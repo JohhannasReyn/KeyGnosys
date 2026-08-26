@@ -1,0 +1,23 @@
+{
+  "schema": "mousetrapkeys/theme/1",
+  "id": "dark",
+  "name": "Dark",
+  "base": "dark",
+  "tokens": {
+    "surface": "#12141aE6",
+    "key_face": "#1e2129F2",
+    "key_face_alt": "#171a21F2",
+    "key_border": "#2c313d",
+    "key_text": "#e6e9ef",
+    "key_text_dim": "#8b93a7",
+    "key_sub_text": "#6b7285",
+    "accent": "#4c9aff",
+    "accent_text": "#0b0d12",
+    "latched": "#f0a020",
+    "led_on": "#37d67a",
+    "led_off": "#333845",
+    "bar_surface": "#181b22F2",
+    "bar_text": "#e6e9ef",
+    "bar_border": "#2c313d"
+  }
+}
