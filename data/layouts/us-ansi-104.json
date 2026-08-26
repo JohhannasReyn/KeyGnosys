@@ -1,0 +1,939 @@
+{
+  "schema": "mousetrapkeys/layout/1",
+  "id": "us-ansi-104",
+  "name": "US Full-Size (ANSI 104)",
+  "description": "Standard US full-size desktop keyboard with function row, navigation cluster and numeric keypad.",
+  "size": {
+    "w": 22.5,
+    "h": 6.25
+  },
+  "keys": [
+    {
+      "code": "Escape",
+      "x": 0,
+      "y": 0,
+      "legend": {
+        "base": "Esc"
+      },
+      "role": "system"
+    },
+    {
+      "code": "F1",
+      "x": 2.0,
+      "y": 0,
+      "legend": {
+        "base": "F1"
+      },
+      "role": "system"
+    },
+    {
+      "code": "F2",
+      "x": 3.0,
+      "y": 0,
+      "legend": {
+        "base": "F2"
+      },
+      "role": "system"
+    },
+    {
+      "code": "F3",
+      "x": 4.0,
+      "y": 0,
+      "legend": {
+        "base": "F3"
+      },
+      "role": "system"
+    },
+    {
+      "code": "F4",
+      "x": 5.0,
+      "y": 0,
+      "legend": {
+        "base": "F4"
+      },
+      "role": "system"
+    },
+    {
+      "code": "F5",
+      "x": 6.5,
+      "y": 0,
+      "legend": {
+        "base": "F5"
+      },
+      "role": "system"
+    },
+    {
+      "code": "F6",
+      "x": 7.5,
+      "y": 0,
+      "legend": {
+        "base": "F6"
+      },
+      "role": "system"
+    },
+    {
+      "code": "F7",
+      "x": 8.5,
+      "y": 0,
+      "legend": {
+        "base": "F7"
+      },
+      "role": "system"
+    },
+    {
+      "code": "F8",
+      "x": 9.5,
+      "y": 0,
+      "legend": {
+        "base": "F8"
+      },
+      "role": "system"
+    },
+    {
+      "code": "F9",
+      "x": 11.0,
+      "y": 0,
+      "legend": {
+        "base": "F9"
+      },
+      "role": "system"
+    },
+    {
+      "code": "F10",
+      "x": 12.0,
+      "y": 0,
+      "legend": {
+        "base": "F10"
+      },
+      "role": "system"
+    },
+    {
+      "code": "F11",
+      "x": 13.0,
+      "y": 0,
+      "legend": {
+        "base": "F11"
+      },
+      "role": "system"
+    },
+    {
+      "code": "F12",
+      "x": 14.0,
+      "y": 0,
+      "legend": {
+        "base": "F12"
+      },
+      "role": "system"
+    },
+    {
+      "code": "PrintScreen",
+      "x": 15.25,
+      "y": 0,
+      "legend": {
+        "base": "PrtSc"
+      },
+      "role": "system"
+    },
+    {
+      "code": "ScrollLock",
+      "x": 16.25,
+      "y": 0,
+      "legend": {
+        "base": "Scroll"
+      },
+      "role": "toggle"
+    },
+    {
+      "code": "Pause",
+      "x": 17.25,
+      "y": 0,
+      "legend": {
+        "base": "Pause"
+      },
+      "role": "system"
+    },
+    {
+      "code": "Backquote",
+      "x": 0.0,
+      "y": 1.25,
+      "legend": {
+        "base": "`",
+        "shift": "~"
+      }
+    },
+    {
+      "code": "Digit1",
+      "x": 1.0,
+      "y": 1.25,
+      "legend": {
+        "base": "1",
+        "shift": "!"
+      }
+    },
+    {
+      "code": "Digit2",
+      "x": 2.0,
+      "y": 1.25,
+      "legend": {
+        "base": "2",
+        "shift": "@"
+      }
+    },
+    {
+      "code": "Digit3",
+      "x": 3.0,
+      "y": 1.25,
+      "legend": {
+        "base": "3",
+        "shift": "#"
+      }
+    },
+    {
+      "code": "Digit4",
+      "x": 4.0,
+      "y": 1.25,
+      "legend": {
+        "base": "4",
+        "shift": "$"
+      }
+    },
+    {
+      "code": "Digit5",
+      "x": 5.0,
+      "y": 1.25,
+      "legend": {
+        "base": "5",
+        "shift": "%"
+      }
+    },
+    {
+      "code": "Digit6",
+      "x": 6.0,
+      "y": 1.25,
+      "legend": {
+        "base": "6",
+        "shift": "^"
+      }
+    },
+    {
+      "code": "Digit7",
+      "x": 7.0,
+      "y": 1.25,
+      "legend": {
+        "base": "7",
+        "shift": "&"
+      }
+    },
+    {
+      "code": "Digit8",
+      "x": 8.0,
+      "y": 1.25,
+      "legend": {
+        "base": "8",
+        "shift": "*"
+      }
+    },
+    {
+      "code": "Digit9",
+      "x": 9.0,
+      "y": 1.25,
+      "legend": {
+        "base": "9",
+        "shift": "("
+      }
+    },
+    {
+      "code": "Digit0",
+      "x": 10.0,
+      "y": 1.25,
+      "legend": {
+        "base": "0",
+        "shift": ")"
+      }
+    },
+    {
+      "code": "Minus",
+      "x": 11.0,
+      "y": 1.25,
+      "legend": {
+        "base": "-",
+        "shift": "_"
+      }
+    },
+    {
+      "code": "Equal",
+      "x": 12.0,
+      "y": 1.25,
+      "legend": {
+        "base": "=",
+        "shift": "+"
+      }
+    },
+    {
+      "code": "Backspace",
+      "x": 13,
+      "y": 1.25,
+      "w": 2,
+      "legend": {
+        "base": "Backspace"
+      },
+      "role": "system"
+    },
+    {
+      "code": "Tab",
+      "x": 0,
+      "y": 2.25,
+      "w": 1.5,
+      "legend": {
+        "base": "Tab"
+      },
+      "role": "system"
+    },
+    {
+      "code": "KeyQ",
+      "x": 1.5,
+      "y": 2.25,
+      "legend": {
+        "base": "Q"
+      }
+    },
+    {
+      "code": "KeyW",
+      "x": 2.5,
+      "y": 2.25,
+      "legend": {
+        "base": "W"
+      }
+    },
+    {
+      "code": "KeyE",
+      "x": 3.5,
+      "y": 2.25,
+      "legend": {
+        "base": "E"
+      }
+    },
+    {
+      "code": "KeyR",
+      "x": 4.5,
+      "y": 2.25,
+      "legend": {
+        "base": "R"
+      }
+    },
+    {
+      "code": "KeyT",
+      "x": 5.5,
+      "y": 2.25,
+      "legend": {
+        "base": "T"
+      }
+    },
+    {
+      "code": "KeyY",
+      "x": 6.5,
+      "y": 2.25,
+      "legend": {
+        "base": "Y"
+      }
+    },
+    {
+      "code": "KeyU",
+      "x": 7.5,
+      "y": 2.25,
+      "legend": {
+        "base": "U"
+      }
+    },
+    {
+      "code": "KeyI",
+      "x": 8.5,
+      "y": 2.25,
+      "legend": {
+        "base": "I"
+      }
+    },
+    {
+      "code": "KeyO",
+      "x": 9.5,
+      "y": 2.25,
+      "legend": {
+        "base": "O"
+      }
+    },
+    {
+      "code": "KeyP",
+      "x": 10.5,
+      "y": 2.25,
+      "legend": {
+        "base": "P"
+      }
+    },
+    {
+      "code": "BracketLeft",
+      "x": 11.5,
+      "y": 2.25,
+      "legend": {
+        "base": "[",
+        "shift": "{"
+      }
+    },
+    {
+      "code": "BracketRight",
+      "x": 12.5,
+      "y": 2.25,
+      "legend": {
+        "base": "]",
+        "shift": "}"
+      }
+    },
+    {
+      "code": "CapsLock",
+      "x": 0,
+      "y": 3.25,
+      "w": 1.75,
+      "legend": {
+        "base": "Caps"
+      },
+      "role": "toggle"
+    },
+    {
+      "code": "KeyA",
+      "x": 1.75,
+      "y": 3.25,
+      "legend": {
+        "base": "A"
+      }
+    },
+    {
+      "code": "KeyS",
+      "x": 2.75,
+      "y": 3.25,
+      "legend": {
+        "base": "S"
+      }
+    },
+    {
+      "code": "KeyD",
+      "x": 3.75,
+      "y": 3.25,
+      "legend": {
+        "base": "D"
+      }
+    },
+    {
+      "code": "KeyF",
+      "x": 4.75,
+      "y": 3.25,
+      "legend": {
+        "base": "F"
+      }
+    },
+    {
+      "code": "KeyG",
+      "x": 5.75,
+      "y": 3.25,
+      "legend": {
+        "base": "G"
+      }
+    },
+    {
+      "code": "KeyH",
+      "x": 6.75,
+      "y": 3.25,
+      "legend": {
+        "base": "H"
+      }
+    },
+    {
+      "code": "KeyJ",
+      "x": 7.75,
+      "y": 3.25,
+      "legend": {
+        "base": "J"
+      }
+    },
+    {
+      "code": "KeyK",
+      "x": 8.75,
+      "y": 3.25,
+      "legend": {
+        "base": "K"
+      }
+    },
+    {
+      "code": "KeyL",
+      "x": 9.75,
+      "y": 3.25,
+      "legend": {
+        "base": "L"
+      }
+    },
+    {
+      "code": "Semicolon",
+      "x": 10.75,
+      "y": 3.25,
+      "legend": {
+        "base": ";",
+        "shift": ":"
+      }
+    },
+    {
+      "code": "Quote",
+      "x": 11.75,
+      "y": 3.25,
+      "legend": {
+        "base": "'",
+        "shift": "\""
+      }
+    },
+    {
+      "code": "Backslash",
+      "x": 13.5,
+      "y": 2.25,
+      "w": 1.5,
+      "legend": {
+        "base": "\\",
+        "shift": "|"
+      }
+    },
+    {
+      "code": "Enter",
+      "x": 12.75,
+      "y": 3.25,
+      "w": 2.25,
+      "legend": {
+        "base": "Enter"
+      },
+      "role": "system"
+    },
+    {
+      "code": "ShiftLeft",
+      "x": 0,
+      "y": 4.25,
+      "w": 2.25,
+      "legend": {
+        "base": "Shift"
+      },
+      "role": "modifier"
+    },
+    {
+      "code": "KeyZ",
+      "x": 2.25,
+      "y": 4.25,
+      "legend": {
+        "base": "Z"
+      }
+    },
+    {
+      "code": "KeyX",
+      "x": 3.25,
+      "y": 4.25,
+      "legend": {
+        "base": "X"
+      }
+    },
+    {
+      "code": "KeyC",
+      "x": 4.25,
+      "y": 4.25,
+      "legend": {
+        "base": "C"
+      }
+    },
+    {
+      "code": "KeyV",
+      "x": 5.25,
+      "y": 4.25,
+      "legend": {
+        "base": "V"
+      }
+    },
+    {
+      "code": "KeyB",
+      "x": 6.25,
+      "y": 4.25,
+      "legend": {
+        "base": "B"
+      }
+    },
+    {
+      "code": "KeyN",
+      "x": 7.25,
+      "y": 4.25,
+      "legend": {
+        "base": "N"
+      }
+    },
+    {
+      "code": "KeyM",
+      "x": 8.25,
+      "y": 4.25,
+      "legend": {
+        "base": "M"
+      }
+    },
+    {
+      "code": "Comma",
+      "x": 9.25,
+      "y": 4.25,
+      "legend": {
+        "base": ",",
+        "shift": "<"
+      }
+    },
+    {
+      "code": "Period",
+      "x": 10.25,
+      "y": 4.25,
+      "legend": {
+        "base": ".",
+        "shift": ">"
+      }
+    },
+    {
+      "code": "Slash",
+      "x": 11.25,
+      "y": 4.25,
+      "legend": {
+        "base": "/",
+        "shift": "?"
+      }
+    },
+    {
+      "code": "ShiftRight",
+      "x": 12.25,
+      "y": 4.25,
+      "w": 2.75,
+      "legend": {
+        "base": "Shift"
+      },
+      "role": "modifier"
+    },
+    {
+      "code": "ControlLeft",
+      "x": 0,
+      "y": 5.25,
+      "w": 1.25,
+      "legend": {
+        "base": "Ctrl"
+      },
+      "role": "modifier"
+    },
+    {
+      "code": "MetaLeft",
+      "x": 1.25,
+      "y": 5.25,
+      "w": 1.25,
+      "legend": {
+        "base": "Win"
+      },
+      "role": "modifier"
+    },
+    {
+      "code": "AltLeft",
+      "x": 2.5,
+      "y": 5.25,
+      "w": 1.25,
+      "legend": {
+        "base": "Alt"
+      },
+      "role": "modifier"
+    },
+    {
+      "code": "Space",
+      "x": 3.75,
+      "y": 5.25,
+      "w": 6.25,
+      "legend": {
+        "base": ""
+      }
+    },
+    {
+      "code": "AltRight",
+      "x": 10,
+      "y": 5.25,
+      "w": 1.25,
+      "legend": {
+        "base": "Alt"
+      },
+      "role": "modifier"
+    },
+    {
+      "code": "MetaRight",
+      "x": 11.25,
+      "y": 5.25,
+      "w": 1.25,
+      "legend": {
+        "base": "Win"
+      },
+      "role": "modifier"
+    },
+    {
+      "code": "ContextMenu",
+      "x": 12.5,
+      "y": 5.25,
+      "w": 1.25,
+      "legend": {
+        "base": "Menu"
+      },
+      "role": "system"
+    },
+    {
+      "code": "ControlRight",
+      "x": 13.75,
+      "y": 5.25,
+      "w": 1.25,
+      "legend": {
+        "base": "Ctrl"
+      },
+      "role": "modifier"
+    },
+    {
+      "code": "Insert",
+      "x": 15.25,
+      "y": 1.25,
+      "legend": {
+        "base": "Ins"
+      },
+      "role": "nav"
+    },
+    {
+      "code": "Home",
+      "x": 16.25,
+      "y": 1.25,
+      "legend": {
+        "base": "Home"
+      },
+      "role": "nav"
+    },
+    {
+      "code": "PageUp",
+      "x": 17.25,
+      "y": 1.25,
+      "legend": {
+        "base": "PgUp"
+      },
+      "role": "nav"
+    },
+    {
+      "code": "Delete",
+      "x": 15.25,
+      "y": 2.25,
+      "legend": {
+        "base": "Del"
+      },
+      "role": "nav"
+    },
+    {
+      "code": "End",
+      "x": 16.25,
+      "y": 2.25,
+      "legend": {
+        "base": "End"
+      },
+      "role": "nav"
+    },
+    {
+      "code": "PageDown",
+      "x": 17.25,
+      "y": 2.25,
+      "legend": {
+        "base": "PgDn"
+      },
+      "role": "nav"
+    },
+    {
+      "code": "ArrowUp",
+      "x": 16.25,
+      "y": 4.25,
+      "legend": {
+        "base": "▲"
+      },
+      "role": "nav"
+    },
+    {
+      "code": "ArrowLeft",
+      "x": 15.25,
+      "y": 5.25,
+      "legend": {
+        "base": "◀"
+      },
+      "role": "nav"
+    },
+    {
+      "code": "ArrowDown",
+      "x": 16.25,
+      "y": 5.25,
+      "legend": {
+        "base": "▼"
+      },
+      "role": "nav"
+    },
+    {
+      "code": "ArrowRight",
+      "x": 17.25,
+      "y": 5.25,
+      "legend": {
+        "base": "▶"
+      },
+      "role": "nav"
+    },
+    {
+      "code": "NumLock",
+      "x": 18.5,
+      "y": 1.25,
+      "legend": {
+        "base": "Num"
+      },
+      "role": "toggle"
+    },
+    {
+      "code": "NumpadDivide",
+      "x": 19.5,
+      "y": 1.25,
+      "legend": {
+        "base": "/"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "NumpadMultiply",
+      "x": 20.5,
+      "y": 1.25,
+      "legend": {
+        "base": "*"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "NumpadSubtract",
+      "x": 21.5,
+      "y": 1.25,
+      "legend": {
+        "base": "-"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "Numpad7",
+      "x": 18.5,
+      "y": 2.25,
+      "legend": {
+        "base": "7"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "Numpad8",
+      "x": 19.5,
+      "y": 2.25,
+      "legend": {
+        "base": "8"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "Numpad9",
+      "x": 20.5,
+      "y": 2.25,
+      "legend": {
+        "base": "9"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "NumpadAdd",
+      "x": 21.5,
+      "y": 2.25,
+      "h": 2,
+      "legend": {
+        "base": "+"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "Numpad4",
+      "x": 18.5,
+      "y": 3.25,
+      "legend": {
+        "base": "4"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "Numpad5",
+      "x": 19.5,
+      "y": 3.25,
+      "legend": {
+        "base": "5"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "Numpad6",
+      "x": 20.5,
+      "y": 3.25,
+      "legend": {
+        "base": "6"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "Numpad1",
+      "x": 18.5,
+      "y": 4.25,
+      "legend": {
+        "base": "1"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "Numpad2",
+      "x": 19.5,
+      "y": 4.25,
+      "legend": {
+        "base": "2"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "Numpad3",
+      "x": 20.5,
+      "y": 4.25,
+      "legend": {
+        "base": "3"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "NumpadEnter",
+      "x": 21.5,
+      "y": 4.25,
+      "h": 2,
+      "legend": {
+        "base": "Enter"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "Numpad0",
+      "x": 18.5,
+      "y": 5.25,
+      "w": 2,
+      "legend": {
+        "base": "0"
+      },
+      "role": "numpad"
+    },
+    {
+      "code": "NumpadDecimal",
+      "x": 20.5,
+      "y": 5.25,
+      "legend": {
+        "base": "."
+      },
+      "role": "numpad"
+    }
+  ]
+}

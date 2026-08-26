@@ -1,0 +1,37 @@
+{
+  "schema": "mousetrapkeys/profile/1",
+  "id": "terminal",
+  "name": "Terminal",
+  "priority": 40,
+  "match": {
+    "process": ["windowsterminal.exe", "wt.exe", "powershell.exe", "pwsh.exe", "cmd.exe", "gnome-terminal", "konsole", "xterm", "alacritty", "kitty", "wezterm"],
+    "wm_class": ["gnome-terminal-server", "konsole", "XTerm", "Alacritty", "kitty"],
+    "title_regex": null
+  },
+  "shortcuts": {
+    "Control": {
+      "KeyC": "Interrupt / copy",
+      "KeyD": "EOF / close",
+      "KeyL": "Clear screen",
+      "KeyR": "History search",
+      "KeyA": "Line start",
+      "KeyE": "Line end",
+      "KeyU": "Clear before cursor",
+      "KeyK": "Clear after cursor",
+      "KeyW": "Delete word back",
+      "KeyZ": "Suspend"
+    },
+    "Control+Shift": {
+      "KeyC": "Copy",
+      "KeyV": "Paste",
+      "KeyT": "New tab",
+      "KeyW": "Close tab",
+      "KeyN": "New window"
+    },
+    "Alt": {
+      "KeyF": "Word forward",
+      "KeyB": "Word back",
+      "Backspace": "Delete word back"
+    }
+  }
+}
