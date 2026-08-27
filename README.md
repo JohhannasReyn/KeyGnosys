@@ -1,8 +1,8 @@
-# MouseTrapKeys
+# KeyGnosys
 
 **Drive the mouse from the home row, and see what every key does while you learn.**
 
-MouseTrapKeys is two things working together: an input layer that turns CapsLock
+KeyGnosys is two things working together: an input layer that turns CapsLock
 into a gateway for cursor control and window switching, and a translucent,
 click-through on-screen keyboard that **relabels itself to match whatever mode
 you are in** — so the shortcuts are on screen until you no longer need them.
@@ -63,15 +63,15 @@ sees keys only while the app has focus, and it cannot suppress anything.
 ## Try it
 
 ```sh
-git clone https://github.com/JohhannasReyn/mousetrapkeys
-cd mousetrapkeys
+git clone https://github.com/JohhannasReyn/keygnosys
+cd keygnosys
 
 python -m venv .venv
 .venv/Scripts/activate          # Windows
 # source .venv/bin/activate     # Linux
 
 pip install -e .
-mousetrapkeys
+keygnosys
 ```
 
 Click the control bar, then type — the keys light up. Hold Ctrl to see the
@@ -82,10 +82,10 @@ On Linux, click-through additionally needs `pip install -e ".[x11]"`.
 Useful flags:
 
 ```sh
-mousetrapkeys --list              # every layout, binding set, theme and profile found
-mousetrapkeys --check             # validate all documents; non-zero exit if any failed
-mousetrapkeys --layout thinkpad-compact --scale 0.8
-mousetrapkeys --backend mock      # force the mock backend
+keygnosys --list              # every layout, binding set, theme and profile found
+keygnosys --check             # validate all documents; non-zero exit if any failed
+keygnosys --layout thinkpad-compact --scale 0.8
+keygnosys --backend mock      # force the mock backend
 ```
 
 ---
@@ -145,9 +145,9 @@ can drop into their own `layouts/`.
 Until then, or if you would rather work in a text editor:
 
 ```sh
-mousetrapkeys --list                                   # find the id
-cp data/layouts/us-ansi-104.json  ~/.config/mousetrapkeys/layouts/mine.json
-# on Windows: %APPDATA%\MouseTrapKeys\layouts\
+keygnosys --list                                   # find the id
+cp data/layouts/us-ansi-104.json  ~/.config/keygnosys/layouts/mine.json
+# on Windows: %APPDATA%\KeyGnosys\layouts\
 ```
 
 Edit `id` and `name`, adjust the geometry, restart. A user file with the same
@@ -191,7 +191,7 @@ momentary; the default), `toggle`, and `hold`. Real CapsLock moves to
 ## How it is put together
 
 ```
-keygnosys-core (C++)                        mousetrapkeys (Python / PySide6)
+keygnosys-core (C++)                        keygnosys (Python / PySide6)
 ├── Input backend  evdev · hook       ├── Overlay: keyboard + control bar
 ├── Layer engine   the state machine  ├── Layout / theme / profile registry
 ├── Actions        cursor · windows   ├── Settings

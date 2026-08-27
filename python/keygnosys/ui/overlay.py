@@ -31,7 +31,7 @@ class KeyboardWindow(QWidget):
 
     def __init__(self, state: AppState) -> None:
         super().__init__()
-        self.setWindowTitle("MouseTrapKeys")
+        self.setWindowTitle("KeyGnosys")
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )

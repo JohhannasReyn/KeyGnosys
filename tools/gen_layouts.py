@@ -23,7 +23,7 @@ import re
 from pathlib import Path
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "data" / "layouts"
-SCHEMA = "mousetrapkeys/layout/2"
+SCHEMA = "keygnosys/layout/2"
 
 # --------------------------------------------------------------------------
 # Shared key runs
@@ -347,7 +347,7 @@ def vivobook_s():
 # --------------------------------------------------------------------------
 
 def document(layout_id, name, description, keys, *, model=None,
-             author="MouseTrapKeys"):
+             author="KeyGnosys"):
     # The extent follows from the keys themselves: a fractional key width
     # rounded for the file can otherwise overhang a hand-written total.
     def right(k):

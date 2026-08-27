@@ -23,32 +23,32 @@ def user_root() -> Path:
     if sys.platform == "win32":
         base = os.environ.get("APPDATA")
         if base:
-            return Path(base) / "MouseTrapKeys"
-        return Path.home() / "AppData" / "Roaming" / "MouseTrapKeys"
+            return Path(base) / "KeyGnosys"
+        return Path.home() / "AppData" / "Roaming" / "KeyGnosys"
 
     base = os.environ.get("XDG_CONFIG_HOME")
     if base:
-        return Path(base) / "mousetrapkeys"
-    return Path.home() / ".config" / "mousetrapkeys"
+        return Path(base) / "keygnosys"
+    return Path.home() / ".config" / "keygnosys"
 
 
 def log_root() -> Path:
     if sys.platform == "win32":
         base = os.environ.get("LOCALAPPDATA")
         root = Path(base) if base else Path.home() / "AppData" / "Local"
-        return root / "MouseTrapKeys" / "logs"
+        return root / "KeyGnosys" / "logs"
 
     base = os.environ.get("XDG_STATE_HOME")
     root = Path(base) if base else Path.home() / ".local" / "state"
-    return root / "mousetrapkeys" / "logs"
+    return root / "keygnosys" / "logs"
 
 
 def ipc_endpoint() -> str:
     """The address the native core listens on. See docs/SPEC.md section 5.1."""
     if sys.platform == "win32":
-        return r"\\.\pipe\mousetrapkeys"
-    base = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/mousetrapkeys-{os.getuid()}"
-    return str(Path(base) / "mousetrapkeys" / "core.sock")
+        return r"\\.\pipe\keygnosys"
+    base = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/keygnosys-{os.getuid()}"
+    return str(Path(base) / "keygnosys" / "core.sock")
 
 
 def settings_file() -> Path:

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from mousetrapkeys.documents import Key, Registry, Segment
-from mousetrapkeys.state import (
+from keygnosys.documents import Key, Registry, Segment
+from keygnosys.state import (
     SLOT_NAME_LIMIT, AppState, KeyStyle, LegendLayer,
 )
 

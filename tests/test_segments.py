@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from mousetrapkeys.documents import (
+from keygnosys.documents import (
     DiagnosticSink, DocumentError, Key, Layout, Registry, Segment,
 )
 
@@ -20,7 +20,7 @@ def registry() -> Registry:
 
 
 def _doc(keys: list[dict], **extra) -> dict:
-    return {"schema": "mousetrapkeys/layout/2", "id": "t", "keys": keys, **extra}
+    return {"schema": "keygnosys/layout/2", "id": "t", "keys": keys, **extra}
 
 
 def _seg(x, y, w=1.0, h=1.0, sid="s0") -> dict:
@@ -220,7 +220,7 @@ def test_schema_1_upgrades_to_a_single_segment_per_key() -> None:
     """A pre-segment document must behave exactly as it always did."""
     sink = DiagnosticSink()
     layout = Layout.from_dict({
-        "schema": "mousetrapkeys/layout/1", "id": "old",
+        "schema": "keygnosys/layout/1", "id": "old",
         "keys": [{"code": "KeyA", "x": 1.5, "y": 2.0, "w": 2.25, "h": 1,
                   "legend": {"base": "A"}}],
     }, sink)
@@ -233,7 +233,7 @@ def test_schema_1_upgrades_to_a_single_segment_per_key() -> None:
 
 def test_schema_1_and_2_produce_identical_geometry() -> None:
     old = Layout.from_dict({
-        "schema": "mousetrapkeys/layout/1", "id": "a",
+        "schema": "keygnosys/layout/1", "id": "a",
         "keys": [{"code": "KeyA", "x": 3, "y": 4, "w": 1.75,
                   "legend": {"base": "A"}}],
     })
@@ -247,13 +247,13 @@ def test_schema_1_and_2_produce_identical_geometry() -> None:
 
 def test_loading_an_old_document_never_rewrites_it(tmp_path, monkeypatch) -> None:
     """Upgrades happen in memory. The file on disk is not touched (SPEC 3.4.4)."""
-    from mousetrapkeys import paths
+    from keygnosys import paths
 
     directory = tmp_path / "layouts"
     directory.mkdir()
     path = directory / "old.json"
     original = json.dumps({
-        "schema": "mousetrapkeys/layout/1", "id": "old",
+        "schema": "keygnosys/layout/1", "id": "old",
         "keys": [{"code": "KeyA", "x": 0, "y": 0, "legend": {"base": "A"}}],
     })
     path.write_text(original)

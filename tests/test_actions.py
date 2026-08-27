@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from mousetrapkeys.actions import (
+from keygnosys.actions import (
     CATALOG, action_names, default_legend, is_held, validate_binding,
 )
-from mousetrapkeys.documents import Registry
+from keygnosys.documents import Registry
 
 
 def test_unknown_action_is_rejected() -> None:
@@ -78,7 +78,7 @@ def test_bindings_file_lost_nothing_to_validation() -> None:
     exactly the failure mode the diagnostics exist to make visible.
     """
     import json
-    from mousetrapkeys import paths
+    from keygnosys import paths
 
     raw = json.loads(
         (paths.BUNDLED_ROOT / "bindings" / "default.json").read_text("utf-8"))

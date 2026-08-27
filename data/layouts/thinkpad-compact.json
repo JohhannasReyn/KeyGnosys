@@ -1,10 +1,10 @@
 {
-  "schema": "mousetrapkeys/layout/2",
+  "schema": "keygnosys/layout/2",
   "id": "thinkpad-compact",
   "name": "ThinkPad (laptop)",
   "description": "Compact laptop layout modelled on current ThinkPad T-series boards, 14-inch and 16-inch alike. Fn is leftmost; Home/End/Ins/Del sit in the function row; no numeric keypad. A starting template, not a model-exact reproduction.",
   "metadata": {
-    "author": "MouseTrapKeys",
+    "author": "KeyGnosys",
     "source_template": null,
     "model": "ThinkPad T14 / T16 Gen 5 class",
     "revision": 1

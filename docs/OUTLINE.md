@@ -1,4 +1,4 @@
-# MouseTrapKeys — Software Outline
+# KeyGnosys — Software Outline
 
 > This is the **outline**: what the software is, the pieces it is made of, and why
 > the seams fall where they do. The [SPEC](SPEC.md) turns each piece below into
@@ -8,7 +8,7 @@
 
 ## 1. What it is
 
-MouseTrapKeys is a **keyboard-first desktop input layer** with a **visual on-screen
+KeyGnosys is a **keyboard-first desktop input layer** with a **visual on-screen
 keyboard that explains itself**.
 
 Two things are happening at once, and the whole design follows from keeping them
@@ -63,7 +63,7 @@ These are the constraints every later decision is measured against.
                         JSON Lines over a local socket │
                                       │                │
 ┌─────────────────────────────────────▼────────────────┴───────────────┐
-│  mousetrapkeys   (Python 3.11+ / PySide6, unprivileged)              │
+│  keygnosys   (Python 3.11+ / PySide6, unprivileged)              │
 │                                                                      │
 │   Core client  →  App state  →  Overlay window   +  Control bar      │
 │                        │         (click-through)    (always live)    │

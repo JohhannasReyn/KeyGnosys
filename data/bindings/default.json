@@ -1,10 +1,10 @@
 {
-  "schema": "mousetrapkeys/bindings/2",
+  "schema": "keygnosys/bindings/2",
   "id": "default",
   "name": "Default cursor layer",
   "description": "Right hand steers, left hand clicks. Movement sits on the vi keys (HJKL) so the pointer is driven from the home row, and scrolling sits directly above it (YUIO) in the same order. The left hand keeps the click buttons and the precision modifier, so it can act without interrupting motion. Digits jump straight to a window slot; the numeric keypad, being physically a 3x3 grid, warps the pointer to the matching third of the screen.",
   "metadata": {
-    "author": "MouseTrapKeys",
+    "author": "KeyGnosys",
     "source_template": null,
     "revision": 1
   },
