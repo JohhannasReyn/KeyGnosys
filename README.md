@@ -308,13 +308,19 @@ configuration, and a UI that can see what the engine is doing.
 
 ## Free, and staying that way
 
-KeyGnosys is free, and the application itself will stay free, clean and
-bloat-free. No advertising. No features held back behind a paywall. No
-telemetry (see the trust note above — that one is enforced in the
-[specification](docs/SPEC.md#12-security-and-permissions), not just promised).
+**KeyGnosys itself is free, clean and bloat-free.** No advertising, no
+telemetry, and no paywall around the core application or its accessibility and
+productivity functionality.
 
-If there is ever a business here it will be built around the software rather
-than by degrading it.
+The no-telemetry half is not merely a promise — it is enforced in the
+[specification](docs/SPEC.md#12-security-and-permissions), alongside the
+commitment that no keystroke content is ever written to disk.
+
+If a business is ever built here it belongs *around* the ecosystem — things like
+profile libraries, creator content, synchronization, managed deployment or
+support — and never inside the basic experience of using KeyGnosys. Drawing that
+line now, before release, is the point: it means the line never has to be
+redrawn later at someone else's expense.
 
 ## License
 
