@@ -82,29 +82,33 @@ struct Decision {
 // ---------------------------------------------------------------------------
 // Capacities
 //
-// The engine processes events without allocating, which means every container
-// it touches on the event path has a fixed size. These are the bounds. All sit
-// far above what a physical keyboard can produce -- a human has ten fingers --
-// and each has a defined, safe behaviour on overflow.
+// The event path performs no dynamic allocation, so every container it touches
+// has a fixed size. There is deliberately no "untracked" key domain: per-key
+// state covers the whole KeyCode id space, so every valid code carries the
+// state its invariants require.
+//
+// The remaining bounds are on *simultaneity*, and each one fails safe: when an
+// obligation cannot be recorded, the decision that would create it is not
+// emitted. A press that cannot be tracked is suppressed rather than forwarded
+// untracked, because a suppressed key is a missing keystroke while an
+// untracked forwarded press is a key held down forever.
 // ---------------------------------------------------------------------------
 
-// KeyCode ids the engine tracks state for. The built-in vocabulary is under
-// 200 entries and backends only ever emit vocabulary codes, so this is not
-// reachable in practice. A code beyond it is handled on a stateless path that
-// forwards symmetrically (see onKey), which keeps both P7 and its mirror
-// intact but means such a key can never be bound.
-inline constexpr std::size_t kMaxTrackedKeyId = 512;
+// Per-key state is indexed directly by KeyCode::id().
+inline constexpr std::size_t kKeyIdSpace =
+    static_cast<std::size_t>(KeyCode::kMaxId) + 1;
 
-// Simultaneously buffered presses. Overflow forwards the press immediately,
-// degrading to no-grace-window rather than dropping the keystroke.
-inline constexpr std::size_t kMaxPending = 32;
+// Simultaneously buffered presses.
+inline constexpr std::size_t kMaxPending = 64;
 
-// Simultaneously held keys, in each of the two ordered lists.
-inline constexpr std::size_t kMaxHeld = 64;
+// Simultaneously held keys, in each of the two ordered lists. Comfortably
+// above the key count of any physical keyboard.
+inline constexpr std::size_t kMaxHeld = 256;
 
-// Decisions from one call. The worst case is releaseAll() unwinding every held
-// action and every forwarded press at once.
-inline constexpr std::size_t kDecisionCapacity = 192;
+// Decisions from one call. Derived from the true worst case rather than
+// guessed: releaseAll() unwinding every held action and every forwarded press
+// at once, plus a full pending sweep, plus slack.
+inline constexpr std::size_t kDecisionCapacity = 2 * kMaxHeld + kMaxPending + 8;
 
 // A fixed-capacity decision sink.
 //
@@ -123,9 +127,9 @@ public:
             items_[size_++] = decision;
             return;
         }
-        // Cannot happen with a physical keyboard. Recorded rather than ignored
-        // so that if it ever does, it surfaces as a diagnostic instead of as
-        // silently lost input.
+        // Unreachable: the capacity is derived from the maximum unwind. Kept
+        // as a recorded condition rather than an assert so that if the
+        // derivation ever drifts, it surfaces instead of corrupting memory.
         overflowed_ = true;
     }
 
@@ -158,10 +162,12 @@ public:
     // produce a state where a key is passthrough but not bound, and a reload
     // that removes a binding cannot leave stale behaviour behind.
     //
-    // Emits decisions, because keys may be held or buffered when it is called:
+    // Emits decisions, because keys may be held or buffered when it is called.
+    // A reload never discards physical input the user has already committed:
     // an action whose binding disappeared is released, and a buffered press
-    // whose key is no longer action-bound is resolved. Forwarded presses are
-    // untouched -- P7 outranks a config reload.
+    // whose key is no longer action-bound is resolved as the ordinary
+    // keystroke it turned out to be. Forwarded presses are untouched -- P7
+    // outranks a config reload.
     void setBindings(const BindingMap& bindings, DecisionBuffer& out);
 
     // -- the event path, allocation-free ----------------------------------
@@ -197,18 +203,42 @@ public:
     // In press order.
     [[nodiscard]] std::vector<KeyCode> heldActions() const;
 
+    // Diagnostics. Non-zero means input was dropped because an obligation
+    // could not be recorded -- unreachable from a physical keyboard, and worth
+    // surfacing if it ever happens.
+    [[nodiscard]] std::uint64_t capacityDrops() const { return capacityDrops_; }
+    [[nodiscard]] std::uint64_t invalidEvents() const { return invalidEvents_; }
+
 private:
     // Per-key state, indexed by KeyCode id. A flat array rather than a hash
     // set: membership tests are the hot path, and node-based containers
-    // allocate on insertion.
+    // allocate on insertion. Packed into one byte per key so that covering the
+    // whole id space costs 64 KiB, allocated once at construction.
     struct Slot {
-        bool bound = false;          // has a binding at all
-        BindingKind kind = BindingKind::Action;
-        bool forwarded = false;      // press went to the OS; P7 owes a release
-        bool heldAction = false;
-        bool modifierHeld = false;
-        bool isModifier = false;     // precomputed; avoids a lookup per event
-        bool pending = false;
+        enum : std::uint8_t {
+            kBound = 1u << 0,
+            kPassthrough = 1u << 1,   // meaningful only when kBound
+            kForwarded = 1u << 2,     // press went to the OS; P7 owes a release
+            kHeldAction = 1u << 3,
+            kModifierHeld = 1u << 4,
+            kIsModifier = 1u << 5,
+            kPending = 1u << 6,
+        };
+
+        [[nodiscard]] bool has(std::uint8_t mask) const {
+            return (bits & mask) != 0;
+        }
+        void set(std::uint8_t mask) {
+            bits = static_cast<std::uint8_t>(bits | mask);
+        }
+        void clear(std::uint8_t mask) {
+            bits = static_cast<std::uint8_t>(bits & static_cast<std::uint8_t>(~mask));
+        }
+        void assign(std::uint8_t mask, bool on) {
+            on ? set(mask) : clear(mask);
+        }
+
+        std::uint8_t bits = 0;
     };
 
     struct Pending {
@@ -223,26 +253,35 @@ private:
     // The single path by which a press reaches the OS. Records the key so its
     // release is guaranteed to follow. Nothing else may emit a Forward for a
     // Down; that is what makes P7 checkable rather than merely intended.
-    void forwardPress(KeyCode code, KeyState state, DecisionBuffer& out);
+    //
+    // Returns false, and emits a Suppress instead, when the obligation cannot
+    // be recorded. Creating an obligation that cannot be discharged would be
+    // strictly worse than dropping the keystroke.
+    bool forwardPress(KeyCode code, KeyState state, DecisionBuffer& out);
     void forgetForwarded(KeyCode code);
 
-    [[nodiscard]] bool trackable(KeyCode code) const {
-        return code.valid() && code.id() < kMaxTrackedKeyId;
-    }
     Slot& slot(KeyCode code) { return slots_[code.id()]; }
     [[nodiscard]] const Slot& slot(KeyCode code) const {
         return slots_[code.id()];
     }
 
-    void addHeldAction(KeyCode code);
+    // Returns false when the action could not be recorded, in which case the
+    // caller must not emit RunAction -- an action start with no guaranteed
+    // release is the P7 failure in a different currency.
+    bool addHeldAction(KeyCode code);
     void removeHeldAction(KeyCode code);
     bool addPending(KeyCode code, TimePoint now);
     [[nodiscard]] bool isPending(KeyCode code) const;
-    std::optional<TimePoint> takePending(KeyCode code);
+    bool takePending(KeyCode code);
 
     EngineConfig config_;
     Mode mode_ = Mode::Normal;
     bool latched_ = false;
+
+    // Physical CapsLock state, tracked explicitly so that duplicate and
+    // orphaned CapsLock events follow the same policy as every other key
+    // instead of bypassing it (SPEC 6.3.2).
+    bool capsPhysicallyDown_ = false;
     std::optional<TimePoint> capsPressedAt_;
     // True when the current CapsLock press was forwarded to the OS as a real
     // CapsLock. Its release must be forwarded too.
@@ -253,14 +292,17 @@ private:
     // release has no other way to tell the two apart.
     bool capsWasLatched_ = false;
 
-    // Resolved once at construction. Looking these up per event would take
-    // the intern table's lock and build a std::string from the name -- an
+    // Resolved once at construction. Looking these up per event would take the
+    // intern table's lock and build a std::string from the name -- an
     // allocation, on the path that must not have one.
     KeyCode capsLock_;
     KeyCode shiftLeft_;
     KeyCode shiftRight_;
+    std::array<KeyCode, 8> modifierCodes_{};
 
-    std::array<Slot, kMaxTrackedKeyId> slots_{};
+    // One byte per key over the whole id space; a single allocation at
+    // construction, never resized, never touched by the event path.
+    std::vector<Slot> slots_;
 
     // Ordered companions to the flags above. Membership is O(1) via `slots_`;
     // these exist so that iteration happens in press order rather than in
@@ -275,6 +317,9 @@ private:
 
     std::array<KeyCode, kMaxHeld> forwardedOrder_{};
     std::size_t forwardedCount_ = 0;
+
+    std::uint64_t capacityDrops_ = 0;
+    std::uint64_t invalidEvents_ = 0;
 };
 
 }  // namespace mtk

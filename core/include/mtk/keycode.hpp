@@ -24,6 +24,10 @@ namespace mtk {
 class KeyCode {
 public:
     static constexpr std::uint16_t kInvalid = 0;
+    // The largest id fromString() will ever hand out. Consumers that index
+    // state by id size their storage from this, so that every valid KeyCode
+    // is representable and there is no "untracked" domain to reason about.
+    static constexpr std::uint16_t kMaxId = 0xFFFE;
 
     KeyCode() = default;
     explicit KeyCode(std::uint16_t id) : id_(id) {}

@@ -128,8 +128,22 @@ reloads and emits `bindings_changed` / `layouts_changed` over IPC. A reload that
 produces zero valid documents **MUST** keep the previous set and emit a diagnostic
 (inherited from the prototype's behaviour).
 
-Reloading bindings **MUST** first release every held key and every locked drag
-button (P7).
+Reloading bindings **MUST** release every held action whose binding disappeared,
+and every locked drag button (P7).
+
+A reload **MUST NOT** discard physical input the user has already committed. A
+press sitting in the grace window was delayed only to resolve *layer intent*,
+not to await permission:
+
+- if the key is still bound to an action, the press stays buffered, **retaining
+  its original press time** — restarting the clock would silently extend the
+  grace window;
+- if the key is no longer action-bound, there is nothing left to disambiguate,
+  so the press resolves immediately as the ordinary forwarded keystroke it
+  turned out to be, and its release obligation is recorded;
+- forwarded presses are untouched. P7 outranks a config reload.
+
+Multiple keys resolved by one reload are emitted in press order (§6.3.2).
 
 ### 3.4 Update and migration policy
 
@@ -837,7 +851,40 @@ There is exactly one code path by which a press reaches the OS, and it records
 the key as it goes. That is what makes the invariant checkable rather than
 merely intended.
 
-#### 6.3.1 Event ordering
+#### 6.3.1 State capacity and the key domain
+
+Per-key state **MUST** cover the entire `KeyCode` id space. There is deliberately
+no "untracked" class of key: a key the engine cannot hold state for is a key
+whose invariants it cannot maintain, and forwarding such events blindly breaks
+both P7 and its mirror — an orphan release is forwarded, and a forwarded press
+cannot be unwound by `release_all`. One byte of packed flags per key covers the
+whole domain in 64 KiB, allocated once at construction, so the question does not
+arise.
+
+The remaining bounds are on **simultaneity** — how many keys can be buffered,
+held, or forwarded at one time — and each **MUST fail safe**:
+
+> **When an obligation cannot be recorded, the decision that would create it is
+> not emitted.**
+
+A press that cannot be tracked is **suppressed**, not forwarded untracked. An
+action that cannot be recorded emits no `RunAction`. A dropped keystroke is
+recoverable by pressing the key again; a key the OS believes is held forever, or
+an action with no release, is not.
+
+The decision buffer is the exception, and only because its capacity is *derived*
+from the true worst case — `release_all` unwinding every held action and every
+forwarded press at once — rather than guessed.
+
+"A human has ten fingers" is not a safety argument. Malformed drivers, injected
+events, device reconnects and lost releases are all in the threat model, so
+overflow behaviour is specified and **MUST** be tested by deliberately forcing
+it, not merely observed not to happen under ordinary traffic.
+
+Capacity drops **MUST** be counted and exposed, so that a condition this
+unreachable surfaces as a diagnostic if it ever occurs.
+
+#### 6.3.2 Event ordering
 
 Decisions **MUST** be emitted in a deterministic order, and that order **MUST**
 be the order the keys were pressed in. This applies to every place the engine
@@ -853,7 +900,7 @@ simultaneous movement keys starts first, and whether a bug reproduces. Leaving
 it to a hash table's iteration order would make the engine's output depend on
 nothing the user can see or control.
 
-#### 6.3.2 Malformed and duplicate events
+#### 6.3.3 Malformed and duplicate events
 
 The engine **MUST** tolerate physical event streams that do not alternate
 cleanly. A dropped event, a stuck driver, or a device re-plugged mid-keypress
@@ -865,6 +912,21 @@ can all produce them.
 | A press for a key already running an action | Suppressed; the action is already held. |
 | A press for a key already buffered | Kept buffered, retaining the **original** press time, so a repeated press cannot extend the grace window indefinitely. |
 | A release for a key with no matching press | Suppressed (the mirror obligation, below). |
+| An invalid key code | Suppressed in every direction. It never produces a press, so it can never owe a release. |
+
+**CapsLock is not exempt.** It is dispatched before the general per-key logic,
+so it **MUST** carry its own physical-state tracking or it bypasses this policy
+entirely:
+
+| Event | Treatment |
+|-------|-----------|
+| A duplicate CapsLock press | Suppressed, or forwarded as a repeat if the press was a real CapsLock. It **MUST NOT** re-run activation — in `toggle` mode that would flip the layer twice for one physical press. |
+| A CapsLock release with no matching press | Suppressed, and **MUST NOT** change the mode, the latch, or anything else. |
+| A CapsLock release after `release_all` | The same: `release_all` clears the physical-down flag, so the release that follows is an orphan by definition. |
+
+The recorded press time **MUST** be cleared on release. Left set, it remains
+available to a later malformed event, which could latch the layer from a clock
+reading that belongs to a keypress long finished.
 
 **The mirror obligation.** A release **MUST NOT** be forwarded unless the
 matching press was forwarded. If the layer deactivates while suppressed keys are
@@ -877,8 +939,10 @@ Both directions are proved by property tests over randomised event sequences
 (§13), not merely asserted. The generator's event space covers what this section
 claims: presses and releases, autorepeat, CapsLock transitions in all three
 activation modes, grace-window expiry, `release_all` mid-sequence with physical
-releases continuing afterwards, configuration reloads while keys are held, and
-malformed or duplicate physical events.
+releases continuing afterwards, configuration reloads while keys are held,
+malformed or duplicate physical events — including malformed CapsLock
+specifically, since it is dispatched before the general per-key logic — and
+invalid key codes.
 
 **Only bound keys are ever delayed.** Buffering adds up to `grace_ms` of latency,
 and it applies **only** to keys bound to an action in the cursor layer, and
@@ -1508,7 +1572,11 @@ explicit commitments.
 | P7 mirror | The same sweep in the opposite direction: assert no release is ever forwarded without a matching forwarded press, so a suppressed key held across a mode change cannot produce an orphan key-up |
 | Property-test coverage | Assert the generator is not degenerate: that it actually produced forwards, suppressions, actions, action releases, buffered presses and repeats in quantity. A generator that quietly stopped exercising a path would keep passing and prove nothing |
 | Event ordering | Exact-sequence tests: buffered presses expiring together, buffered presses promoted by CapsLock, held actions released on leaving the layer, and `release_all` all emit in press order. Plus a replay test asserting identical decision sequences across repeated runs |
-| Allocation contract | Drive the engine through many event cycles against one `DecisionBuffer` and assert it never overflows its fixed capacity |
+| Allocation contract | Drive the engine through many event cycles against one `DecisionBuffer` and assert it never overflows its fixed capacity; separately construct the true worst-case unwind and assert the derived capacity holds it |
+| Forced capacity overflow | Deliberately exceed each bounded list — forwarded presses, held actions, buffered presses — with synthetic key codes, and assert the fail-safe: no forwarded press left unreleased, no action started without a release, no keystroke silently dropped where degrading would do. Observing that ordinary traffic does not overflow proves nothing about overflow |
+| Key domain | Assert a code interned beyond the built-in vocabulary is tracked like any other, and that an invalid code is suppressed in both directions |
+| Malformed CapsLock | Duplicate press does not double-toggle; orphan release does not change the mode or the latch; a stale press time cannot latch the layer later |
+| Reload | Assert a pending press survives a reload that keeps its binding, keeps its original press time, and resolves as a forwarded keystroke when the binding is removed |
 | Motion | Assert diagonal speed equals cardinal speed; assert fractional accumulation never loses pixels; assert the ramp is monotonic |
 | IPC | Golden-file tests of serialised messages; a fake client that stops reading, asserting the core does not block |
 | Overlay | `pytest-qt` against the mock backend; render each bundled layout at several scales and assert no key overlaps and no clipped legends |
