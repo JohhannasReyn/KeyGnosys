@@ -792,8 +792,14 @@ while the map showed it as empty would be the worst of both.
 **The escape hatch requires an explicit binding.** A key reaches the OS inside
 the layer only because it is bound to `key.passthrough`. Having no binding is
 never treated as permission to type — an unbound key is suppressed, without
-exception. The engine is told which keys are passthrough separately from which
-keys are bound, so the distinction cannot be lost.
+exception.
+
+This is enforced structurally rather than defended. The engine receives **one**
+classification — a map from key to `Action` or `Passthrough` — and *having an
+entry* is what being bound means. There is no second set that could list a key
+as passthrough while the first omits it, and a reload that removes a binding
+cannot leave stale behaviour behind, because the whole map is replaced in a
+single call with no observable intermediate state.
 
 **A passthrough key is never delayed by the grace window.** It does the same
 thing whether the layer is engaged or not, so there is nothing to disambiguate,
@@ -831,6 +837,35 @@ There is exactly one code path by which a press reaches the OS, and it records
 the key as it goes. That is what makes the invariant checkable rather than
 merely intended.
 
+#### 6.3.1 Event ordering
+
+Decisions **MUST** be emitted in a deterministic order, and that order **MUST**
+be the order the keys were pressed in. This applies to every place the engine
+resolves more than one key at once:
+
+- buffered presses whose grace window lapses together;
+- buffered presses promoted together when CapsLock arrives;
+- held actions released when the layer is left;
+- forwarded presses unwound by `release_all`.
+
+Input order is observable. It decides how chords resolve, which of two
+simultaneous movement keys starts first, and whether a bug reproduces. Leaving
+it to a hash table's iteration order would make the engine's output depend on
+nothing the user can see or control.
+
+#### 6.3.2 Malformed and duplicate events
+
+The engine **MUST** tolerate physical event streams that do not alternate
+cleanly. A dropped event, a stuck driver, or a device re-plugged mid-keypress
+can all produce them.
+
+| Event | Treatment |
+|-------|-----------|
+| A press for a key already forwarded | Forwarded **as a repeat**, not as a second press. A second press would owe a second release, and only one physical release is coming — so the key would be left down forever. |
+| A press for a key already running an action | Suppressed; the action is already held. |
+| A press for a key already buffered | Kept buffered, retaining the **original** press time, so a repeated press cannot extend the grace window indefinitely. |
+| A release for a key with no matching press | Suppressed (the mirror obligation, below). |
+
 **The mirror obligation.** A release **MUST NOT** be forwarded unless the
 matching press was forwarded. If the layer deactivates while suppressed keys are
 still physically held — an unbound key, or one that was running an action — their
@@ -839,7 +874,11 @@ for a key it never saw go down, which is the same class of corruption as a stuck
 key, in the opposite direction.
 
 Both directions are proved by property tests over randomised event sequences
-(§13), not merely asserted.
+(§13), not merely asserted. The generator's event space covers what this section
+claims: presses and releases, autorepeat, CapsLock transitions in all three
+activation modes, grace-window expiry, `release_all` mid-sequence with physical
+releases continuing afterwards, configuration reloads while keys are held, and
+malformed or duplicate physical events.
 
 **Only bound keys are ever delayed.** Buffering adds up to `grace_ms` of latency,
 and it applies **only** to keys bound to an action in the cursor layer, and
@@ -995,6 +1034,21 @@ pump. Returning non-zero from the hook proc suppresses the event.
   (default 300 ms) or Windows silently unhooks it. Therefore the hook proc
   **MUST** do nothing but decide suppression and enqueue; all dispatch, IPC and
   logging happen on other threads.
+- **The event path performs no dynamic allocation.** The layer engine runs
+  inside the hook, so this is a hard requirement rather than an optimisation:
+  an allocation can block on a heap lock held by any other thread in the
+  process, and a hook that stalls is a hook that gets unregistered.
+
+  Concretely, that means the engine holds all per-event state in fixed-size
+  arrays indexed by key code rather than in node-based hash containers, resolves
+  the key codes it compares against once at construction rather than by name per
+  event, and writes into a fixed-capacity `DecisionBuffer` rather than a
+  `std::vector` whose capacity the caller might not have reserved. Every one of
+  those capacities has a defined overflow behaviour — documented in
+  `layer_engine.hpp` — rather than undefined behaviour or a reallocation.
+
+  Allocating convenience overloads exist for tests and for callers that are not
+  on the hook path. They are not used by the hook.
 - The core **MUST** detect having been unhooked and re-install automatically.
 - Keys cannot be intercepted while an **elevated** window has focus unless the
   core itself runs elevated. Running unelevated is the default; the UI states
@@ -1452,6 +1506,9 @@ explicit commitments.
 | Grace window | Table-driven: for each of the three resolutions in §6.3, assert the exact output event sequence |
 | P7 invariant | Property test over 200 randomised event sequences, across all three activation modes and including modifiers and a `key.passthrough` binding: assert every forwarded press has a matching forwarded release once the sequence is wound down |
 | P7 mirror | The same sweep in the opposite direction: assert no release is ever forwarded without a matching forwarded press, so a suppressed key held across a mode change cannot produce an orphan key-up |
+| Property-test coverage | Assert the generator is not degenerate: that it actually produced forwards, suppressions, actions, action releases, buffered presses and repeats in quantity. A generator that quietly stopped exercising a path would keep passing and prove nothing |
+| Event ordering | Exact-sequence tests: buffered presses expiring together, buffered presses promoted by CapsLock, held actions released on leaving the layer, and `release_all` all emit in press order. Plus a replay test asserting identical decision sequences across repeated runs |
+| Allocation contract | Drive the engine through many event cycles against one `DecisionBuffer` and assert it never overflows its fixed capacity |
 | Motion | Assert diagonal speed equals cardinal speed; assert fractional accumulation never loses pixels; assert the ramp is monotonic |
 | IPC | Golden-file tests of serialised messages; a fake client that stops reading, asserting the core does not block |
 | Overlay | `pytest-qt` against the mock backend; render each bundled layout at several scales and assert no key overlaps and no clipped legends |
