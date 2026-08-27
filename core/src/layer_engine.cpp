@@ -1,6 +1,6 @@
-#include "mtk/layer_engine.hpp"
+#include "kgn/layer_engine.hpp"
 
-namespace mtk {
+namespace kgn {
 namespace {
 
 Decision suppress(KeyCode code, KeyState state) {
@@ -617,4 +617,4 @@ std::vector<Decision> LayerEngine::releaseAll() {
     return collect(buffer);
 }
 
-}  // namespace mtk
+}  // namespace kgn

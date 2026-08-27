@@ -34,7 +34,7 @@ Requirement keywords **MUST**, **SHOULD**, **MAY** are used in the RFC 2119 sens
 
 | Term | Meaning |
 |------|---------|
-| **Core** | `mtk-core`, the native C++ process that intercepts and synthesizes input. |
+| **Core** | `keygnosys-core`, the native C++ process that intercepts and synthesizes input. |
 | **Overlay** | The Python/PySide6 GUI process. Comprises the *keyboard window* and the *control bar*. |
 | **Cursor layer** | The alternate key mode engaged via CapsLock, in which keys drive the pointer and window manager. |
 | **Legend layer** | Which set of labels the overlay is currently drawing (`base`, `shift`, `modifier`, `cursor`). |
@@ -717,7 +717,7 @@ versions — a silent partial-compatibility mode is worse than a clear refusal.
 
 ```
 core/
-├── include/mtk/
+├── include/kgn/
 │   ├── keycode.hpp          Key vocabulary + code<->string
 │   ├── input_backend.hpp    InputBackend interface
 │   ├── output_backend.hpp   OutputBackend interface

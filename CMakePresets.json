@@ -8,7 +8,7 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "MTK_BUILD_TESTS": "ON"
+        "KGN_BUILD_TESTS": "ON"
       }
     },
     {
@@ -23,7 +23,7 @@
       "name": "debug",
       "inherits": "default",
       "displayName": "Debug",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "MTK_WERROR": "ON" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "KGN_WERROR": "ON" }
     },
     {
       "name": "msvc",

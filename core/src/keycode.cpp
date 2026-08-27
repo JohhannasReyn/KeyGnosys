@@ -1,4 +1,4 @@
-#include "mtk/keycode.hpp"
+#include "kgn/keycode.hpp"
 
 #include <algorithm>
 #include <array>
@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace mtk {
+namespace kgn {
 namespace {
 
 // The vocabulary, in the order of docs/SPEC.md section 2.1. Index into this
@@ -135,4 +135,4 @@ std::string_view modifierGroup(KeyCode code) {
     return "Meta";
 }
 
-}  // namespace mtk
+}  // namespace kgn

@@ -7,11 +7,11 @@
 // same.
 //
 // Usage:
-//     MTK_TEST(name_of_the_thing_being_asserted) {
-//         MTK_CHECK(condition);
-//         MTK_CHECK_EQ(actual, expected);
+//     KGN_TEST(name_of_the_thing_being_asserted) {
+//         KGN_CHECK(condition);
+//         KGN_CHECK_EQ(actual, expected);
 //     }
-//     int main() { return mtk::test::runAll(); }
+//     int main() { return kgn::test::runAll(); }
 
 #pragma once
 
@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-namespace mtk::test {
+namespace kgn::test {
 
 struct Failure {
     std::string test;
@@ -95,14 +95,14 @@ inline int runAll() {
     return failed == 0 ? 0 : 1;
 }
 
-}  // namespace mtk::test
+}  // namespace kgn::test
 
-#define MTK_TEST(name)                                                     \
-    static void mtk_test_##name();                                         \
-    static ::mtk::test::Registrar mtk_reg_##name(#name, mtk_test_##name);  \
-    static void mtk_test_##name()
+#define KGN_TEST(name)                                                     \
+    static void kgn_test_##name();                                         \
+    static ::kgn::test::Registrar kgn_reg_##name(#name, kgn_test_##name);  \
+    static void kgn_test_##name()
 
-#define MTK_CHECK(expr) ::mtk::test::check((expr), #expr, __FILE__, __LINE__)
+#define KGN_CHECK(expr) ::kgn::test::check((expr), #expr, __FILE__, __LINE__)
 
-#define MTK_CHECK_EQ(a, b) \
-    ::mtk::test::checkEq((a), (b), #a, #b, __FILE__, __LINE__)
+#define KGN_CHECK_EQ(a, b) \
+    ::kgn::test::checkEq((a), (b), #a, #b, __FILE__, __LINE__)

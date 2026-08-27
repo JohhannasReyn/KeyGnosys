@@ -137,7 +137,7 @@ class Overlay:
         else:
             self.bar.set_status(
                 "core offline",
-                f"Waiting for mtk-core on {paths.ipc_endpoint()}")
+                f"Waiting for keygnosys-core on {paths.ipc_endpoint()}")
 
     # -- wiring -----------------------------------------------------------
 

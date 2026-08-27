@@ -15,9 +15,9 @@
 #include <string>
 #include <vector>
 
-#include "mtk/keycode.hpp"
+#include "kgn/keycode.hpp"
 
-namespace mtk {
+namespace kgn {
 
 struct Point {
     int x = 0;
@@ -128,4 +128,4 @@ struct Backends {
 // similar.
 Backends createBackends();
 
-}  // namespace mtk
+}  // namespace kgn
