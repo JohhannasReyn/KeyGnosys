@@ -246,6 +246,18 @@ python tools/gen_layouts.py             # regenerate the bundled layouts
 python tools/render_preview.py          # re-render the images in this README
 ```
 
+The native core builds separately, with CMake:
+
+```sh
+cmake --preset default
+cmake --build --preset default
+ctest --preset default                  # no display, no privileges, no hardware
+```
+
+`cmake --preset debug` is the same build with `-Werror`; run it before
+committing. Prerequisites and the other presets are in
+[core/README.md](core/README.md).
+
 The interesting logic — legend resolution, document validation, the action
 catalog — is deliberately free of Qt imports so it can be tested without a
 display. Same principle on the C++ side: the layer engine takes events and a
