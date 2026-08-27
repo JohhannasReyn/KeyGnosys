@@ -1,0 +1,1505 @@
+{
+  "schema": "mousetrapkeys/layout/2",
+  "id": "asus-vivobook-s",
+  "name": "Asus Vivobook S 15/16 (laptop)",
+  "description": "Asus Vivobook S 15 / S 16, which unlike the Zenbook carries a numeric keypad and a navigation row above it. A starting template, not a model-exact reproduction.",
+  "metadata": {
+    "author": "MouseTrapKeys",
+    "source_template": null,
+    "model": "Asus Vivobook S 15 / S 16",
+    "revision": 1
+  },
+  "size": {
+    "w": 19.25,
+    "h": 6.25
+  },
+  "keys": [
+    {
+      "id": "escape",
+      "code": "Escape",
+      "legend": {
+        "base": "Esc"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 0.0,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "f1",
+      "code": "F1",
+      "legend": {
+        "base": "F1"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 1.0714,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "f2",
+      "code": "F2",
+      "legend": {
+        "base": "F2"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 2.1428,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "f3",
+      "code": "F3",
+      "legend": {
+        "base": "F3"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 3.2142,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "f4",
+      "code": "F4",
+      "legend": {
+        "base": "F4"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 4.2856,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "f5",
+      "code": "F5",
+      "legend": {
+        "base": "F5"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 5.357,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "f6",
+      "code": "F6",
+      "legend": {
+        "base": "F6"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 6.4284,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "f7",
+      "code": "F7",
+      "legend": {
+        "base": "F7"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 7.4998,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "f8",
+      "code": "F8",
+      "legend": {
+        "base": "F8"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 8.5712,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "f9",
+      "code": "F9",
+      "legend": {
+        "base": "F9"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 9.6426,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "f10",
+      "code": "F10",
+      "legend": {
+        "base": "F10"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 10.714,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "f11",
+      "code": "F11",
+      "legend": {
+        "base": "F11"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 11.7854,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "f12",
+      "code": "F12",
+      "legend": {
+        "base": "F12"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 12.8568,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "delete",
+      "code": "Delete",
+      "legend": {
+        "base": "Del"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 13.9282,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "print-screen",
+      "code": "PrintScreen",
+      "legend": {
+        "base": "PrtSc"
+      },
+      "role": "nav",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 15.25,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "id": "home",
+      "code": "Home",
+      "legend": {
+        "base": "Home"
+      },
+      "role": "nav",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 16.25,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "id": "end",
+      "code": "End",
+      "legend": {
+        "base": "End"
+      },
+      "role": "nav",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 17.25,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "id": "insert",
+      "code": "Insert",
+      "legend": {
+        "base": "Ins"
+      },
+      "role": "nav",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 18.25,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "id": "backquote",
+      "code": "Backquote",
+      "legend": {
+        "base": "`",
+        "shift": "~"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 0.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "digit1",
+      "code": "Digit1",
+      "legend": {
+        "base": "1",
+        "shift": "!"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 1.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "digit2",
+      "code": "Digit2",
+      "legend": {
+        "base": "2",
+        "shift": "@"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 2.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "digit3",
+      "code": "Digit3",
+      "legend": {
+        "base": "3",
+        "shift": "#"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 3.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "digit4",
+      "code": "Digit4",
+      "legend": {
+        "base": "4",
+        "shift": "$"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 4.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "digit5",
+      "code": "Digit5",
+      "legend": {
+        "base": "5",
+        "shift": "%"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 5.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "digit6",
+      "code": "Digit6",
+      "legend": {
+        "base": "6",
+        "shift": "^"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 6.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "digit7",
+      "code": "Digit7",
+      "legend": {
+        "base": "7",
+        "shift": "&"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 7.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "digit8",
+      "code": "Digit8",
+      "legend": {
+        "base": "8",
+        "shift": "*"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 8.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "digit9",
+      "code": "Digit9",
+      "legend": {
+        "base": "9",
+        "shift": "("
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 9.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "digit0",
+      "code": "Digit0",
+      "legend": {
+        "base": "0",
+        "shift": ")"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 10.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "minus",
+      "code": "Minus",
+      "legend": {
+        "base": "-",
+        "shift": "_"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 11.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "equal",
+      "code": "Equal",
+      "legend": {
+        "base": "=",
+        "shift": "+"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 12.0,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "backspace",
+      "code": "Backspace",
+      "legend": {
+        "base": "Backspace"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 13,
+          "y": 1.25,
+          "w": 2
+        }
+      ]
+    },
+    {
+      "id": "tab",
+      "code": "Tab",
+      "legend": {
+        "base": "Tab"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 0,
+          "y": 2.25,
+          "w": 1.5
+        }
+      ]
+    },
+    {
+      "id": "key-q",
+      "code": "KeyQ",
+      "legend": {
+        "base": "Q"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 1.5,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "key-w",
+      "code": "KeyW",
+      "legend": {
+        "base": "W"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 2.5,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "key-e",
+      "code": "KeyE",
+      "legend": {
+        "base": "E"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 3.5,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "key-r",
+      "code": "KeyR",
+      "legend": {
+        "base": "R"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 4.5,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "key-t",
+      "code": "KeyT",
+      "legend": {
+        "base": "T"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 5.5,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "key-y",
+      "code": "KeyY",
+      "legend": {
+        "base": "Y"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 6.5,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "key-u",
+      "code": "KeyU",
+      "legend": {
+        "base": "U"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 7.5,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "key-i",
+      "code": "KeyI",
+      "legend": {
+        "base": "I"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 8.5,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "key-o",
+      "code": "KeyO",
+      "legend": {
+        "base": "O"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 9.5,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "key-p",
+      "code": "KeyP",
+      "legend": {
+        "base": "P"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 10.5,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "bracket-left",
+      "code": "BracketLeft",
+      "legend": {
+        "base": "[",
+        "shift": "{"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 11.5,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "bracket-right",
+      "code": "BracketRight",
+      "legend": {
+        "base": "]",
+        "shift": "}"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 12.5,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "caps-lock",
+      "code": "CapsLock",
+      "legend": {
+        "base": "Caps"
+      },
+      "role": "toggle",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 0,
+          "y": 3.25,
+          "w": 1.75
+        }
+      ]
+    },
+    {
+      "id": "key-a",
+      "code": "KeyA",
+      "legend": {
+        "base": "A"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 1.75,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "key-s",
+      "code": "KeyS",
+      "legend": {
+        "base": "S"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 2.75,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "key-d",
+      "code": "KeyD",
+      "legend": {
+        "base": "D"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 3.75,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "key-f",
+      "code": "KeyF",
+      "legend": {
+        "base": "F"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 4.75,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "key-g",
+      "code": "KeyG",
+      "legend": {
+        "base": "G"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 5.75,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "key-h",
+      "code": "KeyH",
+      "legend": {
+        "base": "H"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 6.75,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "key-j",
+      "code": "KeyJ",
+      "legend": {
+        "base": "J"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 7.75,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "key-k",
+      "code": "KeyK",
+      "legend": {
+        "base": "K"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 8.75,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "key-l",
+      "code": "KeyL",
+      "legend": {
+        "base": "L"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 9.75,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "semicolon",
+      "code": "Semicolon",
+      "legend": {
+        "base": ";",
+        "shift": ":"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 10.75,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "quote",
+      "code": "Quote",
+      "legend": {
+        "base": "'",
+        "shift": "\""
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 11.75,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "backslash",
+      "code": "Backslash",
+      "legend": {
+        "base": "\\",
+        "shift": "|"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 13.5,
+          "y": 2.25,
+          "w": 1.5
+        }
+      ]
+    },
+    {
+      "id": "enter",
+      "code": "Enter",
+      "legend": {
+        "base": "Enter"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 12.75,
+          "y": 3.25,
+          "w": 2.25
+        }
+      ]
+    },
+    {
+      "id": "shift-left",
+      "code": "ShiftLeft",
+      "legend": {
+        "base": "Shift"
+      },
+      "role": "modifier",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 0,
+          "y": 4.25,
+          "w": 2.25
+        }
+      ]
+    },
+    {
+      "id": "key-z",
+      "code": "KeyZ",
+      "legend": {
+        "base": "Z"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 2.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "key-x",
+      "code": "KeyX",
+      "legend": {
+        "base": "X"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 3.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "key-c",
+      "code": "KeyC",
+      "legend": {
+        "base": "C"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 4.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "key-v",
+      "code": "KeyV",
+      "legend": {
+        "base": "V"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 5.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "key-b",
+      "code": "KeyB",
+      "legend": {
+        "base": "B"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 6.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "key-n",
+      "code": "KeyN",
+      "legend": {
+        "base": "N"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 7.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "key-m",
+      "code": "KeyM",
+      "legend": {
+        "base": "M"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 8.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "comma",
+      "code": "Comma",
+      "legend": {
+        "base": ",",
+        "shift": "<"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 9.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "period",
+      "code": "Period",
+      "legend": {
+        "base": ".",
+        "shift": ">"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 10.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "slash",
+      "code": "Slash",
+      "legend": {
+        "base": "/",
+        "shift": "?"
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 11.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "shift-right",
+      "code": "ShiftRight",
+      "legend": {
+        "base": "Shift"
+      },
+      "role": "modifier",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 12.25,
+          "y": 4.25,
+          "w": 2.75
+        }
+      ]
+    },
+    {
+      "id": "control-left",
+      "code": "ControlLeft",
+      "legend": {
+        "base": "Ctrl"
+      },
+      "role": "modifier",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 0,
+          "y": 5.25,
+          "w": 1.25
+        }
+      ]
+    },
+    {
+      "id": "fn",
+      "code": "Fn",
+      "legend": {
+        "base": "Fn"
+      },
+      "role": "modifier",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 1.25,
+          "y": 5.25
+        }
+      ]
+    },
+    {
+      "id": "meta-left",
+      "code": "MetaLeft",
+      "legend": {
+        "base": "Win"
+      },
+      "role": "modifier",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 2.25,
+          "y": 5.25
+        }
+      ]
+    },
+    {
+      "id": "alt-left",
+      "code": "AltLeft",
+      "legend": {
+        "base": "Alt"
+      },
+      "role": "modifier",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 3.25,
+          "y": 5.25,
+          "w": 1.25
+        }
+      ]
+    },
+    {
+      "id": "space",
+      "code": "Space",
+      "legend": {
+        "base": ""
+      },
+      "segments": [
+        {
+          "id": "s0",
+          "x": 4.5,
+          "y": 5.25,
+          "w": 5.5
+        }
+      ]
+    },
+    {
+      "id": "alt-right",
+      "code": "AltRight",
+      "legend": {
+        "base": "Alt"
+      },
+      "role": "modifier",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 10,
+          "y": 5.25
+        }
+      ]
+    },
+    {
+      "id": "control-right",
+      "code": "ControlRight",
+      "legend": {
+        "base": "Ctrl"
+      },
+      "role": "modifier",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 11,
+          "y": 5.25
+        }
+      ]
+    },
+    {
+      "id": "arrow-left",
+      "code": "ArrowLeft",
+      "legend": {
+        "base": "◀"
+      },
+      "role": "nav",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 12.0,
+          "y": 5.25
+        }
+      ]
+    },
+    {
+      "id": "arrow-up",
+      "code": "ArrowUp",
+      "legend": {
+        "base": "▲"
+      },
+      "role": "nav",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 13.0,
+          "y": 5.25,
+          "h": 0.5
+        }
+      ]
+    },
+    {
+      "id": "arrow-down",
+      "code": "ArrowDown",
+      "legend": {
+        "base": "▼"
+      },
+      "role": "nav",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 13.0,
+          "y": 5.75,
+          "h": 0.5
+        }
+      ]
+    },
+    {
+      "id": "arrow-right",
+      "code": "ArrowRight",
+      "legend": {
+        "base": "▶"
+      },
+      "role": "nav",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 14.0,
+          "y": 5.25
+        }
+      ]
+    },
+    {
+      "id": "num-lock",
+      "code": "NumLock",
+      "legend": {
+        "base": "Num"
+      },
+      "role": "toggle",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 15.25,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "numpad-divide",
+      "code": "NumpadDivide",
+      "legend": {
+        "base": "/"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 16.25,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "numpad-multiply",
+      "code": "NumpadMultiply",
+      "legend": {
+        "base": "*"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 17.25,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "numpad-subtract",
+      "code": "NumpadSubtract",
+      "legend": {
+        "base": "-"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 18.25,
+          "y": 1.25
+        }
+      ]
+    },
+    {
+      "id": "numpad7",
+      "code": "Numpad7",
+      "legend": {
+        "base": "7"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 15.25,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "numpad8",
+      "code": "Numpad8",
+      "legend": {
+        "base": "8"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 16.25,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "numpad9",
+      "code": "Numpad9",
+      "legend": {
+        "base": "9"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 17.25,
+          "y": 2.25
+        }
+      ]
+    },
+    {
+      "id": "numpad-add",
+      "code": "NumpadAdd",
+      "legend": {
+        "base": "+"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 18.25,
+          "y": 2.25,
+          "h": 2
+        }
+      ]
+    },
+    {
+      "id": "numpad4",
+      "code": "Numpad4",
+      "legend": {
+        "base": "4"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 15.25,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "numpad5",
+      "code": "Numpad5",
+      "legend": {
+        "base": "5"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 16.25,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "numpad6",
+      "code": "Numpad6",
+      "legend": {
+        "base": "6"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 17.25,
+          "y": 3.25
+        }
+      ]
+    },
+    {
+      "id": "numpad1",
+      "code": "Numpad1",
+      "legend": {
+        "base": "1"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 15.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "numpad2",
+      "code": "Numpad2",
+      "legend": {
+        "base": "2"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 16.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "numpad3",
+      "code": "Numpad3",
+      "legend": {
+        "base": "3"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 17.25,
+          "y": 4.25
+        }
+      ]
+    },
+    {
+      "id": "numpad-enter",
+      "code": "NumpadEnter",
+      "legend": {
+        "base": "Enter"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 18.25,
+          "y": 4.25,
+          "h": 2
+        }
+      ]
+    },
+    {
+      "id": "numpad0",
+      "code": "Numpad0",
+      "legend": {
+        "base": "0"
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 15.25,
+          "y": 5.25,
+          "w": 2
+        }
+      ]
+    },
+    {
+      "id": "numpad-decimal",
+      "code": "NumpadDecimal",
+      "legend": {
+        "base": "."
+      },
+      "role": "numpad",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 17.25,
+          "y": 5.25
+        }
+      ]
+    }
+  ]
+}
