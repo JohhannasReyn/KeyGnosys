@@ -1,5 +1,7 @@
 # KeyGnosys — Technical Specification
 
+*Master Keys to Your System*
+
 **Version:** 1.0-draft · **Status:** design · **Targets:** Windows 10/11, Linux (X11)
 
 Read [OUTLINE.md](OUTLINE.md) first for the shape of the system and the rationale
