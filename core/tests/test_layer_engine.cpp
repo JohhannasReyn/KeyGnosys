@@ -31,6 +31,14 @@ TimePoint at(int ms) {
     return TimePoint{} + std::chrono::milliseconds(ms);
 }
 
+BindingMap defaultBindings() {
+    return {
+        {H, BindingKind::Action},
+        {J, BindingKind::Action},
+        {BKSP, BindingKind::Passthrough},
+    };
+}
+
 // A harness that owns the clock, so tests read as a timeline.
 struct Fixture {
     LayerEngine engine;
@@ -42,8 +50,7 @@ struct Fixture {
         config.grace = std::chrono::milliseconds(50);
         config.hybridTap = std::chrono::milliseconds(200);
         engine.setConfig(config);
-        engine.setBoundKeys({H, J, BKSP});
-        engine.setPassthroughKeys({BKSP});
+        engine.setBindings(defaultBindings());
     }
 
     std::vector<Decision>& press(KeyCode code, int ms) {
@@ -244,8 +251,7 @@ MTK_TEST(the_escape_gesture_can_be_turned_off) {
     config.shiftCapsIsRealCapsLock = false;
     Fixture f;
     f.engine.setConfig(config);
-    f.engine.setBoundKeys({H, J, BKSP});
-    f.engine.setPassthroughKeys({BKSP});
+    f.engine.setBindings(defaultBindings());
     f.press(LSHIFT, 0);
     f.press(CAPS, 10);
     MTK_CHECK(f.engine.mode() == Mode::Cursor);
@@ -268,6 +274,8 @@ MTK_TEST(leaving_the_layer_releases_every_held_action) {
     f.press(H, 10);
     f.press(J, 20);
     MTK_CHECK_EQ(f.engine.heldActions().size(), std::size_t{2});
+    MTK_CHECK(f.engine.heldActions()[0] == H);   // press order
+    MTK_CHECK(f.engine.heldActions()[1] == J);
     f.release(CAPS, 500);
     MTK_CHECK_EQ(countKind(f.last, Decision::Kind::ReleaseAction),
                  std::size_t{2});
@@ -328,75 +336,210 @@ MTK_TEST(release_all_is_idempotent) {
     MTK_CHECK_EQ(f.engine.releaseAll().size(), std::size_t{0});
 }
 
-MTK_TEST(p7_holds_over_random_event_sequences) {
-    // Property test. For any interleaving of presses, releases, ticks and mode
-    // changes, every Forward(Down) must be matched by a Forward(Up) once the
-    // sequence is wound down.
+// ---------------------------------------------------------------------------
+// Property tests
+//
+// One generator, two directions. The event space deliberately includes
+// everything the specification says P7 must survive: repeats, mid-sequence
+// releaseAll(), configuration reloads while keys are held, and duplicate or
+// orphaned physical events of the kind a dropped event or a stuck driver
+// produces.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Replays one pseudo-random session and returns every decision it produced.
+std::vector<Decision> randomSession(unsigned seed) {
     const std::vector<KeyCode> keys = {H, J, Q, LCTRL, LSHIFT, BKSP};
     const std::vector<ActivationMode> modes = {
         ActivationMode::Hold, ActivationMode::Toggle, ActivationMode::Hybrid};
 
-    for (unsigned seed = 0; seed < 200; ++seed) {
-        std::mt19937 rng(seed);
-        Fixture f(modes[seed % modes.size()]);
+    // Reloads that add, remove and reclassify bindings while keys are held.
+    const std::vector<BindingMap> reloads = {
+        defaultBindings(),
+        {{H, BindingKind::Action}},
+        {{H, BindingKind::Passthrough}, {J, BindingKind::Action}},
+        {{Q, BindingKind::Action}, {BKSP, BindingKind::Action}},
+        {},
+    };
 
-        std::vector<bool> down(keys.size(), false);
-        bool capsDown = false;
-        std::vector<Decision> log;
-        int clock = 0;
+    std::mt19937 rng(seed);
+    Fixture f(modes[seed % modes.size()]);
 
-        for (int step = 0; step < 60; ++step) {
-            clock += static_cast<int>(rng() % 120);
-            const unsigned choice = rng() % 10;
+    std::vector<Decision> log;
+    DecisionBuffer buffer;
+    auto drain = [&log, &buffer]() {
+        for (const auto& d : buffer) log.push_back(d);
+        buffer.clear();
+    };
 
-            if (choice == 0) {
-                f.engine.tick(at(clock), log);
-            } else if (choice == 1) {
-                if (capsDown) {
-                    f.engine.onKey(CAPS, KeyState::Up, at(clock), log);
-                } else {
-                    f.engine.onKey(CAPS, KeyState::Down, at(clock), log);
-                }
+    std::vector<bool> down(keys.size(), false);
+    bool capsDown = false;
+    int clock = 0;
+
+    for (int step = 0; step < 80; ++step) {
+        clock += static_cast<int>(rng() % 120);
+        buffer.clear();
+
+        switch (rng() % 16) {
+            case 0:
+                f.engine.tick(at(clock), buffer);
+                break;
+
+            case 1:
+                f.engine.onKey(CAPS, capsDown ? KeyState::Up : KeyState::Down,
+                               at(clock), buffer);
                 capsDown = !capsDown;
-            } else {
+                break;
+
+            case 2: {
+                // Panic. Everything unwinds; the physical keys stay down, so
+                // the releases that follow exercise recovery.
+                f.engine.releaseAll(buffer);
+                capsDown = false;
+                break;
+            }
+
+            case 3: {
+                // Configuration reload, possibly while keys are held.
+                const auto& reload = reloads[rng() % reloads.size()];
+                f.engine.setBindings(reload, buffer);
+                break;
+            }
+
+            case 4: {
+                // Autorepeat, including for keys that are not down.
+                const std::size_t i = rng() % keys.size();
+                f.engine.onKey(keys[i], KeyState::Repeat, at(clock), buffer);
+                break;
+            }
+
+            case 5: {
+                // A malformed event: a press or release that ignores what the
+                // engine believes about that key. Dropped events and stuck
+                // drivers produce these.
+                const std::size_t i = rng() % keys.size();
+                const KeyState state =
+                    (rng() % 2) ? KeyState::Down : KeyState::Up;
+                f.engine.onKey(keys[i], state, at(clock), buffer);
+                if (state == KeyState::Down) down[i] = true;
+                if (state == KeyState::Up) down[i] = false;
+                break;
+            }
+
+            default: {
                 const std::size_t i = rng() % keys.size();
                 const KeyState state = down[i] ? KeyState::Up : KeyState::Down;
-                f.engine.onKey(keys[i], state, at(clock), log);
+                f.engine.onKey(keys[i], state, at(clock), buffer);
                 down[i] = !down[i];
+                break;
             }
         }
+        drain();
+    }
 
-        // Wind down: release everything still physically held, then panic.
-        clock += 1000;
-        for (std::size_t i = 0; i < keys.size(); ++i) {
-            if (down[i]) f.engine.onKey(keys[i], KeyState::Up, at(clock), log);
-        }
-        if (capsDown) f.engine.onKey(CAPS, KeyState::Up, at(clock), log);
-        f.engine.releaseAll(log);
+    // Wind down: release everything still physically held, then panic.
+    clock += 1000;
+    buffer.clear();
+    for (std::size_t i = 0; i < keys.size(); ++i) {
+        if (down[i]) f.engine.onKey(keys[i], KeyState::Up, at(clock), buffer);
+    }
+    if (capsDown) f.engine.onKey(CAPS, KeyState::Up, at(clock), buffer);
+    f.engine.releaseAll(buffer);
+    drain();
 
-        // Now count. A key must never be left down.
-        std::vector<std::pair<KeyCode, int>> depth;
-        auto bump = [&depth](KeyCode code, int delta) {
-            for (auto& entry : depth) {
-                if (entry.first == code) { entry.second += delta; return; }
+    return log;
+}
+
+// Running press/release depth per key over a decision log.
+struct Depth {
+    std::vector<std::pair<KeyCode, int>> entries;
+
+    int bump(KeyCode code, int delta) {
+        for (auto& entry : entries) {
+            if (entry.first == code) {
+                entry.second += delta;
+                return entry.second;
             }
-            depth.emplace_back(code, delta);
-        };
-        for (const auto& d : log) {
+        }
+        entries.emplace_back(code, delta);
+        return delta;
+    }
+};
+
+}  // namespace
+
+MTK_TEST(p7_every_forwarded_press_is_eventually_released) {
+    // The failure this prevents: the compositor believing a key is held
+    // forever, because its press went to the OS and its release did not.
+    for (unsigned seed = 0; seed < 200; ++seed) {
+        Depth depth;
+        for (const auto& d : randomSession(seed)) {
             if (d.kind != Decision::Kind::Forward) continue;
-            if (d.state == KeyState::Down) bump(d.code, 1);
-            if (d.state == KeyState::Up) bump(d.code, -1);
+            if (d.state == KeyState::Down) depth.bump(d.code, 1);
+            if (d.state == KeyState::Up) depth.bump(d.code, -1);
         }
-        for (const auto& entry : depth) {
+        for (const auto& entry : depth.entries) {
             if (entry.second != 0) {
-                std::string name(entry.first.toString());
-                mtk::test::fail("seed " + std::to_string(seed) + ": " + name
-                     + " left with press/release imbalance "
-                     + std::to_string(entry.second));
+                mtk::test::fail("seed " + std::to_string(seed) + ": "
+                                + std::string(entry.first.toString())
+                                + " left with press/release imbalance "
+                                + std::to_string(entry.second));
                 break;
             }
         }
     }
+}
+
+MTK_TEST(p7_mirror_no_release_is_forwarded_without_a_press) {
+    // The opposite corruption: a key-up the OS has no key-down for. Reached by
+    // forwarding the release of a key that was suppressed while held.
+    for (unsigned seed = 0; seed < 200; ++seed) {
+        Depth depth;
+        bool broken = false;
+        for (const auto& d : randomSession(seed)) {
+            if (d.kind != Decision::Kind::Forward || broken) continue;
+            if (d.state == KeyState::Down) {
+                depth.bump(d.code, 1);
+            } else if (d.state == KeyState::Up && depth.bump(d.code, -1) < 0) {
+                mtk::test::fail("seed " + std::to_string(seed) + ": "
+                                + std::string(d.code.toString())
+                                + " released without a forwarded press");
+                broken = true;
+            }
+        }
+    }
+}
+
+MTK_TEST(the_generator_actually_exercises_the_paths_it_claims) {
+    // A property test that silently stopped generating the interesting
+    // transitions would keep passing and prove nothing. Assert the event space
+    // is not degenerate.
+    std::size_t forwards = 0, suppressions = 0, actions = 0, releases = 0;
+    std::size_t buffers = 0, repeats = 0;
+    for (unsigned seed = 0; seed < 200; ++seed) {
+        for (const auto& d : randomSession(seed)) {
+            switch (d.kind) {
+                case Decision::Kind::Forward:
+                    ++forwards;
+                    if (d.state == KeyState::Repeat) ++repeats;
+                    break;
+                case Decision::Kind::Suppress:
+                    ++suppressions;
+                    if (d.state == KeyState::Repeat) ++repeats;
+                    break;
+                case Decision::Kind::RunAction: ++actions; break;
+                case Decision::Kind::ReleaseAction: ++releases; break;
+                case Decision::Kind::Buffer: ++buffers; break;
+            }
+        }
+    }
+    MTK_CHECK(forwards > 1000);
+    MTK_CHECK(suppressions > 1000);
+    MTK_CHECK(actions > 100);
+    MTK_CHECK(releases > 100);
+    MTK_CHECK(buffers > 100);
+    MTK_CHECK(repeats > 100);
 }
 
 // ---------------------------------------------------------------------------
@@ -492,65 +635,231 @@ MTK_TEST(an_action_key_held_across_deactivation_releases_suppressed) {
     MTK_CHECK(!has(f.last, Decision::Kind::Forward, H));
 }
 
-MTK_TEST(every_forwarded_release_has_a_matching_forwarded_press) {
-    // The mirror of P7, and the property that stops the engine emitting a
-    // key-up the OS has no key-down for. Same random sweep, opposite
-    // direction: the depth counter must never go negative.
-    const std::vector<KeyCode> keys = {H, J, Q, LCTRL, LSHIFT, BKSP};
-    const std::vector<ActivationMode> modes = {
-        ActivationMode::Hold, ActivationMode::Toggle, ActivationMode::Hybrid};
+// ---------------------------------------------------------------------------
+// The binding classification is one map, so it cannot disagree with itself
+// ---------------------------------------------------------------------------
 
-    for (unsigned seed = 0; seed < 200; ++seed) {
-        std::mt19937 rng(seed);
-        Fixture f(modes[seed % modes.size()]);
+MTK_TEST(passthrough_requires_a_binding_and_the_api_cannot_express_otherwise) {
+    // A key is passthrough because its binding says so. There is no second
+    // set that could list it without the first agreeing -- BindingKind lives
+    // on the map entry, and having an entry is what being bound means.
+    Fixture f;
+    f.engine.setBindings({{H, BindingKind::Action}});
+    f.press(CAPS, 0);
+    // BKSP is no longer in the map at all, so it is unbound, so it is
+    // suppressed -- not forwarded as a leftover passthrough.
+    MTK_CHECK(has(f.press(BKSP, 10), Decision::Kind::Suppress, BKSP));
+    MTK_CHECK(!has(f.last, Decision::Kind::Forward, BKSP));
+}
 
-        std::vector<bool> down(keys.size(), false);
-        bool capsDown = false;
+MTK_TEST(removing_a_binding_cannot_leave_stale_passthrough_behaviour) {
+    Fixture f;
+    f.press(CAPS, 0);
+    MTK_CHECK(has(f.press(BKSP, 10), Decision::Kind::Forward, BKSP));
+    f.release(BKSP, 20);
+
+    f.engine.setBindings({{H, BindingKind::Action}});      // reload drops BKSP
+    MTK_CHECK(has(f.press(BKSP, 30), Decision::Kind::Suppress, BKSP));
+}
+
+MTK_TEST(a_reload_releases_actions_whose_binding_disappeared) {
+    Fixture f;
+    f.press(CAPS, 0);
+    f.press(H, 10);
+    f.press(J, 20);
+    auto out = f.engine.setBindings({{H, BindingKind::Action}});
+    // J lost its binding, so its action must end. H keeps its, so it must not.
+    MTK_CHECK(has(out, Decision::Kind::ReleaseAction, J));
+    MTK_CHECK(!has(out, Decision::Kind::ReleaseAction, H));
+    MTK_CHECK_EQ(f.engine.heldActions().size(), std::size_t{1});
+}
+
+MTK_TEST(a_reload_that_changes_a_keys_kind_shows_no_intermediate_state) {
+    // H goes from Action to Passthrough in one call. No sequence of events can
+    // observe it as neither, or as both.
+    Fixture f;
+    f.press(CAPS, 0);
+    f.engine.setBindings({{H, BindingKind::Passthrough}});
+    MTK_CHECK(has(f.press(H, 10), Decision::Kind::Forward, H));
+    MTK_CHECK(!has(f.last, Decision::Kind::RunAction, H));
+    MTK_CHECK(has(f.release(H, 20), Decision::Kind::Forward, H));
+}
+
+MTK_TEST(a_reload_drops_buffered_presses_without_typing_them) {
+    Fixture f;
+    f.press(H, 0);                                    // buffered
+    auto out = f.engine.setBindings({{J, BindingKind::Action}});
+    MTK_CHECK(!has(out, Decision::Kind::Forward, H));  // never typed
+    // Its press never reached the OS, so its release must not either.
+    MTK_CHECK(has(f.release(H, 10), Decision::Kind::Suppress, H));
+}
+
+MTK_TEST(a_reload_leaves_forwarded_presses_alone) {
+    // P7 outranks a config reload: a key the OS has seen go down still owes
+    // it a key-up.
+    Fixture f;
+    f.press(Q, 0);
+    f.engine.setBindings({{Q, BindingKind::Action}});
+    MTK_CHECK(has(f.release(Q, 10), Decision::Kind::Forward, Q));
+}
+
+// ---------------------------------------------------------------------------
+// Ordering -- buffered events must resolve in press order
+// ---------------------------------------------------------------------------
+
+MTK_TEST(expired_buffered_presses_are_forwarded_in_press_order) {
+    Fixture f;
+    f.press(H, 0);
+    f.press(J, 5);
+    f.tick(100);
+    MTK_CHECK_EQ(f.last.size(), std::size_t{2});
+    MTK_CHECK(f.last[0].code == H);
+    MTK_CHECK(f.last[1].code == J);
+}
+
+MTK_TEST(reversed_presses_expire_in_that_reversed_order) {
+    // The order comes from when the keys were pressed, not from anything
+    // intrinsic to the keys themselves.
+    Fixture f;
+    f.press(J, 0);
+    f.press(H, 5);
+    f.tick(100);
+    MTK_CHECK_EQ(f.last.size(), std::size_t{2});
+    MTK_CHECK(f.last[0].code == J);
+    MTK_CHECK(f.last[1].code == H);
+}
+
+MTK_TEST(capslock_promotes_buffered_keys_in_press_order) {
+    Fixture f;
+    f.press(J, 0);
+    f.press(H, 5);
+    f.press(CAPS, 20);
+    MTK_CHECK_EQ(countKind(f.last, Decision::Kind::RunAction), std::size_t{2});
+    MTK_CHECK(f.last[1].code == J);   // [0] is the CapsLock suppression
+    MTK_CHECK(f.last[2].code == H);
+}
+
+MTK_TEST(partial_expiry_preserves_the_order_of_what_remains) {
+    Fixture f;
+    f.press(H, 0);
+    f.press(J, 40);
+    f.press(Q, 45);          // unbound, forwarded immediately, never buffered
+    f.tick(60);              // H has expired; J has not
+    MTK_CHECK_EQ(f.last.size(), std::size_t{1});
+    MTK_CHECK(f.last[0].code == H);
+    f.tick(120);
+    MTK_CHECK_EQ(f.last.size(), std::size_t{1});
+    MTK_CHECK(f.last[0].code == J);
+}
+
+MTK_TEST(held_actions_are_released_in_press_order) {
+    Fixture f(ActivationMode::Hold);
+    f.press(CAPS, 0);
+    f.press(J, 10);
+    f.press(H, 20);
+    f.release(CAPS, 500);
+    MTK_CHECK_EQ(f.last.size(), std::size_t{3});   // suppress + two releases
+    MTK_CHECK(f.last[1].code == J);
+    MTK_CHECK(f.last[2].code == H);
+}
+
+MTK_TEST(release_all_unwinds_forwarded_presses_in_press_order) {
+    Fixture f;
+    f.press(LCTRL, 0);
+    f.press(Q, 5);
+    f.press(LSHIFT, 10);
+    auto out = f.engine.releaseAll();
+    MTK_CHECK_EQ(out.size(), std::size_t{3});
+    MTK_CHECK(out[0].code == LCTRL);
+    MTK_CHECK(out[1].code == Q);
+    MTK_CHECK(out[2].code == LSHIFT);
+}
+
+MTK_TEST(the_same_input_always_produces_the_same_decisions) {
+    // Nondeterminism here would be invisible in normal use and vicious to
+    // debug, so it is asserted directly rather than hoped for.
+    auto replay = []() {
+        Fixture f;
         std::vector<Decision> log;
-        int clock = 0;
-
-        for (int step = 0; step < 60; ++step) {
-            clock += static_cast<int>(rng() % 120);
-            const unsigned choice = rng() % 10;
-            if (choice == 0) {
-                f.engine.tick(at(clock), log);
-            } else if (choice == 1) {
-                f.engine.onKey(CAPS, capsDown ? KeyState::Up : KeyState::Down,
-                               at(clock), log);
-                capsDown = !capsDown;
-            } else {
-                const std::size_t i = rng() % keys.size();
-                f.engine.onKey(keys[i], down[i] ? KeyState::Up : KeyState::Down,
-                               at(clock), log);
-                down[i] = !down[i];
-            }
+        for (KeyCode code : {H, J, Q, LCTRL}) {
+            for (const auto& d : f.press(code, 0)) log.push_back(d);
         }
-
-        std::vector<std::pair<KeyCode, int>> depth;
-        auto bump = [&depth](KeyCode code, int delta) -> int {
-            for (auto& entry : depth) {
-                if (entry.first == code) {
-                    entry.second += delta;
-                    return entry.second;
-                }
-            }
-            depth.emplace_back(code, delta);
-            return delta;
-        };
-
-        bool broken = false;
-        for (const auto& d : log) {
-            if (d.kind != Decision::Kind::Forward || broken) continue;
-            if (d.state == KeyState::Down) {
-                bump(d.code, 1);
-            } else if (d.state == KeyState::Up && bump(d.code, -1) < 0) {
-                mtk::test::fail("seed " + std::to_string(seed) + ": "
-                                + std::string(d.code.toString())
-                                + " released without a forwarded press");
-                broken = true;
-            }
+        for (const auto& d : f.tick(100)) log.push_back(d);
+        for (const auto& d : f.press(CAPS, 110)) log.push_back(d);
+        for (const auto& d : f.engine.releaseAll()) log.push_back(d);
+        return log;
+    };
+    const auto first = replay();
+    for (int run = 0; run < 20; ++run) {
+        const auto again = replay();
+        MTK_CHECK_EQ(again.size(), first.size());
+        for (std::size_t i = 0; i < first.size() && i < again.size(); ++i) {
+            MTK_CHECK(again[i].kind == first[i].kind);
+            MTK_CHECK(again[i].code == first[i].code);
+            MTK_CHECK(again[i].state == first[i].state);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Malformed and duplicate physical events
+// ---------------------------------------------------------------------------
+
+MTK_TEST(a_duplicate_press_does_not_double_the_release_obligation) {
+    Fixture f;
+    f.press(Q, 0);
+    f.press(Q, 10);                  // dropped release, or a stuck driver
+    MTK_CHECK(has(f.release(Q, 20), Decision::Kind::Forward, Q));
+    // The books are settled: a second release owes nothing.
+    MTK_CHECK(has(f.release(Q, 30), Decision::Kind::Suppress, Q));
+}
+
+MTK_TEST(a_release_with_no_press_is_suppressed) {
+    Fixture f;
+    MTK_CHECK(has(f.release(Q, 0), Decision::Kind::Suppress, Q));
+}
+
+MTK_TEST(a_duplicate_press_cannot_extend_the_grace_window) {
+    Fixture f;
+    f.press(H, 0);
+    f.press(H, 40);                  // must not reset the clock
+    f.tick(60);
+    MTK_CHECK(has(f.last, Decision::Kind::Forward, H));
+}
+
+MTK_TEST(repeat_events_follow_the_press_that_preceded_them) {
+    Fixture f;
+    f.press(Q, 0);
+    f.last = f.engine.onKey(Q, KeyState::Repeat, at(100));
+    MTK_CHECK(has(f.last, Decision::Kind::Forward, Q));
+
+    f.press(CAPS, 200);
+    f.press(H, 210);                 // running an action
+    f.last = f.engine.onKey(H, KeyState::Repeat, at(300));
+    MTK_CHECK(has(f.last, Decision::Kind::Suppress, H));
+}
+
+// ---------------------------------------------------------------------------
+// The capacity bounds
+// ---------------------------------------------------------------------------
+
+MTK_TEST(the_decision_buffer_never_reallocates) {
+    // The point of DecisionBuffer: fixed storage, so nothing on the event path
+    // can allocate. Drive it hard and assert it stayed within capacity.
+    Fixture f;
+    DecisionBuffer buffer;
+    for (int i = 0; i < 500; ++i) {
+        buffer.clear();
+        f.engine.onKey(H, KeyState::Down, at(i * 10), buffer);
+        f.engine.onKey(CAPS, KeyState::Down, at(i * 10 + 1), buffer);
+        f.engine.onKey(H, KeyState::Up, at(i * 10 + 2), buffer);
+        f.engine.onKey(CAPS, KeyState::Up, at(i * 10 + 3), buffer);
+        f.engine.tick(at(i * 10 + 4), buffer);
+        MTK_CHECK(!buffer.overflowed());
+    }
+    buffer.clear();
+    f.engine.releaseAll(buffer);
+    MTK_CHECK(!buffer.overflowed());
 }
 
 int main() {
