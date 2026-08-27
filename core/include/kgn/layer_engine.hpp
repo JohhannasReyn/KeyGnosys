@@ -22,9 +22,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "mtk/keycode.hpp"
+#include "kgn/keycode.hpp"
 
-namespace mtk {
+namespace kgn {
 
 using Clock = std::chrono::steady_clock;
 using TimePoint = Clock::time_point;
@@ -336,4 +336,4 @@ private:
     std::uint64_t invalidEvents_ = 0;
 };
 
-}  // namespace mtk
+}  // namespace kgn

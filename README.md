@@ -191,7 +191,7 @@ momentary; the default), `toggle`, and `hold`. Real CapsLock moves to
 ## How it is put together
 
 ```
-mtk-core (C++)                        mousetrapkeys (Python / PySide6)
+keygnosys-core (C++)                        mousetrapkeys (Python / PySide6)
 ├── Input backend  evdev · hook       ├── Overlay: keyboard + control bar
 ├── Layer engine   the state machine  ├── Layout / theme / profile registry
 ├── Actions        cursor · windows   ├── Settings

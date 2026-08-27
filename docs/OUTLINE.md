@@ -50,7 +50,7 @@ These are the constraints every later decision is measured against.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  mtk-core        (C++17, native, privileged)                         │
+│  keygnosys-core        (C++17, native, privileged)                         │
 │                                                                      │
 │   Input backend  →  Layer engine  →  Action dispatcher               │
 │   (evdev/hook)      (state machine)   (cursor · scroll · windows)    │

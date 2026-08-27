@@ -17,7 +17,7 @@
 #include <string>
 #include <string_view>
 
-namespace mtk {
+namespace kgn {
 
 // A key identity. Interned to an integer id so the hot path compares ints
 // rather than strings; the string form is recovered for IPC and config.
@@ -71,11 +71,11 @@ bool isModifier(KeyCode code);
 // group, because a shortcut does not care which hand pressed it.
 std::string_view modifierGroup(KeyCode code);
 
-}  // namespace mtk
+}  // namespace kgn
 
 template <>
-struct std::hash<mtk::KeyCode> {
-    std::size_t operator()(const mtk::KeyCode& code) const noexcept {
+struct std::hash<kgn::KeyCode> {
+    std::size_t operator()(const kgn::KeyCode& code) const noexcept {
         return std::hash<std::uint16_t>{}(code.id());
     }
 };

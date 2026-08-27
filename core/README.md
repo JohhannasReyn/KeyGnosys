@@ -1,4 +1,4 @@
-# mtk-core
+# keygnosys-core
 
 The native input core: interception, suppression, pointer synthesis, window
 management, and the JSON Lines IPC server the overlay connects to.
@@ -10,11 +10,11 @@ not written yet. What exists today:
 
 | | |
 |---|---|
-| ✅ | `mtk_engine`: the platform-free library, CMake target, warning setup |
+| ✅ | `kgn_engine`: the platform-free library, CMake target, warning setup |
 | ✅ | `src/keycode.cpp` — the key vocabulary, interning, modifier grouping |
 | ✅ | `src/layer_engine.cpp` — the CapsLock state machine, the grace window, and the P7 forwarded-release invariant with its mirror |
 | ✅ | Test harness and `ctest` wiring; 96 tests, clean under `-Werror -Wconversion` |
-| ✅ | Interface headers defining the seam ([`include/mtk/`](include/mtk/)) |
+| ✅ | Interface headers defining the seam ([`include/kgn/`](include/kgn/)) |
 | 🚧 | Motion integrator, action dispatch, IPC server (rest of **M2**) |
 | 🚧 | Windows backend: hook, `SendInput`, Win32 windows (**M3**) |
 | 🚧 | Linux/X11 backend: evdev, uinput, EWMH, XRandR (**M4**) |
@@ -82,7 +82,7 @@ failing output automatically; to run a test binary directly for more detail:
 
 ### Why it is split this way
 
-**`mtk_engine` touches no OS API.** No device, no thread, no system call. It
+**`kgn_engine` touches no OS API.** No device, no thread, no system call. It
 takes events and a clock and returns decisions. `test_layer_engine` exercises
 the whole CapsLock state machine on a synthetic timeline, including a property
 test that replays 200 random event sequences and asserts no key is ever left
@@ -92,26 +92,26 @@ the original prototype — the CapsLock race window, the forwarded-release
 invariant — can be tested at all. `ctest` needs no display, no privileges and no
 hardware, and it will stay that way.
 
-**`mtk_platform` is where operating systems live**, one implementation per
-platform behind the interfaces in [`include/mtk/backends.hpp`](include/mtk/backends.hpp).
+**`kgn_platform` is where operating systems live**, one implementation per
+platform behind the interfaces in [`include/kgn/backends.hpp`](include/kgn/backends.hpp).
 It is not built yet. Configuring on a platform with no backend is deliberately
 not an error — you get the engine and its tests, which is what M2 needs.
 
 ### Tests
 
-[`tests/mtk_test.hpp`](tests/mtk_test.hpp) is a ~100-line harness. Not Catch2 or
+[`tests/kgn_test.hpp`](tests/kgn_test.hpp) is a ~100-line harness. Not Catch2 or
 GoogleTest, because both want a network fetch at configure time or a vendored
 copy, and neither earns that for asserting on a pure state machine. Swapping it
 later is mechanical — the assertions already read the same.
 
 ```cpp
-MTK_TEST(name_of_the_thing_being_asserted) {
-    MTK_CHECK(condition);
-    MTK_CHECK_EQ(actual, expected);
+KGN_TEST(name_of_the_thing_being_asserted) {
+    KGN_CHECK(condition);
+    KGN_CHECK_EQ(actual, expected);
 }
 ```
 
-Add a test file to `tests/`, then one `mtk_add_test(name)` line in
+Add a test file to `tests/`, then one `kgn_add_test(name)` line in
 `CMakeLists.txt`.
 
 ## The prototype
