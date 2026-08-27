@@ -67,6 +67,22 @@ struct Fixture {
     }
 };
 
+// Running press/release depth per key over a decision log.
+struct Depth {
+    std::vector<std::pair<KeyCode, int>> entries;
+
+    int bump(KeyCode code, int delta) {
+        for (auto& entry : entries) {
+            if (entry.first == code) {
+                entry.second += delta;
+                return entry.second;
+            }
+        }
+        entries.emplace_back(code, delta);
+        return delta;
+    }
+};
+
 bool has(const std::vector<Decision>& ds, Decision::Kind kind, KeyCode code) {
     for (const auto& d : ds) {
         if (d.kind == kind && d.code == code) return true;
@@ -427,6 +443,29 @@ std::vector<Decision> randomSession(unsigned seed) {
                 break;
             }
 
+            case 6: {
+                // Malformed CapsLock specifically. It is dispatched before the
+                // general duplicate-state logic, so it needs exercising in its
+                // own right rather than only as one key among many.
+                const unsigned which = rng() % 3;
+                const KeyState state = which == 0   ? KeyState::Down
+                                       : which == 1 ? KeyState::Up
+                                                    : KeyState::Repeat;
+                f.engine.onKey(CAPS, state, at(clock), buffer);
+                if (state == KeyState::Down) capsDown = true;
+                if (state == KeyState::Up) capsDown = false;
+                break;
+            }
+
+            case 7: {
+                // An invalid code, which no backend emits but which the engine
+                // must nonetheless not mishandle.
+                f.engine.onKey(KeyCode{},
+                               (rng() % 2) ? KeyState::Down : KeyState::Up,
+                               at(clock), buffer);
+                break;
+            }
+
             default: {
                 const std::size_t i = rng() % keys.size();
                 const KeyState state = down[i] ? KeyState::Up : KeyState::Down;
@@ -450,22 +489,6 @@ std::vector<Decision> randomSession(unsigned seed) {
 
     return log;
 }
-
-// Running press/release depth per key over a decision log.
-struct Depth {
-    std::vector<std::pair<KeyCode, int>> entries;
-
-    int bump(KeyCode code, int delta) {
-        for (auto& entry : entries) {
-            if (entry.first == code) {
-                entry.second += delta;
-                return entry.second;
-            }
-        }
-        entries.emplace_back(code, delta);
-        return delta;
-    }
-};
 
 }  // namespace
 
@@ -540,6 +563,265 @@ MTK_TEST(the_generator_actually_exercises_the_paths_it_claims) {
     MTK_CHECK(releases > 100);
     MTK_CHECK(buffers > 100);
     MTK_CHECK(repeats > 100);
+}
+
+// ---------------------------------------------------------------------------
+// The key domain
+//
+// Per-key state covers the whole KeyCode id space, so there is no "untracked"
+// class of key whose invariants cannot be maintained. The only code without
+// state is the invalid one, which no backend can emit.
+// ---------------------------------------------------------------------------
+
+MTK_TEST(a_high_id_key_is_tracked_like_any_other) {
+    // Codes interned beyond the built-in vocabulary used to fall off a
+    // stateless path that forwarded everything, which no invariant survives.
+    Fixture f;
+    const KeyCode odd = KeyCode::fromString("VendorSpecificThing");
+    MTK_CHECK(odd.valid());
+    MTK_CHECK(has(f.press(odd, 0), Decision::Kind::Forward, odd));
+
+    auto out = f.engine.releaseAll();
+    MTK_CHECK(has(out, Decision::Kind::Forward, odd));   // release is owed
+    for (const auto& d : out) {
+        if (d.kind == Decision::Kind::Forward) {
+            MTK_CHECK(d.state == KeyState::Up);
+        }
+    }
+}
+
+MTK_TEST(an_invalid_code_is_suppressed_in_every_direction) {
+    // Never forwards a press, so it can never owe a release. Both invariants
+    // hold trivially rather than by argument.
+    Fixture f;
+    const KeyCode bad{};
+    MTK_CHECK(!bad.valid());
+    MTK_CHECK(has(f.press(bad, 0), Decision::Kind::Suppress, bad));
+    MTK_CHECK(has(f.release(bad, 10), Decision::Kind::Suppress, bad));
+    MTK_CHECK(has(f.release(bad, 20), Decision::Kind::Suppress, bad));  // orphan
+    MTK_CHECK_EQ(f.engine.releaseAll().size(), std::size_t{0});
+    MTK_CHECK(f.engine.invalidEvents() > 0);
+}
+
+MTK_TEST(an_orphan_release_of_a_high_id_key_is_suppressed) {
+    Fixture f;
+    const KeyCode odd = KeyCode::fromString("AnotherVendorKey");
+    MTK_CHECK(has(f.release(odd, 0), Decision::Kind::Suppress, odd));
+}
+
+// ---------------------------------------------------------------------------
+// Forced capacity overflow
+//
+// "A human has ten fingers" is not a safety argument: malformed drivers,
+// injected events and lost releases are in the threat model. These drive the
+// bounded lists past capacity on purpose.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::vector<KeyCode> syntheticKeys(const char* prefix, std::size_t count) {
+    std::vector<KeyCode> keys;
+    keys.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        keys.push_back(KeyCode::fromString(std::string(prefix)
+                                           + std::to_string(i)));
+    }
+    return keys;
+}
+
+}  // namespace
+
+MTK_TEST(overflowing_the_forwarded_list_suppresses_rather_than_stranding) {
+    // Past capacity the engine must refuse to create an obligation it cannot
+    // record. A dropped keystroke is recoverable; a key the OS believes is
+    // held forever is not.
+    Fixture f;
+    const auto keys = syntheticKeys("OverflowFwd", kMaxHeld + 40);
+
+    std::vector<Decision> log;
+    for (KeyCode code : keys) {
+        for (const auto& d : f.press(code, 0)) log.push_back(d);
+    }
+    for (const auto& d : f.engine.releaseAll()) log.push_back(d);
+
+    MTK_CHECK(f.engine.capacityDrops() > 0);   // the overflow really happened
+
+    Depth depth;
+    bool orphan = false;
+    for (const auto& d : log) {
+        if (d.kind != Decision::Kind::Forward) continue;
+        if (d.state == KeyState::Down) depth.bump(d.code, 1);
+        if (d.state == KeyState::Up && depth.bump(d.code, -1) < 0) orphan = true;
+    }
+    MTK_CHECK(!orphan);
+    for (const auto& entry : depth.entries) {
+        MTK_CHECK_EQ(entry.second, 0);
+    }
+}
+
+MTK_TEST(overflowing_the_held_action_list_emits_no_unreleasable_action) {
+    // The action-side twin: RunAction without a guaranteed ReleaseAction is
+    // P7's failure in a different currency.
+    const auto keys = syntheticKeys("OverflowAct", kMaxHeld + 40);
+
+    BindingMap bindings;
+    for (KeyCode code : keys) bindings[code] = BindingKind::Action;
+
+    Fixture f;
+    f.engine.setBindings(bindings);
+    f.press(CAPS, 0);
+
+    std::vector<Decision> log;
+    for (KeyCode code : keys) {
+        for (const auto& d : f.press(code, 10)) log.push_back(d);
+    }
+    for (const auto& d : f.engine.releaseAll()) log.push_back(d);
+
+    MTK_CHECK(f.engine.capacityDrops() > 0);
+
+    Depth depth;
+    for (const auto& d : log) {
+        if (d.kind == Decision::Kind::RunAction) depth.bump(d.code, 1);
+        if (d.kind == Decision::Kind::ReleaseAction) depth.bump(d.code, -1);
+    }
+    for (const auto& entry : depth.entries) {
+        MTK_CHECK_EQ(entry.second, 0);
+    }
+}
+
+MTK_TEST(overflowing_the_pending_list_degrades_to_no_grace_window) {
+    // Buffering is the optional part; delivering the keystroke is not.
+    const auto keys = syntheticKeys("OverflowPend", kMaxPending + 10);
+
+    BindingMap bindings;
+    for (KeyCode code : keys) bindings[code] = BindingKind::Action;
+
+    Fixture f;
+    f.engine.setBindings(bindings);
+
+    std::size_t forwarded = 0;
+    for (KeyCode code : keys) {
+        for (const auto& d : f.press(code, 0)) {
+            if (d.kind == Decision::Kind::Forward) ++forwarded;
+        }
+    }
+    MTK_CHECK(forwarded > 0);                  // the surplus was not dropped
+    MTK_CHECK(f.engine.capacityDrops() > 0);
+}
+
+MTK_TEST(the_decision_buffer_holds_a_full_worst_case_unwind) {
+    // The capacity is derived from this case, so assert the derivation.
+    const auto keys = syntheticKeys("Unwind", kMaxHeld);
+    BindingMap bindings;
+    for (KeyCode code : keys) bindings[code] = BindingKind::Action;
+
+    Fixture f;
+    f.engine.setBindings(bindings);
+    f.press(CAPS, 0);
+    for (KeyCode code : keys) f.press(code, 10);
+
+    DecisionBuffer buffer;
+    f.engine.releaseAll(buffer);
+    MTK_CHECK(!buffer.overflowed());
+}
+
+// ---------------------------------------------------------------------------
+// Malformed CapsLock events
+//
+// CapsLock is dispatched before the general duplicate-state logic, so it needs
+// its own physical-state tracking or it bypasses that policy entirely.
+// ---------------------------------------------------------------------------
+
+MTK_TEST(a_duplicate_capslock_press_does_not_toggle_the_layer_twice) {
+    Fixture f(ActivationMode::Toggle);
+    f.press(CAPS, 0);
+    MTK_CHECK(f.engine.mode() == Mode::Cursor);
+    f.press(CAPS, 10);                 // duplicate Down, no release between
+    MTK_CHECK(f.engine.mode() == Mode::Cursor);
+}
+
+MTK_TEST(a_duplicate_capslock_press_is_suppressed_not_re_run) {
+    Fixture f(ActivationMode::Hybrid);
+    f.press(CAPS, 0);
+    MTK_CHECK(has(f.press(CAPS, 10), Decision::Kind::Suppress, CAPS));
+}
+
+MTK_TEST(a_duplicate_real_capslock_press_forwards_as_a_repeat) {
+    Fixture f;
+    f.press(LSHIFT, 0);
+    f.press(CAPS, 10);                 // real CapsLock, forwarded
+    f.press(CAPS, 20);                 // duplicate
+    MTK_CHECK_EQ(f.last.size(), std::size_t{1});
+    MTK_CHECK(f.last[0].kind == Decision::Kind::Forward);
+    MTK_CHECK(f.last[0].state == KeyState::Repeat);
+}
+
+MTK_TEST(an_orphan_capslock_release_cannot_leave_the_layer) {
+    Fixture f(ActivationMode::Toggle);
+    f.press(CAPS, 0);
+    f.release(CAPS, 10);
+    MTK_CHECK(f.engine.mode() == Mode::Cursor);
+    MTK_CHECK(has(f.release(CAPS, 20), Decision::Kind::Suppress, CAPS));
+    MTK_CHECK(f.engine.mode() == Mode::Cursor);   // orphan changed nothing
+}
+
+MTK_TEST(an_orphan_capslock_release_cannot_latch_in_hybrid_mode) {
+    Fixture f(ActivationMode::Hybrid);
+    MTK_CHECK(f.engine.mode() == Mode::Normal);
+    f.release(CAPS, 0);                // never pressed
+    MTK_CHECK(f.engine.mode() == Mode::Normal);
+    MTK_CHECK(!f.engine.latched());
+}
+
+MTK_TEST(a_stale_press_time_cannot_influence_a_later_release) {
+    // capsPressedAt_ left set after a release used to remain available to the
+    // next malformed event, which could latch the layer from a stale clock.
+    Fixture f(ActivationMode::Hybrid);
+    f.press(CAPS, 0);
+    f.release(CAPS, 50);               // tap: latches on
+    MTK_CHECK(f.engine.latched());
+    f.release(CAPS, 10000);            // orphan, long after
+    MTK_CHECK(f.engine.mode() == Mode::Cursor);
+    MTK_CHECK(f.engine.latched());
+}
+
+MTK_TEST(release_all_clears_physical_capslock_state) {
+    Fixture f(ActivationMode::Hold);
+    f.press(CAPS, 0);
+    f.engine.releaseAll();
+    MTK_CHECK(f.engine.mode() == Mode::Normal);
+    // The physical release that follows must not re-enter or alter anything.
+    MTK_CHECK(has(f.release(CAPS, 10), Decision::Kind::Suppress, CAPS));
+    MTK_CHECK(f.engine.mode() == Mode::Normal);
+}
+
+// ---------------------------------------------------------------------------
+// Modifier state after a panic
+// ---------------------------------------------------------------------------
+
+MTK_TEST(release_all_clears_modifier_state_for_an_action_bound_modifier) {
+    // A modifier bound to an action lives in the held list, not the forwarded
+    // list. Clearing only the latter left `modifierHeld` set, and the next
+    // CapsLock was then misread as the Shift+CapsLock escape gesture -- so the
+    // layer would silently stop engaging.
+    Fixture f(ActivationMode::Toggle);
+    f.engine.setBindings({{LSHIFT, BindingKind::Action}});
+    f.press(CAPS, 0);                  // engage the layer
+    f.press(LSHIFT, 10);               // runs an action; Shift held physically
+    f.engine.releaseAll();
+
+    f.press(CAPS, 20);
+    MTK_CHECK(f.engine.mode() == Mode::Cursor);          // layer, not caps
+    MTK_CHECK(!has(f.last, Decision::Kind::Forward, CAPS));
+}
+
+MTK_TEST(release_all_clears_modifier_state_for_a_forwarded_modifier) {
+    Fixture f(ActivationMode::Toggle);
+    f.press(LSHIFT, 0);
+    f.engine.releaseAll();
+    f.press(CAPS, 10);
+    MTK_CHECK(f.engine.mode() == Mode::Cursor);
+    MTK_CHECK(!has(f.last, Decision::Kind::Forward, CAPS));
 }
 
 // ---------------------------------------------------------------------------
@@ -685,13 +967,61 @@ MTK_TEST(a_reload_that_changes_a_keys_kind_shows_no_intermediate_state) {
     MTK_CHECK(has(f.release(H, 20), Decision::Kind::Forward, H));
 }
 
-MTK_TEST(a_reload_drops_buffered_presses_without_typing_them) {
+MTK_TEST(a_reload_keeps_a_pending_press_that_is_still_action_bound) {
+    // The press is physical input the user already committed to. It was
+    // delayed only to resolve layer intent, so an unrelated reload must not
+    // consume it.
     Fixture f;
-    f.press(H, 0);                                    // buffered
+    f.press(H, 0);
+    auto out = f.engine.setBindings({{H, BindingKind::Action}});
+    MTK_CHECK_EQ(out.size(), std::size_t{0});
+    f.tick(100);                                   // still waiting; now expires
+    MTK_CHECK(has(f.last, Decision::Kind::Forward, H));
+    MTK_CHECK(has(f.release(H, 110), Decision::Kind::Forward, H));
+}
+
+MTK_TEST(a_reload_preserves_the_original_press_time_of_a_kept_pending_key) {
+    // Keeping the press but restarting its clock would silently extend the
+    // grace window, which is the same defect as a duplicate press extending it.
+    Fixture f;
+    f.press(H, 0);
+    f.engine.setBindings({{H, BindingKind::Action}});
+    f.tick(60);                                    // 60ms > 50ms grace
+    MTK_CHECK(has(f.last, Decision::Kind::Forward, H));
+}
+
+MTK_TEST(a_reload_resolves_a_pending_press_that_lost_its_binding) {
+    // No longer action-bound, so there is nothing left to disambiguate: it was
+    // an ordinary keystroke all along. It must be delivered, not swallowed.
+    Fixture f;
+    f.press(H, 0);
     auto out = f.engine.setBindings({{J, BindingKind::Action}});
-    MTK_CHECK(!has(out, Decision::Kind::Forward, H));  // never typed
-    // Its press never reached the OS, so its release must not either.
-    MTK_CHECK(has(f.release(H, 10), Decision::Kind::Suppress, H));
+    MTK_CHECK(has(out, Decision::Kind::Forward, H));
+    // And having been forwarded, it now owes a release.
+    MTK_CHECK(has(f.release(H, 10), Decision::Kind::Forward, H));
+}
+
+MTK_TEST(a_reload_resolves_multiple_pending_keys_in_press_order) {
+    Fixture f;
+    f.press(J, 0);
+    f.press(H, 5);
+    auto out = f.engine.setBindings({});
+    MTK_CHECK_EQ(out.size(), std::size_t{2});
+    MTK_CHECK(out[0].code == J);
+    MTK_CHECK(out[1].code == H);
+}
+
+MTK_TEST(a_reload_releases_actions_in_press_order) {
+    // SPEC 6.3.1 applies here too: multi-key decisions are emitted in press
+    // order, not in whatever order the held list happens to be walked.
+    Fixture f;
+    f.press(CAPS, 0);
+    f.press(J, 10);
+    f.press(H, 20);
+    auto out = f.engine.setBindings({});
+    MTK_CHECK_EQ(countKind(out, Decision::Kind::ReleaseAction), std::size_t{2});
+    MTK_CHECK(out[0].code == J);
+    MTK_CHECK(out[1].code == H);
 }
 
 MTK_TEST(a_reload_leaves_forwarded_presses_alone) {
