@@ -8,25 +8,32 @@
 
 ## 1. What it is
 
-KeyGnosys is a **keyboard-first desktop input layer** with a **visual on-screen
-keyboard that explains itself**.
+KeyGnosys is an **application-aware keyboard productivity and learning system**.
 
-Two things are happening at once, and the whole design follows from keeping them
-separate:
+Its purpose is to make the keyboard shortcuts you *could* be using visible at the
+moment you would use them, and to give you somewhere to put the ones you invent.
+Everything below follows from that.
 
-1. **An input layer.** CapsLock stops being CapsLock. While the layer is engaged,
-   the alphanumeric keys drive the mouse pointer, click, scroll, jump between
-   monitors, and switch between running applications — so the hands never leave
-   the home row.
-2. **A heads-up map.** A translucent, pinnable, click-through on-screen keyboard
+It does this through two components, and the whole design follows from keeping
+them separate:
+
+1. **A heads-up map.** A translucent, pinnable, click-through on-screen keyboard
    that lights up as you type and **relabels its own keys to match whatever mode
    you are in**. Base layer shows characters. Shift shows uppercase. Holding Ctrl
-   shows the shortcuts *for the app you are actually focused on*. CapsLock shows
-   your cursor-control bindings.
+   shows the shortcuts *for the application you are actually focused on*. This is
+   the learning surface, and it is what the product is named for.
+2. **An input layer.** CapsLock stops being CapsLock and becomes a configurable
+   control layer. While engaged, the alphanumeric keys drive the mouse pointer,
+   click, scroll, jump between monitors, and switch between running applications
+   — so the hands never leave the home row.
 
-The map exists to make the layer learnable. Once it is muscle memory, the map can
-be hidden entirely and the layer keeps working. **The overlay is optional; the
-input layer is not.**
+The map makes the layer learnable, and makes shortcuts you already had
+discoverable. Once either is muscle memory the map can be hidden entirely and
+the layer keeps working. **The overlay is optional; the input layer is not.**
+
+Cursor control is one major capability rather than the whole identity: a user who
+never engages the CapsLock layer still gets application-aware shortcut guidance
+and live key feedback, and that alone is the point for them.
 
 ---
 

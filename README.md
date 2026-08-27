@@ -1,18 +1,33 @@
 # KeyGnosys
 
-**Drive the mouse from the home row, and see what every key does while you learn.**
+### *Master Keys to Your System*
 
-KeyGnosys is two things working together: an input layer that turns CapsLock
-into a gateway for cursor control and window switching, and a translucent,
-click-through on-screen keyboard that **relabels itself to match whatever mode
-you are in** — so the shortcuts are on screen until you no longer need them.
+An **application-aware keyboard productivity and learning system**. KeyGnosys
+puts a customizable keyboard on screen that lights up as you type, relabels
+itself to match whatever you are holding, and shows the shortcuts for the
+application you are actually in — so you learn them in the middle of real work
+instead of from a cheat sheet. CapsLock becomes a configurable control layer,
+giving you keyboard-driven mouse control and window management without leaving
+the home row.
 
-![The cursor layer](docs/images/legend-cursor.png)
+![Shortcuts for the focused application](docs/images/legend-shortcuts-chrome.png)
 
-*CapsLock engaged: HJKL steer the pointer, YUIO scroll, the left hand clicks, the
-digits jump to a running application, and the numeric keypad — being physically a
-3×3 grid — warps the pointer to the matching third of the screen. Unbound keys
-dim themselves out of the way.*
+*Holding Ctrl in Chrome. Focus a different application and the same keys relabel
+to its shortcuts. Keys with nothing bound dim themselves out of the way.*
+
+## What it does
+
+| | |
+|---|---|
+| **Learns you into the shortcuts you already have** | Standard and user-defined shortcuts appear on the keys, for the application currently focused |
+| **Adapts to the active application** | Chrome shows Chrome's shortcuts; your editor shows its own |
+| **Live visual feedback** | Keys and modifier states light up as you press them, so you can see what the machine thinks you typed |
+| **A configurable CapsLock control layer** | Repurposes a key most people never use into a mode of your own design |
+| **Keyboard-driven mouse and window control** | Pointer, clicks, scrolling, monitors and window switching, all from the home row |
+| **A customizable visual keyboard** | Five bundled layouts, translucent, pinnable, click-through, and editable |
+
+Once a shortcut is muscle memory you stop needing to see it — so the overlay can
+be hidden entirely. **The overlay is optional; the input layer is not.**
 
 ---
 
@@ -28,20 +43,23 @@ depending on what you are holding:
 | **Ctrl** — the shortcuts **for the app you are focused on** | ![shortcuts](docs/images/legend-shortcuts-chrome.png) |
 | **CapsLock** — your cursor-control bindings | ![cursor](docs/images/legend-cursor.png) |
 
-The third one is the interesting one. Focus Chrome and hold Ctrl and you get
-Chrome's shortcuts. Focus your editor and you get your editor's. The labels come
-from plain JSON profiles matched against the focused window, and you can edit or
-replace any of them.
+The third one is the interesting one, and it is where the name comes from. Focus
+Chrome and hold Ctrl and you get Chrome's shortcuts. Focus your editor and you
+get your editor's. The labels come from plain JSON profiles matched against the
+focused window, and you can edit or replace any of them.
 
-Once it is muscle memory, hide the keyboard entirely. **The overlay is optional;
-the input layer is not.**
+This is the difference between a reference you go and look at and one that is
+already in front of you at the moment you need it. Shortcuts get learned in the
+course of doing the work, rather than in a separate act of study that never quite
+happens.
 
 ---
 
 ## Status
 
-**Milestone M1.** The overlay works today. The native input core does not exist
-yet, so the layer draws but does not yet drive.
+**Milestone M1.** The on-screen keyboard works today. The native input core does
+not exist yet, so the layer draws and teaches but does not yet drive the
+pointer.
 
 | | |
 |---|---|
@@ -63,8 +81,8 @@ sees keys only while the app has focus, and it cannot suppress anything.
 ## Try it
 
 ```sh
-git clone https://github.com/JohhannasReyn/keygnosys
-cd keygnosys
+git clone https://github.com/JohhannasReyn/KeyGnosys
+cd KeyGnosys
 
 python -m venv .venv
 .venv/Scripts/activate          # Windows
@@ -236,7 +254,7 @@ driver backend can be added later behind the same interface.
 
 ## A note on trust
 
-This software is, structurally, a keylogger with a GUI. So:
+KeyGnosys is, structurally, a keylogger with a GUI. So:
 
 - **No keystroke content is ever written to disk**, at any log level.
 - **No network access, ever** — no telemetry, no update check, no crash upload.
@@ -287,6 +305,16 @@ design are grab-and-reinject, the CapsLock race grace window, live config
 reload, and the forwarded-release invariant that stops keys sticking down. What
 changed is everything else: two platforms, arbitrary actions, data-driven
 configuration, and a UI that can see what the engine is doing.
+
+## Free, and staying that way
+
+KeyGnosys is free, and the application itself will stay free, clean and
+bloat-free. No advertising. No features held back behind a paywall. No
+telemetry (see the trust note above — that one is enforced in the
+[specification](docs/SPEC.md#12-security-and-permissions), not just promised).
+
+If there is ever a business here it will be built around the software rather
+than by degrading it.
 
 ## License
 
