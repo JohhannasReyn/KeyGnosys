@@ -66,7 +66,7 @@ void LayerEngine::setConfig(const EngineConfig& config) { config_ = config; }
 // ---------------------------------------------------------------------------
 
 void LayerEngine::setBindings(const BindingMap& bindings, DecisionBuffer& out) {
-    // Held actions, in press order (SPEC 6.3.1). Compacting in place keeps the
+    // Held actions, in press order (SPEC 6.3.3). Compacting in place keeps the
     // survivors in order too.
     std::size_t keptHeld = 0;
     for (std::size_t i = 0; i < heldCount_; ++i) {
@@ -117,7 +117,7 @@ void LayerEngine::setBindings(const BindingMap& bindings, DecisionBuffer& out) {
 // ---------------------------------------------------------------------------
 
 bool LayerEngine::forwardPress(KeyCode code, KeyState state,
-                               DecisionBuffer& out) {
+                               DecisionBuffer& out, KeyState suppressAs) {
     Slot& s = slot(code);
     if (!s.has(Slot::kForwarded)) {
         if (forwardedCount_ >= kMaxHeld) {
@@ -125,7 +125,7 @@ bool LayerEngine::forwardPress(KeyCode code, KeyState state,
             // A dropped keystroke is recoverable; a key the OS believes is
             // held forever is not.
             ++capacityDrops_;
-            out.push(suppress(code, state));
+            out.push(suppress(code, suppressAs));
             return false;
         }
         s.set(Slot::kForwarded);
@@ -333,7 +333,11 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
                 // Released before the grace window resolved: an ordinary quick
                 // tap. Send the whole press and release now, in order -- and
                 // only if the press can be tracked, so the pair stays matched.
-                if (forwardPress(code, KeyState::Down, out)) {
+                //
+                // The event being handled is the release, so a suppression
+                // here reports Up even though the press was what could not be
+                // forwarded.
+                if (forwardPress(code, KeyState::Down, out, KeyState::Up)) {
                     forgetForwarded(code);
                     out.push(forward(code, KeyState::Up));
                 }

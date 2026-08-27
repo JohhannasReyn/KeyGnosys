@@ -710,6 +710,48 @@ MTK_TEST(overflowing_the_pending_list_degrades_to_no_grace_window) {
     MTK_CHECK(f.engine.capacityDrops() > 0);
 }
 
+MTK_TEST(a_suppressed_tap_replay_reports_the_release_it_suppressed) {
+    // The grace-window tap replay forwards a Down while handling an Up. If
+    // that press cannot be forwarded, the Suppress must describe the event it
+    // actually suppressed -- the release -- not the press it was trying to
+    // synthesise.
+    //
+    // A Suppress that misreports its own state is a trap for logging, tracing
+    // and any consumer reading the decision stream without the triggering
+    // event in hand.
+    const KeyCode tapped = KeyCode::fromString("TapReplayKey");
+
+    Fixture f;
+    f.engine.setBindings({{tapped, BindingKind::Action}});
+
+    // Saturate the forwarded list so the replay's press cannot be recorded.
+    for (KeyCode code : syntheticKeys("TapReplayFill", kMaxHeld + 4)) {
+        f.press(code, 0);
+    }
+    MTK_CHECK(f.engine.capacityDrops() > 0);
+
+    MTK_CHECK(has(f.press(tapped, 10), Decision::Kind::Buffer, tapped));
+
+    f.release(tapped, 20);                 // inside the grace window
+    MTK_CHECK_EQ(f.last.size(), std::size_t{1});
+    MTK_CHECK(f.last[0].kind == Decision::Kind::Suppress);
+    MTK_CHECK(f.last[0].code == tapped);
+    MTK_CHECK(f.last[0].state == KeyState::Up);
+    MTK_CHECK(!has(f.last, Decision::Kind::Forward, tapped));
+}
+
+MTK_TEST(a_successful_tap_replay_still_emits_the_matched_pair) {
+    // The unsaturated path, so the fix above cannot have changed it.
+    Fixture f;
+    f.press(H, 0);
+    f.release(H, 20);
+    MTK_CHECK_EQ(f.last.size(), std::size_t{2});
+    MTK_CHECK(f.last[0].kind == Decision::Kind::Forward);
+    MTK_CHECK(f.last[0].state == KeyState::Down);
+    MTK_CHECK(f.last[1].kind == Decision::Kind::Forward);
+    MTK_CHECK(f.last[1].state == KeyState::Up);
+}
+
 MTK_TEST(the_decision_buffer_holds_a_full_worst_case_unwind) {
     // The capacity is derived from this case, so assert the derivation.
     const auto keys = syntheticKeys("Unwind", kMaxHeld);
@@ -1160,7 +1202,7 @@ MTK_TEST(a_reload_resolves_multiple_pending_keys_in_press_order) {
 }
 
 MTK_TEST(a_reload_releases_actions_in_press_order) {
-    // SPEC 6.3.1 applies here too: multi-key decisions are emitted in press
+    // SPEC 6.3.3 applies here too: multi-key decisions are emitted in press
     // order, not in whatever order the held list happens to be walked.
     Fixture f;
     f.press(CAPS, 0);
