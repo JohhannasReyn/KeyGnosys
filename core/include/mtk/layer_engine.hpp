@@ -3,7 +3,7 @@
 // This class is deliberately PURE. It takes events and a clock and returns
 // decisions; it touches no OS API, opens no device, and starts no thread. That
 // is what makes the concurrency-sensitive logic inherited from the original
-// prototype testable at all -- see docs/SPEC.md section 12.
+// prototype testable at all -- see docs/SPEC.md section 13.
 //
 // It is also where principle P7 lives: every forwarded key press is tracked so
 // its release is guaranteed to be forwarded too, whatever the mode has become

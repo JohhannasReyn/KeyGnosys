@@ -21,11 +21,12 @@ Requirement keywords **MUST**, **SHOULD**, **MAY** are used in the RFC 2119 sens
 7. [Action catalog](#7-action-catalog)
 8. [Platform backends](#8-platform-backends)
 9. [Overlay UI](#9-overlay-ui)
-10. [Diagnostics and failure behaviour](#10-diagnostics-and-failure-behaviour)
-11. [Security and permissions](#11-security-and-permissions)
-12. [Testing strategy](#12-testing-strategy)
-13. [Milestones](#13-milestones)
-14. [Open questions](#14-open-questions)
+10. [Layout editor](#10-layout-editor)
+11. [Diagnostics and failure behaviour](#11-diagnostics-and-failure-behaviour)
+12. [Security and permissions](#12-security-and-permissions)
+13. [Testing strategy](#13-testing-strategy)
+14. [Milestones](#14-milestones)
+15. [Resolved design decisions](#15-resolved-design-decisions)
 
 ---
 
@@ -41,6 +42,8 @@ Requirement keywords **MUST**, **SHOULD**, **MAY** are used in the RFC 2119 sens
 | **Profile** | An app-shortcut document, matched against the focused window. |
 | **Unit (`u`)** | Layout geometry unit. `1u` is the width of one standard alphanumeric key. |
 | **Suppression** | The core consuming a physical key event so the OS never sees it. |
+| **Logical key** | One key as the user experiences it: one identity, one label, one highlight, one hit-test target. Carries a stable `id` and a physical key `code`. |
+| **Segment** | One axis-aligned rectangle of a logical key's drawn shape. Most keys have one; an ISO Enter has two. Segments have no identity of their own outside the editor. |
 
 ---
 
@@ -139,30 +142,93 @@ version it does not recognise, with a diagnostic naming the file.
 ### 4.1 Layout
 
 Describes physical key geometry. Geometry is expressed in **units** from the
-top-left corner. All keys are axis-aligned rectangles in v1 (see §14).
+top-left corner, never in pixels — the renderer scales units to pixels, so one
+layout serves every display scale and every zoom level.
+
+A layout is a list of **logical keys**. Each logical key owns its identity, its
+physical key code, its label and its style, and it is drawn as **one or more
+rectangular segments**. Most keys have exactly one segment. An ISO Enter has two.
+
+#### 4.1.1 Why segments rather than paths
+
+The alternative was an arbitrary SVG path or polygon per key. Segments were
+chosen because:
+
+- they cover every shape the supported layouts actually need — in practice that
+  is the ISO Enter and nothing else;
+- they are directly editable with drag handles, whereas a path requires a node
+  editor, which is a substantially larger piece of UI for one key shape;
+- hit-testing, snapping, alignment and overlap detection are all trivial on
+  rectangles and all fiddly on paths;
+- a rectangle list survives a round-trip through hand-edited JSON in a way a
+  path string does not.
+
+Arbitrary paths are **out of scope**. If a future layout genuinely needs one, the
+`schema` version field exists to introduce it without breaking anything.
+
+#### 4.1.2 Document
 
 ```jsonc
 {
-  "schema": "mousetrapkeys/layout/1",
-  "id": "us-ansi-104",
-  "name": "US Full-Size (ANSI 104)",
-  "description": "Standard US full-size keyboard.",
-  "size": { "w": 22.5, "h": 6.5 },     // total extent in units
+  "schema": "mousetrapkeys/layout/2",
+  "id": "us-iso-105",
+  "name": "US-International Full-Size (ISO 105)",
+  "description": "Full-size ISO variant: tall L-shaped Enter, short left Shift.",
+
+  "metadata": {
+    "author": "MouseTrapKeys",
+    "source_template": null,        // id of the layout this was duplicated from
+    "model": "Generic ISO full-size",
+    "revision": 1                   // bumped by the editor on every save
+  },
+
+  "size": { "w": 22.5, "h": 6.25 }, // total extent in units
+
   "keys": [
     {
-      "code": "Escape",                 // §2.1 vocabulary
-      "x": 0, "y": 0,                   // top-left, in units
-      "w": 1, "h": 1,                   // defaults 1, 1
+      "id": "escape",               // stable, unique within the layout
+      "code": "Escape",             // physical key identifier, §2.1 vocabulary
       "legend": {
-        "base": "Esc",                  // required
-        "shift": null,                  // optional; falls back to base
-        "sub": null                     // optional small corner text
+        "base": "Esc",              // required
+        "shift": null,              // optional; falls back to base
+        "sub": null                 // optional small corner text
       },
-      "role": "system"                  // see below; default "normal"
+      "role": "system",             // see below; default "normal"
+      "style": null,                // optional per-key overrides, §4.1.4
+      "segments": [
+        { "id": "s0", "x": 0, "y": 0, "w": 1, "h": 1 }
+      ]
+    },
+    {
+      "id": "enter",
+      "code": "Enter",
+      "legend": { "base": "Enter" },
+      "role": "system",
+      "segments": [
+        { "id": "s0", "x": 13.5,  "y": 2.25, "w": 1.5,  "h": 1 },
+        { "id": "s1", "x": 13.75, "y": 3.25, "w": 1.25, "h": 1 }
+      ]
     }
   ]
 }
 ```
+
+That two-segment Enter is the real ISO shape: the upper part reaches `0.25u`
+further left than the lower part, because the row above it holds one fewer key.
+
+**Identity fields.**
+
+| Field | Scope | Purpose |
+|-------|-------|---------|
+| `id` (layout) | Global | What settings and the shadowing rule (§3.2) refer to |
+| `id` (key) | Unique within a layout | Lets the editor track a key across moves, resizes and relabels, and lets a future per-key override refer to one |
+| `id` (segment) | Unique within a key | Lets the editor address one rectangle of a multi-segment key |
+| `code` | — | The physical key. Independent of `id`, `legend` and geometry: renaming a label or moving a key never changes which physical key it represents |
+
+Key and segment ids **MUST** match `^[A-Za-z0-9][A-Za-z0-9_-]*$`. When a document
+omits them, the loader **MUST** synthesise stable ones (`k0`, `k1`, … and
+`s0`, `s1`, …) by index, so hand-written files stay easy to author and the editor
+still has something to hold on to.
 
 **`role`** informs rendering and hit-testing, not behaviour:
 
@@ -175,15 +241,112 @@ top-left corner. All keys are axis-aligned rectangles in v1 (see §14).
 | `numpad` | Numpad cluster | Grouped, may be hidden by a setting |
 | `toggle` | CapsLock, NumLock, ScrollLock | Renders an LED dot |
 
-**Validation.** A layout is rejected if: `schema` major is unknown; `id` is
-missing or not `^[a-z0-9][a-z0-9-]*$`; `keys` is empty; any key lacks `code` or
-`legend.base`; or two keys with the same `code` overlap geometrically. Duplicate
-`code` values are otherwise **permitted** — `ShiftLeft` and `ShiftRight` are
-distinct codes, but a layout may legitimately draw e.g. two `Fn` keys.
+#### 4.1.3 The one-key rule
 
-**Adding a layout** is: write the file, drop it in `layouts/`, restart or wait for
-the watcher. No code change. This is principle P1 and is a hard requirement — any
-change that makes a new layout require a code edit is a spec violation.
+A logical key's segments are a **drawing detail, not a structural one**. Every
+consumer treats the key as a single thing:
+
+- **Rendering** — one fill, one border, one label. The border follows the outline
+  of the union of the segments; interior edges where segments meet are not drawn.
+- **Highlighting** — a key press lights every segment at once, and the fade
+  animation runs once for the key, not once per segment.
+- **Hit-testing** — a point inside *any* segment hits the key. The editor selects
+  the whole key.
+- **Moving** — dragging a key in the editor translates all of its segments
+  together, preserving their relative offsets.
+- **Legend** — drawn once, centred on the **largest** segment. Centring on the
+  bounding box of an L-shape puts the text in the notch, where it can fall
+  outside the key entirely.
+
+Only inside the editor's **segment-edit mode** (§10.5) may segments be resized or
+repositioned individually.
+
+#### 4.1.4 Style overrides
+
+`style` is an optional object on a logical key, overriding theme tokens for that
+key alone. All fields optional; anything absent falls through to the theme.
+
+```jsonc
+"style": {
+  "face": "#2a2f3aF2",     // #RRGGBB or #RRGGBBAA
+  "text": "#e6e9ef",
+  "border": "#3a4150",
+  "accent": "#ff7043"      // this key's feedback colour
+}
+```
+
+Style overrides are geometry- and label-independent, and they survive relabelling
+and moving. They exist so a user can mark up their own board — tinting the keys
+they are still learning, say — without forking a whole theme.
+
+#### 4.1.5 Validation
+
+Failures are graded, because a layout is a document a human edits by hand and one
+mistake must never blank the whole keyboard (principle P6).
+
+**Document rejected** — the layout does not load at all:
+
+| Condition |
+|-----------|
+| `schema` major version is unrecognised |
+| `id` missing or not matching `^[a-z0-9][a-z0-9-]*$` |
+| `keys` missing, not a list, or empty |
+| `keys` is not a list of objects |
+
+**Key dropped, document still loads** — diagnostic `layout.key_invalid`:
+
+| Condition |
+|-----------|
+| Missing `code` or `legend.base` |
+| `segments` missing or empty |
+| Any segment dimension non-positive, non-numeric, or non-finite |
+| Duplicate key `id` within the layout (the later one is dropped) |
+
+**Warning, key still loads** — the layout renders, and the editor surfaces these
+before allowing a save:
+
+| Code | Condition |
+|------|-----------|
+| `layout.duplicate_code` | Two logical keys claim the same `code`. Almost always a mistake — both would light up together on one keypress — but not structurally invalid, so it warns rather than drops. |
+| `layout.unknown_code` | `code` is not in the §2.1 vocabulary. The key renders but can never highlight, because no backend will ever emit that code. |
+| `layout.overlap` | Two **different** logical keys overlap geometrically. |
+| `layout.out_of_bounds` | A segment extends beyond the declared `size`. |
+
+**Overlap is a warning, never an automatic correction.** The editor reports it
+and highlights the offending pair; it does not nudge, resize, or reject the
+user's work. Some overlap may be deliberate — a board with a raised key drawn
+over its neighbour — and silently rewriting someone's layout is worse than
+letting them ship an odd one.
+
+**Segments of the same logical key are exempt.** They may touch, share edges, or
+overlap outright without producing `layout.overlap`. Sharing an edge is the
+normal case: that is how an L-shape is assembled.
+
+#### 4.1.6 Adding a layout
+
+Three supported routes, all producing the same document:
+
+1. **The editor** (§10) — duplicate a bundled template, drag it into shape, save.
+   This is the route ordinary users take.
+2. **Drop in a file** — write JSON, put it in `layouts/`, restart or wait for the
+   watcher.
+3. **Generate it** — `tools/gen_layouts.py` for boards that are more easily
+   described in code than placed by hand.
+
+No route involves a code change. This is principle P1 and is a hard requirement:
+any change that makes a new layout require a code edit is a spec violation.
+
+#### 4.1.7 Schema 1 compatibility
+
+Schema 1 described flat keys with `x`/`y`/`w`/`h` directly on the key and no
+identity fields. The loader **MUST** still accept it, upgrading in memory:
+
+- each key becomes a logical key with a single segment carrying its geometry;
+- `id` fields are synthesised by index;
+- `metadata` defaults to empty.
+
+Schema 1 documents are never rewritten in place. The editor saves as schema 2,
+and offers to upgrade a schema 1 document on first edit.
 
 ### 4.2 Bindings
 
@@ -622,12 +785,28 @@ device. This is the prototype's proven approach.
 
 - Device selection: auto-detect nodes advertising `EV_KEY` with `KEY_A` and
   `KEY_Z`, preferring `/dev/input/by-path/*-event-kbd`. Overridable by config and
-  by CLI flag. Multiple keyboards **SHOULD** all be grabbed.
+  by CLI flag.
 - The virtual device **MUST** advertise every `EV_KEY` code the real device has,
   plus `EV_REL` `REL_X`/`REL_Y`/`REL_WHEEL`/`REL_HWHEEL` and the mouse buttons.
 - Requires membership in the `input` group and write access to `/dev/uinput`. A
   shipped udev rule grants this without running as root.
 - Hot-plug: watch for device add/remove via udev and re-grab.
+
+**Multiple keyboards.** All detected keyboard devices **MUST** be grabbed, and
+events from every one of them map onto the single layout the user has selected,
+by physical key code. A laptop's built-in keyboard and an external board both
+drive the same overlay.
+
+The core **MUST NOT** switch layouts based on which device an event came from.
+That is a deliberate exclusion, not an oversight: the overlay's job is to be a
+stable map, and a keyboard that redraws itself when the user's hands move between
+two boards is worse than one that is occasionally slightly wrong about key
+shapes. A key present on one board and absent from the drawn layout simply does
+not light up; it still functions normally.
+
+The architecture keeps the door open — `InputBackend` reports a device id
+alongside each event, and nothing in the engine assumes a single source — but
+per-device layout selection is out of scope for v1.
 
 ### 8.2 Windows input — low-level hook
 
@@ -689,6 +868,31 @@ layouts render it for visual fidelity; the core **MUST NOT** promise to bind or
 report it, and the UI **SHOULD** show it as permanently unbindable rather than
 letting the user assign an action that will never fire.
 
+### 8.5 Linux display environment
+
+**X11 is the supported Linux display environment for v1.** This is a statement of
+scope, not a temporary gap to be quietly worked around.
+
+Wayland forbids, by design, exactly the things this overlay is built on: an
+application cannot make its own window click-through, cannot reliably identify
+the focused window, cannot warp the pointer, and cannot place itself above other
+surfaces without a compositor-specific protocol. `wlr-layer-shell` covers
+wlroots compositors but not GNOME; portals cover some of the window information
+but not the input side.
+
+Consequently:
+
+- The overlay **MAY** run under Wayland, and **MUST** detect it and report which
+  features are unavailable (`clickthrough.unavailable_reason()` already does this
+  for the click-through toggle specifically).
+- The core's input path is unaffected — evdev works regardless of display server,
+  so the cursor layer itself can function; it is the *overlay* that is limited.
+- No compositor-specific code ships. A feature that works on KDE and silently
+  fails on GNOME is worse than one that is documented as unavailable.
+
+Revisit when a single mechanism covers the major compositors. The
+`WindowBackend` seam exists for that implementation; see §15.7.
+
 ---
 
 ## 9. Overlay UI
@@ -733,12 +937,37 @@ widgets. Rationale: repaint cost on every keystroke, uniform theming, and
 sub-pixel geometry from the units model.
 
 - Layout units → pixels via `scale × base_key_px` (base 44 px at scale 1.0).
-- Each key: rounded rect, face + border from theme tokens, centred legend,
-  optional `sub` text in the top-right corner, optional LED dot for `toggle` role.
+- Each key: rounded outline, face + border from theme tokens (or the key's own
+  `style` overrides), one centred legend, optional `sub` text in the top-right
+  corner, optional LED dot for `toggle` role.
 - Painted in one pass with clipping to the damaged region; a key press repaints
-  only that key's rect plus its glow margin.
+  only that key's bounding rect plus its glow margin.
 - Hit-testing exists only for the non-click-through mode (used by the binding
-  editor, where clicking a key assigns it).
+  editor and the layout editor, where clicking a key selects it).
+
+**Segmented keys.** A logical key is drawn as the **union** of its segments, not
+as a pile of independent rectangles:
+
+1. Build one path per key by uniting its segment rectangles.
+2. Round only the **exterior** corners of that union. Interior corners — where
+   two segments meet — stay square, because a real ISO Enter has a sharp inner
+   corner and rounding it produces a visible pinch.
+3. Fill and stroke the united path once. Stroking each segment separately would
+   draw a seam across the middle of the key.
+4. Draw the legend once, centred on the **largest** segment by area. The centroid
+   of an L-shape's bounding box lands in the notch, outside the key.
+5. Highlight, fade and hit-test against the whole union (§4.1.3).
+
+A single-segment key is the degenerate case of exactly this path and **MUST**
+render identically to a plain rounded rectangle — the common case must not pay
+for the rare one, visually or in code.
+
+Rounding an arbitrary rectilinear union is more work than it sounds. The
+supported case is small and fixed — a key of two axis-aligned segments sharing a
+full or partial edge — and the renderer **MAY** restrict itself to that,
+falling back to per-segment rounded rectangles for any union it cannot trace,
+with a `layout.complex_key` diagnostic. Falling back to something visibly
+imperfect is acceptable; silently mis-drawing the key is not.
 
 ### 9.4 Legend resolution
 
@@ -779,14 +1008,136 @@ the product.
 
 ---
 
-## 10. Diagnostics and failure behaviour
+## 10. Layout editor
+
+Editing JSON by hand is a fine way to author a layout and a poor way to *fix*
+one. The bundled laptop layouts are representative templates rather than
+model-exact reproductions (§15.5), so correcting a board to match the machine in
+front of you is an ordinary user task, not an advanced one. It needs a visual
+tool.
+
+**JSON stays the persistence and interchange format.** It does not stop being the
+source of truth, and hand-editing remains fully supported. It simply stops being
+the only way in.
+
+### 10.1 Scope
+
+The editor is a separate window in the Python application, opened from the
+control bar. It edits **layout documents only** — not bindings, themes or
+profiles, which have their own editors (§14, M5).
+
+### 10.2 Getting a layout to edit
+
+The bundled layouts are read-only. Every editing session starts by producing a
+user-owned copy:
+
+| Action | Result |
+|--------|--------|
+| **New from template** | Pick a bundled layout, name the copy. `metadata.source_template` records the original id. |
+| **Duplicate** | Copy any layout, bundled or user, under a new id. |
+| **Edit** | Open a user layout directly. |
+| **Reset to template** | Re-copy from `metadata.source_template`, discarding every change. Requires confirmation, and is refused when no source template is recorded. |
+
+Attempting to edit a bundled layout **MUST** offer to duplicate it rather than
+either silently forking or flatly refusing. Saving a copy whose `id` equals a
+bundled one is permitted and is how the shadowing rule (§3.2) is meant to be
+used — the UI **MUST** say plainly that the copy will replace the bundled layout
+everywhere.
+
+### 10.3 Canvas operations
+
+| Operation | Behaviour |
+|-----------|-----------|
+| **Select** | Click a key. Shift-click or rubber-band to extend. Selection is by logical key, never by segment (§4.1.3). |
+| **Move** | Drag, or nudge with arrow keys. All segments of the key translate together. Multi-selection moves as a rigid group. |
+| **Resize** | Eight handles on the selection's bounding box. A single-segment key resizes directly. A multi-segment key scales its segments proportionally, unless segment-edit mode is active. |
+| **Add** | From a key palette (§10.4), or duplicate the selection. New keys land offset from the original and are selected. |
+| **Delete** | Removes the selected keys. |
+| **Assign code** | Change a key's physical `code` from a searchable list of the §2.1 vocabulary, or by pressing the physical key. |
+| **Relabel** | Edit `legend.base`, `legend.shift` and `legend.sub` inline. |
+| **Style** | Set or clear the per-key `style` overrides of §4.1.4. |
+| **Align** | Left, right, top, bottom, centre horizontally, centre vertically, across the selection. |
+| **Distribute** | Even horizontal or vertical spacing across three or more keys. |
+| **Snap** | Configurable grid, default `0.25u`, matching the granularity real keyboards actually use. Toggleable, and suspended while a modifier is held. |
+| **Undo/redo** | Unlimited within a session, over every operation above. |
+
+The canvas renders through the **same** `KeyboardView` the overlay uses, in an
+editing mode. Two renderers would drift, and the user would end up editing
+against a picture that does not match what the overlay draws.
+
+### 10.4 Key palette
+
+A panel of ready-made keys to drag onto the canvas, grouped by role: alphanumeric,
+modifiers, function row, navigation, numpad, system. Each carries a sensible
+default `code`, `legend`, `role` and size — dragging a `ShiftLeft` from the
+palette produces a `2.25u` key labelled "Shift", not a blank `1u` square.
+
+### 10.5 Segment-edit mode
+
+Entered on a selected key. While active:
+
+- each segment shows its own resize handles and can be moved independently;
+- segments can be added to and removed from the key, subject to a minimum of one;
+- the rest of the canvas dims and is not selectable, so it is unambiguous that
+  edits apply within one key;
+- overlap between this key's own segments is **not** flagged (§4.1.5).
+
+This is the only place segments are individually addressable. Everywhere else,
+including plain resize, they move and scale as one.
+
+### 10.6 Validation surface
+
+The editor runs the §4.1.5 rules continuously and shows results in a problems
+panel. Clicking a problem selects the key it concerns.
+
+- **Errors** block saving: duplicate key `id`, non-positive segment dimensions, a
+  key with no segments.
+- **Warnings** do not block saving, but **MUST** be acknowledged before the first
+  save that introduces them: `layout.duplicate_code`, `layout.unknown_code`,
+  `layout.overlap`, `layout.out_of_bounds`.
+
+Overlapping keys are drawn with a hatched marker on the overlapping region so the
+problem is visible on the canvas and not only in a list. The editor **MUST NOT**
+resolve an overlap by moving anything (§4.1.5).
+
+### 10.7 Persistence, import and export
+
+- **Save** writes to the user layouts directory, bumps `metadata.revision`, and
+  emits `config_changed` so a running overlay picks it up without a restart.
+- **Export** writes the document to a file the user chooses — the same JSON, so
+  an exported layout is directly droppable into anyone else's `layouts/`.
+- **Import** reads such a file, validates it, and reports problems before
+  accepting. An import whose `id` collides prompts to rename or replace.
+- **Autosave** keeps an in-progress draft so a crash does not lose an hour of
+  nudging keys. Drafts are separate from saved layouts and are offered for
+  recovery on next launch.
+
+### 10.8 Compatibility requirement
+
+The editor introduces **no schema of its own**. It reads and writes exactly the
+documents of §4.1, the same ones the renderer consumes and the bundled layouts
+use. Anything the editor can express, a hand-written file can express, and the
+reverse. This is why segments, stable ids and metadata are specified now, in v1,
+even though the editor itself ships later (§14) — so its arrival is a feature
+addition and not a breaking format migration.
+
+---
+
+## 11. Diagnostics and failure behaviour
 
 Every diagnostic carries a stable machine-readable `code`.
 
 | Code | Level | Meaning |
 |------|-------|---------|
-| `layout.invalid` | warn | Layout file failed validation; skipped |
+| `layout.invalid` | warn | Layout document failed validation; skipped entirely |
 | `layout.duplicate_id` | warn | Two documents claim one id; later wins |
+| `layout.key_invalid` | warn | One logical key was dropped; the layout still loaded |
+| `layout.duplicate_code` | warn | Two logical keys claim the same physical `code` |
+| `layout.unknown_code` | warn | A key's `code` is outside the §2.1 vocabulary; it can never highlight |
+| `layout.overlap` | warn | Two different logical keys overlap geometrically |
+| `layout.out_of_bounds` | warn | A segment extends past the declared `size` |
+| `layout.complex_key` | info | A segment union the renderer could not trace; drawn per-segment |
+| `layout.upgraded` | info | A schema 1 document was upgraded in memory |
 | `binding.unknown_action` | warn | Binding skipped |
 | `binding.unknown_key` | warn | Binding references a code absent from the active layout |
 | `profile.invalid` | warn | Profile skipped |
@@ -804,7 +1155,7 @@ something that merely looks similar.
 
 ---
 
-## 11. Security and permissions
+## 12. Security and permissions
 
 This software is, structurally, a keylogger with a GUI. That obliges some
 explicit commitments.
@@ -828,12 +1179,15 @@ explicit commitments.
 
 ---
 
-## 12. Testing strategy
+## 13. Testing strategy
 
 | Layer | Approach |
 |-------|----------|
 | Key vocabulary | Round-trip every code through each backend's table; assert bijection and no unmapped entries |
-| Layout registry | Validate every bundled layout against the schema; assert no geometric overlaps; assert every bound key exists in every bundled layout |
+| Layout registry | Validate every bundled layout against the schema; assert every bound key exists in every bundled layout; assert key and segment ids are unique and stable across a save/load round-trip |
+| Layout geometry | Assert no two **different** logical keys overlap in any bundled layout, and that segments of the *same* key are exempt from that rule; assert the ISO Enter is two segments and the ANSI Enter is one; assert every segment lies within the declared `size` |
+| Schema upgrade | Load a schema 1 document and assert it produces the same logical keys as its schema 2 equivalent, with synthesised ids |
+| Layout editor | Property test: every canvas operation (move, resize, align, distribute, snap, add, delete, segment edit) leaves a document that still validates. Round-trip test: save → load → save is byte-identical. Undo/redo returns to the exact prior document |
 | Layer engine | **Pure unit tests over a synthetic event trace.** The engine takes events and a clock and returns decisions — no OS involved. This is where the grace window and P7 are proven. |
 | Grace window | Table-driven: for each of the three resolutions in §6.3, assert the exact output event sequence |
 | P7 invariant | Property test: for any random event sequence with random mode changes, assert every forwarded press has a matching forwarded release |
@@ -848,41 +1202,156 @@ logic inherited from the prototype can be tested at all.
 
 ---
 
-## 13. Milestones
+## 14. Milestones
 
 | # | Milestone | Contents |
 |---|-----------|----------|
-| **M0** | Foundation | Docs, repo layout, schemas, the three layouts, default bindings, themes, IPC protocol definition |
-| **M1** | Overlay on the mock backend | Renders any layout, all four legend layers, feedback, themes, click-through, pin, opacity, persistence |
+| **M0** | Foundation | Docs, repo layout, schemas, bundled layouts, default bindings, themes, IPC protocol definition |
+| **M1** | Overlay on the mock backend | Renders any layout **including segmented keys**, all four legend layers, feedback, themes, click-through, pin, opacity, persistence |
 | **M2** | Core skeleton + IPC | Engine, motion integrator, action dispatcher, IPC server, unit tests. No OS backends — driven by a synthetic input backend |
 | **M3** | Windows backend | Hook, `SendInput`, Win32 windows/monitors. End-to-end on Windows |
-| **M4** | Linux/X11 backend | evdev, uinput, EWMH/XRandR, udev rule. End-to-end on Linux |
+| **M4** | Linux/X11 backend | evdev, uinput, EWMH/XRandR, udev rule, all-keyboard grab. End-to-end on Linux |
 | **M5** | Configuration UI | Settings dialog, visual binding editor, profile editor |
-| **M6** | Packaging | Windows installer, Linux packages, first release |
+| **M6** | **Visual layout editor** | Canvas, key palette, move/resize/align/distribute/snap, segment-edit mode, validation panel, import/export, reset-to-template |
+| **M7** | Packaging | Windows installer, Linux packages, first release |
 
-M0 and M1 are the scope of the initial commit.
+**M1 is revised, not extended.** Segmented keys land in the schema, the loader,
+the validator, the renderer and the bundled layouts *now*. What is deferred to
+M6 is only the editing UI.
+
+That split is deliberate. The format is the thing that is expensive to change
+later — every layout anyone has authored has to be migrated — while an editor is
+additive and can arrive whenever. Shipping the format without the editor costs
+nothing; shipping the editor without the format would mean a breaking migration
+the first time someone drew an ISO Enter.
+
+**The editor is placed after the platform backends** because a layout editor is
+most valuable once the layer it configures actually drives the mouse, and because
+it shares its canvas, selection model and hit-testing with the M5 binding editor.
+Building the binding editor first means the layout editor inherits working
+infrastructure rather than inventing it.
 
 ---
 
-## 14. Open questions
+## 15. Resolved design decisions
 
-1. **Non-rectangular keys.** ISO Enter and the ISO left-Shift are L-shaped. v1
-   draws rectangles. Options: approximate (ship now, looks slightly wrong on ISO
-   boards), or add an optional `path` field to the key schema (correct, more
-   renderer work). *Proposed: approximate in v1, add `path` in layout schema v2 —
-   the `schema` version field exists precisely to make this a non-breaking change.*
-2. **Layout naming — "104" vs "105".** "105-key" conventionally denotes the ISO
-   variant; the standard US full-size board is ANSI 104. The repo ships
-   `us-ansi-104` as the default and `us-iso-105` alongside it, so both readings of
-   the original request are satisfied and the difference is visible rather than
-   argued about.
-3. **Laptop layout fidelity.** ThinkPad and Asus keyboards vary by model and year.
-   The bundled files are modelled on current mainstream models and are explicitly
-   a starting point — correcting them is a JSON edit, which is the point of P1.
-4. **Multiple keyboards on Linux.** Grabbing all keyboards is specified, but an
-   external keyboard plus a laptop keyboard with different physical layouts means
-   the overlay can only draw one of them. *Proposed: draw the configured layout,
-   accept input from all devices.*
-5. **Wayland.** Deferred (Outline §8). Revisit when `wlr-layer-shell` or an
-   equivalent portal is available uniformly enough to implement without
-   per-compositor branches.
+These were open questions during design. They are settled. Each is recorded here
+with its rationale and a pointer to the section that implements it, so a later
+reader can tell a decision from an accident.
+
+### 15.1 Non-rectangular keys — segmented rectangles
+
+**Decided.** A logical key is drawn as one or more axis-aligned rectangular
+segments sharing a single identity. ISO Enter is two segments. Arbitrary SVG
+paths and polygons are **not** supported.
+
+Approximating an ISO Enter as one rectangle was rejected: it is wrong on every
+ISO board, and the format would have needed a breaking change to fix it later.
+Arbitrary paths were rejected as disproportionate — they solve one key shape at
+the cost of a node editor, path hit-testing, and path overlap detection.
+
+Segments render, highlight, move and hit-test as one key (§4.1.3). They are
+individually addressable only inside the editor's segment-edit mode (§10.5).
+
+*Correction from an earlier draft: the ISO left Shift is **not** L-shaped. It is
+a short rectangle with a separate `IntlBackslash` key beside it, and the two are
+modelled as two independent logical keys.*
+
+→ §4.1, §9.3, §10.5
+
+### 15.2 Visual layout editor — specified, deferred to M6
+
+**Decided.** Users are not required to hand-edit JSON. A visual editor with
+drag-to-move, handle resize, a key palette, multi-select, snap, align,
+distribute, segment editing, rename, reset-to-template, and import/export is a
+specified product feature.
+
+JSON remains the persistence and interchange format — hand-editing stays fully
+supported — but it becomes an implementation detail for ordinary users rather
+than the only way in.
+
+The **schema and renderer support ship in M1**; the editing UI ships in **M6**.
+The reasoning is in §14: formats are expensive to change after people have
+authored against them, editors are not.
+
+→ §10, §14
+
+### 15.3 One schema for everything
+
+**Decided.** Bundled layouts, user layouts, the renderer and the editor all use
+the same document format. The editor introduces no schema of its own and can
+express nothing a hand-written file cannot.
+
+The format carries stable layout, key and segment ids; unit-based rather than
+pixel-based geometry; physical key codes independent of labels and geometry;
+optional labels and per-key style overrides; metadata naming the source template
+and author; and forward-compatible `schema` versioning.
+
+Validation is graded rather than all-or-nothing (§4.1.5). Overlapping *different*
+logical keys produce a warning that the editor surfaces and the user must
+acknowledge — never a silent failure and never an automatic correction. Segments
+of the *same* key are exempt, since sharing an edge is how an L-shape is built.
+
+→ §4.1.2, §4.1.5, §10.8
+
+### 15.4 Layout naming — conventional key counts
+
+**Decided.** `us-ansi-104` is the standard US ANSI full-size layout and the
+default. `us-iso-105` is the ISO full-size variant. Both are bundled. "104" is
+never used as a generic name covering both.
+
+"105-key" conventionally denotes the ISO board while the standard US full-size
+board is ANSI 104, so collapsing them under one name would be wrong for one set
+of users whichever name was chosen.
+
+→ §4.1, `data/layouts/`
+
+### 15.5 Laptop layout fidelity — templates, not guarantees
+
+**Decided.** The bundled ThinkPad and Asus layouts are **representative starting
+templates** based on current mainstream models. They are not claimed to be
+model-exact, and they should not be described as though they were.
+
+Users duplicate the closest template and adjust it visually to match their own
+machine (§10.2). Every difference between boards is expressed in **layout data** —
+never in renderer-specific code, and never in a per-model branch. `metadata`
+records the source template and any model information.
+
+This is what makes the approximation acceptable rather than sloppy: being
+slightly wrong is fine when correcting it is a two-minute drag-and-drop.
+
+→ §4.1.2 `metadata`, §10.2
+
+### 15.6 Multiple keyboards on Linux — all devices, one layout
+
+**Decided.** All detected keyboard devices are grabbed. Events from every one of
+them map onto the single layout the user has selected, matched by physical key
+code. Layouts do **not** switch based on which device an event came from.
+
+A map that redraws itself when the user's hands move between a laptop board and
+an external one is worse than one that is occasionally slightly wrong about key
+shapes — the overlay's value is in being stable enough to memorise.
+
+The architecture does not preclude per-device layout selection later:
+`InputBackend` reports a device id with each event and the engine assumes no
+single source. Implementing it is out of scope for v1.
+
+→ §8.1
+
+### 15.7 Wayland — deferred, X11 is the supported Linux target
+
+**Decided.** **X11 is the supported Linux display environment for v1.** Native
+Wayland support is deferred, not abandoned.
+
+Wayland forbids, by design, an application making its own window click-through,
+identifying the focused window, or warping the pointer. There is no mechanism
+that covers GNOME, KDE and wlroots uniformly, and the alternative is
+compositor-specific implementations that multiply the Linux surface area and the
+testing burden.
+
+Revisit when `wlr-layer-shell`, a suitable desktop portal, or an equivalent can
+provide the required overlay behaviour without per-compositor branches. The
+`WindowBackend` seam exists for it. Until then the limitation is stated plainly
+in the UI and the README rather than partially emulated.
+
+→ §8.4, §9.2, README platform table
