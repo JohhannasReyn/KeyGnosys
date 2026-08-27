@@ -21,7 +21,7 @@ Requirement keywords **MUST**, **SHOULD**, **MAY** are used in the RFC 2119 sens
 7. [Action catalog](#7-action-catalog)
 8. [Platform backends](#8-platform-backends)
 9. [Overlay UI](#9-overlay-ui)
-10. [Layout editor](#10-layout-editor)
+10. [Editors](#10-editors)
 11. [Diagnostics and failure behaviour](#11-diagnostics-and-failure-behaviour)
 12. [Security and permissions](#12-security-and-permissions)
 13. [Testing strategy](#13-testing-strategy)
@@ -130,6 +130,85 @@ produces zero valid documents **MUST** keep the previous set and emit a diagnost
 
 Reloading bindings **MUST** first release every held key and every locked drag
 button (P7).
+
+### 3.4 Update and migration policy
+
+**An update adds capability. It never resets, discards, or silently rewrites
+anything the user has configured.** This is a guarantee, not an aspiration, and
+the rules below exist to make it structurally true rather than a matter of care
+at release time.
+
+#### 3.4.1 The installer never touches user configuration
+
+An update writes **only** to the bundled data directory and the program files. It
+**MUST NOT** write to, move, or delete anything under the user config root
+(§3.1) — not layouts, not bindings, not themes, not profiles, not `settings.json`.
+
+Uninstallation **MUST** leave the user config root in place by default, and
+**MUST** ask before removing it if it offers to at all. A curated layout is
+potentially hours of work.
+
+This is why the two roots are separate directories rather than one directory with
+a naming convention. There is no code path in the installer that can reach user
+data, because it never looks there.
+
+#### 3.4.2 A user document always wins
+
+The shadowing rule (§3.2) does the rest. A user layout with the same `id` as a
+bundled one replaces it entirely and permanently. If a later release improves the
+bundled `thinkpad-compact`, a user who forked it keeps their own version and is
+unaffected.
+
+The consequence is deliberate and cuts both ways: **a fork stops receiving
+upstream improvements.** That is the correct trade — it is the only way to
+guarantee the first half — but the UI **MUST** make it visible rather than
+letting a user wonder why a documented fix never arrived:
+
+- A user document whose `id` matches a bundled one **SHOULD** be marked as
+  overriding it, naming what it shadows.
+- When the bundled original changes in an update, the UI **SHOULD** offer a
+  side-by-side "the built-in version changed — review?" affordance. It **MUST
+  NOT** apply anything automatically.
+
+#### 3.4.3 Settings gain defaults, never lose values
+
+`settings.json` is deep-merged over the current defaults on load (§4.5):
+
+- A key **added** in a new release appears with its default. The user's file need
+  not mention it.
+- A key **removed** from the defaults but still present in the user's file is
+  **preserved verbatim** on rewrite, not stripped. Downgrading a release, or
+  a feature returning later, must not cost the value.
+- A key whose value is out of range is **clamped and reported**, never reset to
+  default silently.
+
+#### 3.4.4 Schema migrations are additive and in-memory
+
+Every document kind is versioned (§4). When a schema gains a major version:
+
+- The loader **MUST** continue to read every prior major version it has ever
+  shipped, upgrading **in memory** — as layout schema 1 is upgraded to 2 in
+  §4.1.7 and bindings schema 1 to 2 in §4.2.
+- Upgrading **MUST NOT** rewrite the file on disk. A document is rewritten only
+  when the user explicitly saves it from an editor.
+- New fields **MUST** have defaults that reproduce the old behaviour exactly. A
+  document written before a field existed must render and behave identically
+  after the field is introduced.
+- Dropping support for an old schema version is a breaking change and requires a
+  major release, a migration tool, and a release note. It is not something to do
+  quietly.
+
+#### 3.4.5 New actions reach existing users
+
+A command added to the action catalog (§7) in a later release **MUST** become
+visible to a user whose binding document predates it, without them re-forking
+anything.
+
+This is why the editor's unassigned list has a derived half (§10.2.3): commands
+are offered from the live catalog, not from a stored inventory. A document that
+stored the complete list of available commands would freeze the feature set at
+the moment it was written, and "updates only add features" would quietly become
+false for exactly the users who had customised the most.
 
 ---
 
@@ -354,9 +433,16 @@ Maps key codes to cursor-layer actions.
 
 ```jsonc
 {
-  "schema": "mousetrapkeys/bindings/1",
+  "schema": "mousetrapkeys/bindings/2",
   "id": "default",
   "name": "Default cursor layer",
+
+  "metadata": {
+    "author": "MouseTrapKeys",
+    "source_template": null,        // id this was duplicated from
+    "revision": 1
+  },
+
   "settings": {
     "pointer_base_speed": 2,        // px per tick at ramp floor
     "pointer_max_speed": 28,        // px per tick at ramp ceiling
@@ -373,7 +459,13 @@ Maps key codes to cursor-layer actions.
     "KeyL": { "action": "pointer.move",  "params": { "dir": "right" } },
     "Space":{ "action": "button.click",  "params": { "button": "left" },
               "legend": "Click" }
-  }
+  },
+
+  // Commands the user configured that currently sit on no key. See §10.2.3.
+  "unassigned": [
+    { "action": "window.move_to_monitor", "params": { "target": 2 },
+      "legend": "Send to left screen" }
+  ]
 }
 ```
 
@@ -384,6 +476,31 @@ Maps key codes to cursor-layer actions.
   action catalog's default legend.
 - Diagonal movement is **not** a binding. It emerges from two direction keys held
   simultaneously, as vectors sum in the motion integrator (§6.4).
+
+**Binding a command to more than one key is legal and expected.** The shipped
+defaults bind left-click to both `KeyD` and `Space`. Only the *key* side is
+exclusive: a key holds at most one command.
+
+**`unassigned`** holds commands the user has configured but that are currently
+bound to nowhere — the persistent half of the editor's unassigned list (§10.2.3).
+It exists so that a command displaced by reassignment keeps its `params` and its
+custom `legend` across a restart instead of silently reverting to a catalog
+default. It is validated exactly like a binding; entries that fail validation are
+dropped with a diagnostic.
+
+The list is **not** a complete inventory of unbound commands. Everything in the
+action catalog that is neither bound nor listed here is offered by the editor as
+an *available* command, derived at runtime. Storing the whole catalog in every
+document would mean a new action in a later release never appearing for existing
+users — the derived half is what keeps upgrades additive (§3.4).
+
+An entry that is also present in `bindings` is a contradiction; the loader
+**MUST** drop it from `unassigned`, keep the binding, and emit
+`binding.unassigned_conflict`. This can only arise from hand-editing.
+
+**Schema 1 compatibility.** Schema 1 had no `metadata` and no `unassigned`. Both
+default to empty on load. Schema 1 documents are never rewritten in place; the
+editor saves as schema 2.
 
 ### 4.3 Theme
 
@@ -1008,7 +1125,15 @@ the product.
 
 ---
 
-## 10. Layout editor
+## 10. Editors
+
+Two editors share one canvas, one selection model and one hit-testing
+implementation: the **layout editor** shapes the keyboard, the **binding editor**
+decides what its keys do. Both render through the same `KeyboardView` the overlay
+uses, in an editing mode -- two renderers would drift, and a user editing against
+a picture that does not match the overlay is being lied to.
+
+### 10.1 Layout editor
 
 Editing JSON by hand is a fine way to author a layout and a poor way to *fix*
 one. The bundled laptop layouts are representative templates rather than
@@ -1020,13 +1145,13 @@ tool.
 source of truth, and hand-editing remains fully supported. It simply stops being
 the only way in.
 
-### 10.1 Scope
+#### 10.1.1 Scope
 
 The editor is a separate window in the Python application, opened from the
 control bar. It edits **layout documents only** — not bindings, themes or
 profiles, which have their own editors (§14, M5).
 
-### 10.2 Getting a layout to edit
+#### 10.1.2 Getting a layout to edit
 
 The bundled layouts are read-only. Every editing session starts by producing a
 user-owned copy:
@@ -1044,7 +1169,7 @@ bundled one is permitted and is how the shadowing rule (§3.2) is meant to be
 used — the UI **MUST** say plainly that the copy will replace the bundled layout
 everywhere.
 
-### 10.3 Canvas operations
+#### 10.1.3 Canvas operations
 
 | Operation | Behaviour |
 |-----------|-----------|
@@ -1065,14 +1190,14 @@ The canvas renders through the **same** `KeyboardView` the overlay uses, in an
 editing mode. Two renderers would drift, and the user would end up editing
 against a picture that does not match what the overlay draws.
 
-### 10.4 Key palette
+#### 10.1.4 Key palette
 
 A panel of ready-made keys to drag onto the canvas, grouped by role: alphanumeric,
 modifiers, function row, navigation, numpad, system. Each carries a sensible
 default `code`, `legend`, `role` and size — dragging a `ShiftLeft` from the
 palette produces a `2.25u` key labelled "Shift", not a blank `1u` square.
 
-### 10.5 Segment-edit mode
+#### 10.1.5 Segment-edit mode
 
 Entered on a selected key. While active:
 
@@ -1085,7 +1210,7 @@ Entered on a selected key. While active:
 This is the only place segments are individually addressable. Everywhere else,
 including plain resize, they move and scale as one.
 
-### 10.6 Validation surface
+#### 10.1.6 Validation surface
 
 The editor runs the §4.1.5 rules continuously and shows results in a problems
 panel. Clicking a problem selects the key it concerns.
@@ -1100,7 +1225,7 @@ Overlapping keys are drawn with a hatched marker on the overlapping region so th
 problem is visible on the canvas and not only in a list. The editor **MUST NOT**
 resolve an overlap by moving anything (§4.1.5).
 
-### 10.7 Persistence, import and export
+#### 10.1.7 Persistence, import and export
 
 - **Save** writes to the user layouts directory, bumps `metadata.revision`, and
   emits `config_changed` so a running overlay picks it up without a restart.
@@ -1112,7 +1237,7 @@ resolve an overlap by moving anything (§4.1.5).
   nudging keys. Drafts are separate from saved layouts and are offered for
   recovery on next launch.
 
-### 10.8 Compatibility requirement
+#### 10.1.8 Compatibility requirement
 
 The editor introduces **no schema of its own**. It reads and writes exactly the
 documents of §4.1, the same ones the renderer consumes and the bundled layouts
@@ -1120,6 +1245,79 @@ use. Anything the editor can express, a hand-written file can express, and the
 reverse. This is why segments, stable ids and metadata are specified now, in v1,
 even though the editor itself ships later (§14) — so its arrival is a feature
 addition and not a breaking format migration.
+
+### 10.2 Binding editor
+
+Decides what each key does while the cursor layer is engaged. It edits binding
+documents (§4.2), and it renders on the same canvas as the layout editor: click a
+key on the drawn keyboard, choose a command, done.
+
+#### 10.2.1 A key holds one command; a command may sit on many keys
+
+These are not symmetric, and the asymmetry is what makes reassignment simple.
+
+- **A key holds at most one command.** There is nowhere to put a second.
+- **A command may be bound to several keys.** This is normal and useful — the
+  shipped defaults put left-click on both `KeyD` and `Space`, because the thumb
+  and the index finger are both good at it.
+
+#### 10.2.2 Reassignment is silent
+
+Assigning command **C** to key **K**:
+
+1. If **K** already held command **P**, **P** is removed from **K**. No prompt,
+   no warning, no confirmation dialog.
+2. If **P** is now bound to **no key at all**, it moves to the **unassigned
+   commands** list. If **P** is still bound elsewhere, nothing further happens.
+3. If **C** came from the unassigned list, it leaves that list.
+4. **C** is bound to **K**.
+
+**No warning is shown at any point.** A dialog asking "this key is already used,
+are you sure?" is noise: the user just picked a key and a command, and the
+meaning of that is unambiguous. The old command is not destroyed — it is one
+click away in the unassigned list — so there is nothing to protect the user
+against.
+
+This is a deliberate departure from the `layout.duplicate_code` warning of
+§4.1.5, and the two are not in tension. A duplicate *physical key code* in a
+layout is a mistake with no sensible reading — two keys claiming to be the same
+key. A reused *key assignment* has exactly one sensible reading, and the editor
+simply performs it.
+
+#### 10.2.3 The unassigned commands list
+
+A panel beside the keyboard holding every command that is currently bound to no
+key. It is a first-class part of the editor, not an undo buffer.
+
+It has two parts, presented as one list:
+
+| Source | Contents |
+|--------|----------|
+| **Displaced** | Commands the user had configured that reassignment pushed out. Persisted in the document's `unassigned` array (§4.2), so they survive a restart with their parameters and custom legends intact. |
+| **Available** | Every command in the action catalog (§7) not currently bound and not already listed above. Derived, never stored. This is what makes the list useful on first launch instead of empty. |
+
+Assigning from the list is drag-to-key or select-then-click-key. A displaced
+command **MUST** retain its `params` and its custom `legend` while it sits in the
+list — a user who wrote "Send to left screen" on a key does not want to retype it
+because they moved it.
+
+The list **MUST** distinguish the two sources visually, because they mean
+different things: one is *your* configuration waiting to be re-homed, the other
+is a menu of things you have not used yet.
+
+Clearing a key without replacing it (an explicit "unassign" action) moves its
+command to the displaced list by the same rules.
+
+#### 10.2.4 Other operations
+
+| Operation | Behaviour |
+|-----------|-----------|
+| **Edit parameters** | Change a bound command's `params` in place — which monitor `window.move_to_monitor` targets, which grid cell `warp.grid` jumps to |
+| **Custom legend** | Override the catalog's default label for this binding |
+| **Tuning** | Edit the binding set's `settings` block: pointer speed, ramp, precision factor, scroll speed |
+| **Duplicate set** | Fork a binding document under a new id, the same way layouts are forked (§10.1.2) |
+| **Reset** | Restore the whole set to its source template, with confirmation |
+| **Undo/redo** | Unlimited within a session, covering reassignment and displacement together — one undo puts both commands back where they were |
 
 ---
 
@@ -1139,6 +1337,7 @@ Every diagnostic carries a stable machine-readable `code`.
 | `layout.complex_key` | info | A segment union the renderer could not trace; drawn per-segment |
 | `layout.upgraded` | info | A schema 1 document was upgraded in memory |
 | `binding.unknown_action` | warn | Binding skipped |
+| `binding.unassigned_conflict` | warn | A command appears in both `bindings` and `unassigned`; the binding wins |
 | `binding.unknown_key` | warn | Binding references a code absent from the active layout |
 | `profile.invalid` | warn | Profile skipped |
 | `config.clamped` | info | A setting was outside its range |
@@ -1187,6 +1386,8 @@ explicit commitments.
 | Layout registry | Validate every bundled layout against the schema; assert every bound key exists in every bundled layout; assert key and segment ids are unique and stable across a save/load round-trip |
 | Layout geometry | Assert no two **different** logical keys overlap in any bundled layout, and that segments of the *same* key are exempt from that rule; assert the ISO Enter is two segments and the ANSI Enter is one; assert every segment lies within the declared `size` |
 | Schema upgrade | Load a schema 1 document and assert it produces the same logical keys as its schema 2 equivalent, with synthesised ids |
+| Binding editor | Table-driven reassignment: assigning over an occupied key displaces exactly one command, and it reaches `unassigned` only when its last key is taken. Assert a command bound to two keys survives one of them being reassigned. Assert `params` and custom `legend` survive a displace/restore round-trip |
+| Update policy | Load a settings file missing new keys and assert defaults appear; load one carrying removed keys and assert they survive a rewrite; assert loading a prior-schema document never writes to disk |
 | Layout editor | Property test: every canvas operation (move, resize, align, distribute, snap, add, delete, segment edit) leaves a document that still validates. Round-trip test: save → load → save is byte-identical. Undo/redo returns to the exact prior document |
 | Layer engine | **Pure unit tests over a synthetic event trace.** The engine takes events and a clock and returns decisions — no OS involved. This is where the grace window and P7 are proven. |
 | Grace window | Table-driven: for each of the three resolutions in §6.3, assert the exact output event sequence |
@@ -1211,7 +1412,7 @@ logic inherited from the prototype can be tested at all.
 | **M2** | Core skeleton + IPC | Engine, motion integrator, action dispatcher, IPC server, unit tests. No OS backends — driven by a synthetic input backend |
 | **M3** | Windows backend | Hook, `SendInput`, Win32 windows/monitors. End-to-end on Windows |
 | **M4** | Linux/X11 backend | evdev, uinput, EWMH/XRandR, udev rule, all-keyboard grab. End-to-end on Linux |
-| **M5** | Configuration UI | Settings dialog, visual binding editor, profile editor |
+| **M5** | Configuration UI | Settings dialog, binding editor with silent reassignment and the unassigned-commands list, profile editor |
 | **M6** | **Visual layout editor** | Canvas, key palette, move/resize/align/distribute/snap, segment-edit mode, validation panel, import/export, reset-to-template |
 | **M7** | Packaging | Windows installer, Linux packages, first release |
 
@@ -1355,3 +1556,40 @@ provide the required overlay behaviour without per-compositor branches. The
 in the UI and the README rather than partially emulated.
 
 → §8.4, §9.2, README platform table
+
+### 15.8 Reassigning a key is silent
+
+**Decided.** Assigning a command to a key that already holds one displaces the
+old command without a prompt, a warning, or a confirmation. The displaced command
+moves to the unassigned list, where it keeps its parameters and its custom label
+and can be re-homed in one click.
+
+A confirmation dialog here would be noise. The user has just named a key and a
+command; there is one possible meaning, nothing is destroyed, and the undo is
+immediate and visible.
+
+A key holds one command; a command may be bound to several keys. Only the key
+side is exclusive, which is why displacement is well-defined and why binding
+left-click to both `Space` and `KeyD` remains legal.
+
+*This does not contradict the `layout.duplicate_code` warning of §4.1.5. Two
+layout keys claiming the same physical code is a mistake with no sensible
+reading. A reused key assignment has exactly one.*
+
+→ §4.2, §10.2.2, §10.2.3
+
+### 15.9 An update never costs the user their configuration
+
+**Decided.** Updates add capability and nothing else. The installer never writes
+to the user config root; user documents permanently shadow bundled ones; settings
+gain new defaults without losing existing values, including values whose keys
+have been retired; schema upgrades happen in memory and never rewrite a file the
+user did not save; and new actions reach existing users because the editor offers
+commands from the live catalog rather than a stored inventory.
+
+The one honest cost is stated rather than hidden: a forked document stops
+receiving upstream improvements to its original. That is inherent to guaranteeing
+the fork is never touched, so the UI surfaces the divergence and offers a review
+rather than pretending it does not exist.
+
+→ §3.4
