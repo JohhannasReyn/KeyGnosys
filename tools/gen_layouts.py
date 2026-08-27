@@ -104,8 +104,8 @@ def alpha_block(keys, *, iso_enter: bool):
     keys.append(key("Quote", 11.75, 3.25, base="'", shift='"'))
 
     if iso_enter:
-        # ISO: Backslash drops to the home row, Enter is tall. v1 draws
-        # rectangles, so the L-shape is approximated -- see SPEC.md section 14.
+        # ISO: Backslash drops to the home row and Enter becomes the tall
+        # L-shape. See SPEC.md section 4.1 for the segment model.
         keys.append(key("Backslash", 12.75, 3.25, base="\\", shift="|"))
         keys.append(key("Enter", 13.75, 2.25, w=1.25, h=2, base="Enter", role="system"))
     else:

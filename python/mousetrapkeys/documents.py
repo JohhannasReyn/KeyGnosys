@@ -5,7 +5,7 @@ Layouts, bindings, themes and profiles are all plain JSON discovered at runtime
 *refuses to let one bad file break the rest* (principle P6): every failure is
 recorded as a diagnostic and the offending document is skipped.
 
-See docs/SPEC.md section 4 for the formats and section 10 for diagnostic codes.
+See docs/SPEC.md section 4 for the formats and section 11 for diagnostic codes.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class DocumentError(Exception):
 @dataclass
 class Diagnostic:
     level: str          # "info" | "warn" | "error"
-    code: str           # stable machine-readable code, see SPEC section 10
+    code: str           # stable machine-readable code, see SPEC section 11
     message: str
     file: str | None = None
 

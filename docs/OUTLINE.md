@@ -185,6 +185,14 @@ Keys light on press and fade on release, in a user-chosen accent colour. Themes 
 `dark` / `light` / `system`, defined as colour-token documents rather than
 stylesheets, so a new theme is another JSON drop-in (P1).
 
+### 5.4 The layout editor
+
+The same `KeyboardView` that draws the overlay also backs the layout editor, in an
+editing mode — two renderers would drift, and a user editing against a picture
+that does not match the overlay is being lied to.
+
+See §6.2 for what it does and why it exists.
+
 ---
 
 ## 6. Data model — the four file kinds
@@ -194,7 +202,7 @@ Everything user-facing is one of four JSON document types. Each is versioned by 
 
 | Kind | Answers | Shipped examples |
 |------|---------|------------------|
-| **Layout** | Where are the keys, and what shape are they? | `us-105-ansi`, `thinkpad-compact`, `asus-compact` |
+| **Layout** | Where are the keys, and what shape are they? | `us-ansi-104`, `us-iso-105`, `thinkpad-compact`, `asus-compact` |
 | **Bindings** | What does each key do in the cursor layer? | `default` |
 | **Theme** | What colours? | `dark`, `light` |
 | **App profile** | Which app is this, and what are its shortcuts? | Chrome, VS Code, file manager, terminal |
@@ -202,6 +210,45 @@ Everything user-facing is one of four JSON document types. Each is versioned by 
 Bundled files live with the package; user files live in the platform config
 directory and **shadow bundled ones by id** — so customising a shipped layout never
 means editing an installed file that the next upgrade will overwrite.
+
+### 6.1 Logical keys and segments
+
+A layout is a list of **logical keys**, and each is drawn as one or more
+rectangular **segments**. Most keys are one segment. An ISO Enter is two, forming
+its L-shape.
+
+This matters more than it sounds. The segments are a drawing detail and nothing
+else: a logical key has one identity, one label, one highlight, one hit-test
+target. Press Enter on an ISO board and the whole L lights up as one key, because
+it *is* one key. Segments become individually addressable only inside the layout
+editor, and only when the user has deliberately entered segment-edit mode.
+
+Arbitrary SVG paths were rejected. They solve one key shape at the cost of a node
+editor, path hit-testing and path overlap detection. Rectangles keep dragging,
+snapping, aligning and overlap-checking trivial, and they survive a round-trip
+through hand-edited JSON in a way a path string does not.
+
+*(The ISO left Shift, incidentally, is not L-shaped -- it is a short rectangle
+with a separate key beside it, and the two are modelled as two logical keys.)*
+
+### 6.2 Editing without JSON
+
+Hand-editing JSON is a fine way to *author* a layout and a poor way to *fix* one.
+Since the laptop layouts are representative templates rather than model-exact
+reproductions, correcting a board to match the machine in front of you is an
+ordinary user task -- so there is a **visual layout editor**: duplicate a
+template, drag keys around, resize with handles, snap to a grid, align and
+distribute, edit the segments of an L-shaped key, save under your own name, or
+reset back to the template.
+
+JSON stays the persistence and interchange format -- exporting a layout produces
+a file anyone can drop into their own `layouts/` directory. It simply stops being
+the only way in.
+
+The editor introduces **no schema of its own**. It reads and writes exactly the
+documents the renderer consumes and the bundled layouts use, which is why
+segments, stable ids and metadata are in the format from the start even though
+the editor itself arrives later.
 
 ---
 
@@ -225,15 +272,28 @@ and monitor actions. All three CapsLock modes. The overlay with its four legend
 layers, feedback, themes, click-through, pinning and opacity. Config persistence
 and a settings UI. Bundled app profiles with user override.
 
+**Planned, and specified now:**
+
+- **Visual layout editor** (§6.2). The *format* support — segments, stable ids,
+  metadata — ships from the start, because a format is expensive to change once
+  people have authored against it. The editing UI follows in a later milestone,
+  because an editor is additive and can arrive whenever.
+
 **Out, deliberately:**
 
-- **Wayland** — the overlay's click-through, global always-on-top, focused-window
-  identification and pointer warping are all restricted there by design, and no
-  single approach covers GNOME, KDE and wlroots. The backend seam exists; the
-  implementation does not. Documented, not faked (P6).
+- **Wayland** — **X11 is the supported Linux display environment for v1.** The
+  overlay's click-through, global always-on-top, focused-window identification and
+  pointer warping are all restricted under Wayland by design, and no single
+  mechanism covers GNOME, KDE and wlroots. The backend seam exists; the
+  implementation does not, and no compositor-specific code ships. Documented, not
+  faked (P6).
 - **macOS** — no backend. The interfaces do not preclude one.
 - **Shortcut capture ("learn") mode** — profiles are hand-authored in v1.
-- **Layout editor GUI** — layouts are hand-authored JSON in v1.
+- **Arbitrary key shapes** — SVG paths and polygons. Segmented rectangles cover
+  every board we support, and cost far less in editor and renderer complexity.
+- **Per-device layouts** — all keyboards are accepted as input, but the overlay
+  draws the one layout the user selected. A map that redraws itself when the
+  hands move between two boards cannot be memorised, which is the whole point.
 
 ---
 

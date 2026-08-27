@@ -50,7 +50,8 @@ yet, so the layer draws but does not yet drive.
 | ✅ | Configuration persistence, document validation and diagnostics |
 | 🚧 | Native core — key interception, pointer control, window management ([`core/`](core/README.md), milestones M2–M4) |
 | 🚧 | Settings and visual binding editor (M5) |
-| 🚧 | Installers (M6) |
+| 🚧 | Visual layout editor (M6) |
+| 🚧 | Installers (M7) |
 
 Until the core lands, the overlay runs on a **mock backend** that reads Qt's own
 key events. It lights up as you type, and it says so in the control bar — it
@@ -96,19 +97,38 @@ code change, no recompile. That is a hard design requirement, not a nice-to-have
 | id | |
 |----|---|
 | `us-ansi-104` | ![](docs/images/layout-us-ansi-104.png) |
-| `us-iso-105` | Full-size ISO: tall Enter, short left Shift, the extra `IntlBackslash` key |
+| `us-iso-105` | Full-size ISO: the tall L-shaped Enter, a short left Shift, and the extra `IntlBackslash` key beside it |
 | `thinkpad-compact` | ![](docs/images/layout-thinkpad-compact.png) |
 | `asus-compact` | ![](docs/images/layout-asus-compact.png) |
 
 > **On "104" vs "105".** "105-key" conventionally means the ISO board; the
-> standard US full-size keyboard is ANSI 104. Both ship, so both readings are
-> covered and the difference is visible rather than argued about.
+> standard US full-size keyboard is ANSI 104. Both ship under their conventional
+> names, so neither set of users gets the wrong one.
 
-The laptop layouts are modelled on current mainstream ThinkPad and Asus boards.
-These vary by model and year — if yours differs, correcting it is a JSON edit,
-which is exactly the point.
+### Key shapes
 
-To add or customise one:
+A key is drawn as **one or more rectangles** sharing a single identity. Nearly
+every key is one rectangle; an ISO Enter is two, forming its L.
+
+The segments are a drawing detail and nothing more — one key, one label, one
+highlight, one hit-test target. Press Enter on an ISO board and the whole L
+lights up, because it *is* one key. Arbitrary SVG paths were rejected: they solve
+one key shape at the cost of a node editor, path hit-testing and path overlap
+detection, while rectangles keep dragging, snapping and aligning trivial.
+
+### Making your own
+
+The laptop layouts are **representative templates**, not model-exact
+reproductions — ThinkPad and Asus boards vary by model and year. Correcting one
+to match your actual machine is expected, so it is meant to be easy.
+
+A **visual layout editor** is specified for M6: duplicate a template, drag keys
+around, resize with handles, snap to a grid, align and distribute, edit the
+segments of an L-shaped key, save under your own name, or reset back to the
+template. Export produces the same JSON, so a layout you make is a file anyone
+can drop into their own `layouts/`.
+
+Until then, or if you would rather work in a text editor:
 
 ```sh
 mousetrapkeys --list                                   # find the id
@@ -182,10 +202,16 @@ notifications and configuration, so a stalled GUI can never delay a keystroke.
 | Click-through | ✅ | ✅ (needs `python-xlib`) | ❌ not possible | — |
 | Input layer | 🚧 low-level hook | 🚧 evdev grab | ❌ | — |
 
-Wayland forbids an application making its own window click-through, identifying
-the focused window, or warping the pointer — and no single approach covers GNOME,
-KDE and wlroots. The backend seam exists; the implementation does not. It is
-documented rather than faked.
+**X11 is the supported Linux display environment for v1.** Wayland forbids, by
+design, an application making its own window click-through, identifying the
+focused window, or warping the pointer — and no single mechanism covers GNOME,
+KDE and wlroots. The backend seam exists; the implementation does not, and no
+compositor-specific code ships. It is documented rather than faked.
+
+All detected keyboards are accepted as input, and they all map onto the one
+layout you have selected. The overlay does not switch layouts based on which
+keyboard you typed on — a map that redraws itself as your hands move between two
+boards cannot be memorised, which is the entire point of it.
 
 The Windows input path uses a low-level hook, which needs no driver and no admin
 install. It cannot intercept keys while an elevated window has focus, and never
@@ -207,7 +233,7 @@ This software is, structurally, a keylogger with a GUI. So:
 - The core takes **only** the privileges its backend needs — a udev rule on
   Linux, and no elevation at all on Windows by default.
 
-See [SPEC section 11](docs/SPEC.md#11-security-and-permissions).
+See [SPEC section 12](docs/SPEC.md#12-security-and-permissions).
 
 ---
 
