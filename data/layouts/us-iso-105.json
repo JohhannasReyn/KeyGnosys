@@ -1,10 +1,10 @@
 {
-  "schema": "mousetrapkeys/layout/2",
+  "schema": "keygnosys/layout/2",
   "id": "us-iso-105",
   "name": "US-International Full-Size (ISO 105)",
   "description": "Full-size ISO variant: the tall L-shaped Enter, a short left Shift, and the extra IntlBackslash key beside it. This is the board usually meant by \"105-key\".",
   "metadata": {
-    "author": "MouseTrapKeys",
+    "author": "KeyGnosys",
     "source_template": null,
     "model": "Generic ISO full-size",
     "revision": 1

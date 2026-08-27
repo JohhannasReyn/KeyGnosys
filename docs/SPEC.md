@@ -1,4 +1,4 @@
-# MouseTrapKeys — Technical Specification
+# KeyGnosys — Technical Specification
 
 **Version:** 1.0-draft · **Status:** design · **Targets:** Windows 10/11, Linux (X11)
 
@@ -86,7 +86,7 @@ translation table.**
 |----------|----------------------|----------------|
 | Linux | evdev `KEY_*` constants (`linux/input-event-codes.h`) | `core/src/platform/linux/evdev_keymap.cpp` |
 | Windows | Scancode set 1 (from the hook's `scanCode` + `LLKHF_EXTENDED`) | `core/src/platform/windows/scancode_keymap.cpp` |
-| Overlay | Qt `QKeyEvent::nativeScanCode` (mock backend only) | `python/mousetrapkeys/coreclient/mock.py` |
+| Overlay | Qt `QKeyEvent::nativeScanCode` (mock backend only) | `python/keygnosys/coreclient/mock.py` |
 
 Windows mapping **MUST** key off the *scancode*, not the virtual key code.
 Virtual key codes are affected by the user's active keyboard layout; scancodes are
@@ -101,9 +101,9 @@ positional, which is what the vocabulary is defined to be.
 | Role | Windows | Linux |
 |------|---------|-------|
 | **Bundled** (read-only) | `<package>/data/` | `<package>/data/` |
-| **User config** | `%APPDATA%\MouseTrapKeys\` | `$XDG_CONFIG_HOME/mousetrapkeys/` (default `~/.config/mousetrapkeys/`) |
-| **Runtime/socket** | `\\.\pipe\mousetrapkeys` | `$XDG_RUNTIME_DIR/mousetrapkeys/core.sock` |
-| **Logs** | `%LOCALAPPDATA%\MouseTrapKeys\logs\` | `$XDG_STATE_HOME/mousetrapkeys/logs/` |
+| **User config** | `%APPDATA%\KeyGnosys\` | `$XDG_CONFIG_HOME/keygnosys/` (default `~/.config/keygnosys/`) |
+| **Runtime/socket** | `\\.\pipe\keygnosys` | `$XDG_RUNTIME_DIR/keygnosys/core.sock` |
+| **Logs** | `%LOCALAPPDATA%\KeyGnosys\logs\` | `$XDG_STATE_HOME/keygnosys/logs/` |
 
 Both roots contain the same four subdirectories: `layouts/`, `bindings/`,
 `themes/`, `profiles/`.
@@ -229,7 +229,7 @@ false for exactly the users who had customised the most.
 ## 4. File formats
 
 Every document carries a `schema` field of the form
-`mousetrapkeys/<kind>/<major>`. A consumer **MUST** reject a document whose major
+`keygnosys/<kind>/<major>`. A consumer **MUST** reject a document whose major
 version it does not recognise, with a diagnostic naming the file.
 
 ### 4.1 Layout
@@ -263,13 +263,13 @@ Arbitrary paths are **out of scope**. If a future layout genuinely needs one, th
 
 ```jsonc
 {
-  "schema": "mousetrapkeys/layout/2",
+  "schema": "keygnosys/layout/2",
   "id": "us-iso-105",
   "name": "US-International Full-Size (ISO 105)",
   "description": "Full-size ISO variant: tall L-shaped Enter, short left Shift.",
 
   "metadata": {
-    "author": "MouseTrapKeys",
+    "author": "KeyGnosys",
     "source_template": null,        // id of the layout this was duplicated from
     "model": "Generic ISO full-size",
     "revision": 1                   // bumped by the editor on every save
@@ -447,12 +447,12 @@ Maps key codes to cursor-layer actions.
 
 ```jsonc
 {
-  "schema": "mousetrapkeys/bindings/2",
+  "schema": "keygnosys/bindings/2",
   "id": "default",
   "name": "Default cursor layer",
 
   "metadata": {
-    "author": "MouseTrapKeys",
+    "author": "KeyGnosys",
     "source_template": null,        // id this was duplicated from
     "revision": 1
   },
@@ -522,7 +522,7 @@ Colour tokens, not stylesheets — so themes stay renderer-agnostic.
 
 ```jsonc
 {
-  "schema": "mousetrapkeys/theme/1",
+  "schema": "keygnosys/theme/1",
   "id": "dark",
   "name": "Dark",
   "base": "dark",                    // "dark" | "light" — used by "system" mode
@@ -555,7 +555,7 @@ Identifies an application and supplies its shortcut legends.
 
 ```jsonc
 {
-  "schema": "mousetrapkeys/profile/1",
+  "schema": "keygnosys/profile/1",
   "id": "chrome",
   "name": "Google Chrome",
   "priority": 50,                        // higher wins ties; default 50
@@ -600,7 +600,7 @@ Single document, user config root, written by the settings UI.
 
 ```jsonc
 {
-  "schema": "mousetrapkeys/settings/1",
+  "schema": "keygnosys/settings/1",
   "appearance": {
     "theme": "system",              // "dark" | "light" | "system" | <theme id>
     "accent": null,                 // "#RRGGBB" overrides theme accent
@@ -643,8 +643,8 @@ debugging is worth more than the bytes saved.
 
 | Platform | Endpoint | Access control |
 |----------|----------|----------------|
-| Linux | `$XDG_RUNTIME_DIR/mousetrapkeys/core.sock` (`AF_UNIX`, `SOCK_STREAM`) | Socket mode `0600`, owner-only |
-| Windows | `\\.\pipe\mousetrapkeys` (named pipe, message mode) | DACL restricted to the creating user |
+| Linux | `$XDG_RUNTIME_DIR/keygnosys/core.sock` (`AF_UNIX`, `SOCK_STREAM`) | Socket mode `0600`, owner-only |
+| Windows | `\\.\pipe\keygnosys` (named pipe, message mode) | DACL restricted to the creating user |
 
 The core is the server and **MUST** accept multiple concurrent clients. Events are
 broadcast to all; replies go only to the requesting client.

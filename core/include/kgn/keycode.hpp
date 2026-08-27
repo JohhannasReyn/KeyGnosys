@@ -1,4 +1,4 @@
-// The key vocabulary shared by every part of MouseTrapKeys.
+// The key vocabulary shared by every part of KeyGnosys.
 //
 // Keys are identified by W3C UI Events `code` values -- "KeyA", "Digit1",
 // "ShiftLeft", "CapsLock", "Numpad7". They are positional rather than

@@ -1,5 +1,5 @@
 {
-  "schema": "mousetrapkeys/profile/1",
+  "schema": "keygnosys/profile/1",
   "id": "chrome",
   "name": "Google Chrome",
   "priority": 50,

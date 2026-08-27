@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mousetrapkeys"
+name = "keygnosys"
 version = "0.1.0"
 description = "Pinnable, click-through on-screen keyboard and CapsLock cursor layer"
 readme = "README.md"
@@ -18,7 +18,7 @@ x11 = ["python-xlib>=0.33"]
 dev = ["pytest>=8.0", "pytest-qt>=4.4"]
 
 [project.scripts]
-mousetrapkeys = "mousetrapkeys.app:main"
+keygnosys = "keygnosys.app:main"
 
 [tool.setuptools]
 package-dir = { "" = "python" }

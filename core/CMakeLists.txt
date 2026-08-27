@@ -123,7 +123,7 @@ endif()
 # ---------------------------------------------------------------------------
 
 message(STATUS "")
-message(STATUS "MouseTrapKeys core ${PROJECT_VERSION}")
+message(STATUS "KeyGnosys core ${PROJECT_VERSION}")
 message(STATUS "  build type   : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  compiler     : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "  platform     : ${KGN_PLATFORM_NAME}")

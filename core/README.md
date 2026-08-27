@@ -23,7 +23,7 @@ not written yet. What exists today:
 one is uncommenting a line rather than working out where it belongs.
 
 The overlay runs today without any of this, on the mock backend
-(`mousetrapkeys --backend mock`), and will connect to the core automatically once
+(`keygnosys --backend mock`), and will connect to the core automatically once
 it starts listening. Nothing in the Python side changes when it does.
 
 ## Building
