@@ -1,0 +1,50 @@
+{
+  "schema": "mousetrapkeys/profile/1",
+  "id": "vscode",
+  "name": "Visual Studio Code",
+  "priority": 60,
+  "match": {
+    "process": ["code.exe", "code", "code-insiders", "codium", "cursor.exe"],
+    "wm_class": ["Code", "code-oss", "VSCodium"],
+    "title_regex": null
+  },
+  "shortcuts": {
+    "Control": {
+      "KeyP": "Go to file",
+      "KeyB": "Toggle sidebar",
+      "KeyJ": "Toggle panel",
+      "KeyF": "Find",
+      "KeyH": "Replace",
+      "KeyD": "Add next match",
+      "KeyS": "Save",
+      "KeyW": "Close editor",
+      "KeyN": "New file",
+      "KeyG": "Go to line",
+      "KeySlash": "Toggle comment",
+      "Backquote": "Toggle terminal",
+      "Comma": "Settings",
+      "Tab": "Next editor"
+    },
+    "Control+Shift": {
+      "KeyP": "Command palette",
+      "KeyF": "Find in files",
+      "KeyE": "Explorer",
+      "KeyG": "Source control",
+      "KeyX": "Extensions",
+      "KeyD": "Run and debug",
+      "KeyK": "Delete line",
+      "Backquote": "New terminal",
+      "Enter": "Insert line above"
+    },
+    "Alt": {
+      "ArrowUp": "Move line up",
+      "ArrowDown": "Move line down",
+      "KeyZ": "Toggle word wrap",
+      "Digit1": "Editor group 1"
+    },
+    "Control+Alt": {
+      "ArrowUp": "Cursor above",
+      "ArrowDown": "Cursor below"
+    }
+  }
+}

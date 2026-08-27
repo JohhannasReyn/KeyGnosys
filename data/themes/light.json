@@ -1,0 +1,23 @@
+{
+  "schema": "mousetrapkeys/theme/1",
+  "id": "light",
+  "name": "Light",
+  "base": "light",
+  "tokens": {
+    "surface": "#f2f4f8E6",
+    "key_face": "#ffffffF2",
+    "key_face_alt": "#e8ebf1F2",
+    "key_border": "#c6ccd8",
+    "key_text": "#1b1f27",
+    "key_text_dim": "#767f92",
+    "key_sub_text": "#98a1b3",
+    "accent": "#1f6feb",
+    "accent_text": "#ffffff",
+    "latched": "#c2740a",
+    "led_on": "#1a9e52",
+    "led_off": "#c6ccd8",
+    "bar_surface": "#e8ebf1F2",
+    "bar_text": "#1b1f27",
+    "bar_border": "#c6ccd8"
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "schema": "mousetrapkeys/profile/1",
+  "id": "chrome",
+  "name": "Google Chrome",
+  "priority": 50,
+  "match": {
+    "process": ["chrome.exe", "chrome", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "brave.exe", "brave"],
+    "wm_class": ["Google-chrome", "Chromium", "Brave-browser"],
+    "title_regex": null
+  },
+  "shortcuts": {
+    "Control": {
+      "KeyT": "New tab",
+      "KeyW": "Close tab",
+      "KeyN": "New window",
+      "KeyL": "Address bar",
+      "KeyF": "Find",
+      "KeyR": "Reload",
+      "KeyD": "Bookmark",
+      "KeyH": "History",
+      "KeyJ": "Downloads",
+      "KeyP": "Print",
+      "KeyS": "Save page",
+      "Tab": "Next tab",
+      "Equal": "Zoom in",
+      "Minus": "Zoom out",
+      "Digit0": "Reset zoom",
+      "Digit1": "Tab 1",
+      "Digit9": "Last tab"
+    },
+    "Control+Shift": {
+      "KeyT": "Reopen closed tab",
+      "KeyN": "Incognito window",
+      "KeyI": "DevTools",
+      "KeyJ": "Console",
+      "KeyW": "Close window",
+      "KeyDelete": "Clear browsing data",
+      "Tab": "Previous tab"
+    },
+    "Alt": {
+      "ArrowLeft": "Back",
+      "ArrowRight": "Forward",
+      "Home": "Home page",
+      "KeyD": "Address bar",
+      "KeyE": "Chrome menu",
+      "KeyF": "Chrome menu"
+    }
+  }
+}

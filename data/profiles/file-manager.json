@@ -1,0 +1,35 @@
+{
+  "schema": "mousetrapkeys/profile/1",
+  "id": "file-manager",
+  "name": "File Manager",
+  "priority": 40,
+  "match": {
+    "process": ["explorer.exe", "nautilus", "dolphin", "thunar", "nemo", "pcmanfm"],
+    "wm_class": ["Nautilus", "dolphin", "Thunar", "Nemo"],
+    "title_regex": null
+  },
+  "shortcuts": {
+    "Control": {
+      "KeyC": "Copy",
+      "KeyX": "Cut",
+      "KeyV": "Paste",
+      "KeyZ": "Undo",
+      "KeyA": "Select all",
+      "KeyF": "Search",
+      "KeyN": "New window",
+      "KeyW": "Close window",
+      "KeyL": "Location bar"
+    },
+    "Control+Shift": {
+      "KeyN": "New folder",
+      "KeyE": "Show in tree"
+    },
+    "Alt": {
+      "ArrowLeft": "Back",
+      "ArrowRight": "Forward",
+      "ArrowUp": "Parent folder",
+      "Enter": "Properties",
+      "KeyD": "Address bar"
+    }
+  }
+}
