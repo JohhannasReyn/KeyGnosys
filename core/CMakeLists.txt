@@ -46,8 +46,8 @@ endif()
 
 add_library(mtk_engine
     src/keycode.cpp
+    src/layer_engine.cpp
     # Added as milestone M2 lands:
-    #   src/layer_engine.cpp   state machine (header already specified)
     #   src/motion.cpp         60 Hz pointer/scroll integrator
     #   src/actions.cpp        action catalog and dispatch
     #   src/config.cpp         bindings and settings loading
@@ -115,8 +115,8 @@ if(MTK_BUILD_TESTS)
     endfunction()
 
     mtk_add_test(test_keycode)
+    mtk_add_test(test_layer_engine)
     # Added with M2:
-    #   mtk_add_test(test_layer_engine)   grace window, P7 invariant
     #   mtk_add_test(test_motion)         ramp, diagonals, pixel accumulation
 endif()
 

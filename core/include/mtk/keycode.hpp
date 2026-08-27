@@ -24,6 +24,11 @@ namespace mtk {
 class KeyCode {
 public:
     static constexpr std::uint16_t kInvalid = 0;
+    // The largest id a KeyCode can hold. Every non-zero std::uint16_t is a
+    // valid id, so this is the full width of the type -- consumers that index
+    // state by id size their storage from it and can then accept any KeyCode
+    // that valid() admits, with no boundary left to police.
+    static constexpr std::uint16_t kMaxId = 0xFFFF;
 
     KeyCode() = default;
     explicit KeyCode(std::uint16_t id) : id_(id) {}

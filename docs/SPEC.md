@@ -128,8 +128,22 @@ reloads and emits `bindings_changed` / `layouts_changed` over IPC. A reload that
 produces zero valid documents **MUST** keep the previous set and emit a diagnostic
 (inherited from the prototype's behaviour).
 
-Reloading bindings **MUST** first release every held key and every locked drag
-button (P7).
+Reloading bindings **MUST** release every held action whose binding disappeared,
+and every locked drag button (P7).
+
+A reload **MUST NOT** discard physical input the user has already committed. A
+press sitting in the grace window was delayed only to resolve *layer intent*,
+not to await permission:
+
+- if the key is still bound to an action, the press stays buffered, **retaining
+  its original press time** — restarting the clock would silently extend the
+  grace window;
+- if the key is no longer action-bound, there is nothing left to disambiguate,
+  so the press resolves immediately as the ordinary forwarded keystroke it
+  turned out to be, and its release obligation is recorded;
+- forwarded presses are untouched. P7 outranks a config reload.
+
+Multiple keys resolved by one reload are emitted in press order (§6.3.3).
 
 ### 3.4 Update and migration policy
 
@@ -774,6 +788,37 @@ or by any binding with action `layer.release`.
 press while Shift is physically held is not a layer gesture: the core synthesizes
 a genuine CapsLock press/release to the OS and does not change mode.
 
+**What the layer does to keys it has no binding for.** While `CURSOR` is
+engaged, each physical key falls into exactly one of three cases:
+
+| Key | Treatment |
+|-----|-----------|
+| Bound to `key.passthrough` | **Forwarded.** The escape hatch (§7.6), for a key that must still reach the OS inside the layer. |
+| Bound to any other action | Runs its action. Suppressed; nothing reaches the OS. |
+| A modifier (`Shift`/`Control`/`Alt`/`Meta`) | **Forwarded.** Ctrl+click and Shift+drag must keep working, and a layer that broke them would be useless for the pointer control it exists to provide. |
+| Anything else | **Suppressed.** |
+
+Suppressing the last case is deliberate: the cursor layer is a *mode*, not an
+overlay on normal typing. The overlay draws those keys blank and dimmed (§9.4)
+precisely to say they do nothing, and a key that silently typed a character
+while the map showed it as empty would be the worst of both.
+
+**The escape hatch requires an explicit binding.** A key reaches the OS inside
+the layer only because it is bound to `key.passthrough`. Having no binding is
+never treated as permission to type — an unbound key is suppressed, without
+exception.
+
+This is enforced structurally rather than defended. The engine receives **one**
+classification — a map from key to `Action` or `Passthrough` — and *having an
+entry* is what being bound means. There is no second set that could list a key
+as passthrough while the first omits it, and a reload that removes a binding
+cannot leave stale behaviour behind, because the whole map is replaced in a
+single call with no observable intermediate state.
+
+**A passthrough key is never delayed by the grace window.** It does the same
+thing whether the layer is engaged or not, so there is nothing to disambiguate,
+and buffering it would cost latency and buy nothing.
+
 **The grace window (inherited from the prototype).** A key bound in the cursor
 layer, pressed while in `NORMAL`, is *ambiguous* — the user may be typing it, or
 may be a few milliseconds ahead of the CapsLock that was meant to precede it.
@@ -785,16 +830,155 @@ Such a press is **buffered**, not forwarded, for up to `grace_ms`. It resolves a
 | The key is released | Ordinary tap. Forward press+release together, in order. |
 | `grace_ms` elapses | Ordinary hold. Forward the press, mark **passthrough**. |
 
-**The passthrough invariant (P7).** A key whose press was forwarded to the OS is
-flagged. Its release **MUST** also be forwarded, unconditionally, regardless of
-what the mode has become in the meantime. Violating this leaves a key stuck down
-in the compositor. This invariant applies equally to: mode changes, config
-reloads, `release_all`, client disconnects, and process shutdown — every exit path
-**MUST** run `OutputBackend::releaseAll()`.
+**The forwarded-release invariant (P7).** A key whose press was forwarded to the
+OS is flagged. Its release **MUST** also be forwarded, unconditionally,
+regardless of what the mode has become in the meantime. Violating this leaves a
+key stuck down in the compositor. The invariant applies equally to mode changes,
+config reloads, `release_all`, client disconnects, and process shutdown — every
+exit path **MUST** run `OutputBackend::releaseAll()`.
 
-Buffering adds up to `grace_ms` of latency, but **only** to keys that are bound in
-the cursor layer, and **only** when they are typed while the layer is off. Keys
-with no cursor-layer binding are never buffered and never delayed.
+It covers **every** press that reaches the OS, not only the grace-window replay:
+
+| Forwarded press | Why it is at risk |
+|-----------------|-------------------|
+| Ordinary typing while the layer is off | The layer may engage before the key is released |
+| A **modifier** forwarded inside the layer | The layer may deactivate, or change mode, while the modifier is still physically held |
+| A **`key.passthrough`** binding | Same: the layer may drop while the key is held |
+| A key replayed when the **grace window** lapses | The layer may engage immediately afterwards |
+| A **real CapsLock** from the escape gesture | Shift is commonly released first, changing the modifier state mid-press |
+
+There is exactly one code path by which a press reaches the OS, and it records
+the key as it goes. That is what makes the invariant checkable rather than
+merely intended.
+
+#### 6.3.1 State capacity and the key domain
+
+Per-key state **MUST** cover the entire `KeyCode` id space, and the storage
+domain **MUST** agree with the validity contract at both ends: every id that
+`valid()` admits has a slot, including the largest one. A disagreement between
+the two is an out-of-bounds access, not a policy question. There is deliberately
+no "untracked" class of key: a key the engine cannot hold state for is a key
+whose invariants it cannot maintain, and forwarding such events blindly breaks
+both P7 and its mirror — an orphan release is forwarded, and a forwarded press
+cannot be unwound by `release_all`. One byte of packed flags per key covers the
+whole domain in 64 KiB, allocated once at construction, so the question does not
+arise.
+
+The remaining bounds are on **simultaneity** — how many keys can be buffered,
+held, or forwarded at one time — and each **MUST fail safe**:
+
+> **When an obligation cannot be recorded, the decision that would create it is
+> not emitted.**
+
+A press that cannot be tracked is **suppressed**, not forwarded untracked. An
+action that cannot be recorded emits no `RunAction`. A dropped keystroke is
+recoverable by pressing the key again; a key the OS believes is held forever, or
+an action with no release, is not.
+
+The decision buffer is the exception, and only because its capacity is *derived*
+from the true worst case — `release_all` unwinding every held action and every
+forwarded press at once — rather than guessed.
+
+"A human has ten fingers" is not a safety argument. Malformed drivers, injected
+events, device reconnects and lost releases are all in the threat model, so
+overflow behaviour is specified and **MUST** be tested by deliberately forcing
+it, not merely observed not to happen under ordinary traffic.
+
+Capacity drops **MUST** be counted and exposed, so that a condition this
+unreachable surfaces as a diagnostic if it ever occurs.
+
+#### 6.3.2 Decisions describe the event they resolve
+
+A `Suppress` decision **MUST** report the `KeyState` of the input event it
+suppressed, not of some other event the engine was attempting to synthesise.
+The one case where these differ is the grace-window tap replay, which forwards
+a press while handling a release: if that press cannot be forwarded, the
+resulting `Suppress` reports the **release**.
+
+The rule exists so a `Suppress` is self-describing. Logging, tracing,
+diagnostics and any future IPC consumer read the decision stream without access
+to the event that produced it, and a decision that misreports its own state is
+a trap for every one of them.
+
+#### 6.3.3 Event ordering
+
+Decisions **MUST** be emitted in a deterministic order, and that order **MUST**
+be the order the keys were pressed in. This applies to every place the engine
+resolves more than one key at once:
+
+- buffered presses whose grace window lapses together;
+- buffered presses promoted together when CapsLock arrives;
+- held actions released when the layer is left;
+- forwarded presses unwound by `release_all`.
+
+Input order is observable. It decides how chords resolve, which of two
+simultaneous movement keys starts first, and whether a bug reproduces. Leaving
+it to a hash table's iteration order would make the engine's output depend on
+nothing the user can see or control.
+
+#### 6.3.4 Malformed and duplicate events
+
+The engine **MUST** tolerate physical event streams that do not alternate
+cleanly. A dropped event, a stuck driver, or a device re-plugged mid-keypress
+can all produce them.
+
+| Event | Treatment |
+|-------|-----------|
+| A press for a key already forwarded | Forwarded **as a repeat**, not as a second press. A second press would owe a second release, and only one physical release is coming — so the key would be left down forever. |
+| A press for a key already running an action | Suppressed; the action is already held. |
+| A press for a key already buffered | Kept buffered, retaining the **original** press time, so a repeated press cannot extend the grace window indefinitely. |
+| A release for a key with no matching press | Suppressed (the mirror obligation, below). |
+| An invalid key code | Suppressed in every direction. It never produces a press, so it can never owe a release. |
+
+**CapsLock is not exempt.** It is dispatched before the general per-key logic,
+so it **MUST** carry its own physical-state tracking or it bypasses this policy
+entirely:
+
+| Event | Treatment |
+|-------|-----------|
+| A duplicate CapsLock press | Suppressed, or forwarded as a repeat if the press was a real CapsLock. It **MUST NOT** re-run activation — in `toggle` mode that would flip the layer twice for one physical press. |
+| A CapsLock release with no matching press | Suppressed, and **MUST NOT** change the mode, the latch, or anything else. |
+| A CapsLock release after `release_all` | The same: `release_all` clears the physical-down flag, so the release that follows is an orphan by definition. |
+| A `Shift+CapsLock` gesture whose forwarding could not be recorded | Press and release both suppressed. It remains an **escape gesture** throughout: the press never engaged the layer, so the release **MUST NOT** leave it. |
+
+The escape-gesture classification **MUST** be tracked independently of whether
+forwarding it to the OS succeeded. Deriving one from the other means a gesture
+that failed on a capacity bound falls through into layer-release handling, where
+it can leave a layer its press never engaged.
+
+The recorded press time **MUST** be cleared on release. Left set, it remains
+available to a later malformed event, which could latch the layer from a clock
+reading that belongs to a keypress long finished.
+
+**The mirror obligation.** A release **MUST NOT** be forwarded unless the
+matching press was forwarded. If the layer deactivates while suppressed keys are
+still physically held — an unbound key, or one that was running an action — their
+releases **MUST** be suppressed too. Forwarding them would send the OS a key-up
+for a key it never saw go down, which is the same class of corruption as a stuck
+key, in the opposite direction.
+
+Both directions are proved by property tests over randomised event sequences
+(§13), not merely asserted. The generator's event space covers what this section
+claims: presses and releases, autorepeat, CapsLock transitions in all three
+activation modes, grace-window expiry, `release_all` mid-sequence with physical
+releases continuing afterwards, configuration reloads while keys are held,
+malformed or duplicate physical events — including malformed CapsLock
+specifically, since it is dispatched before the general per-key logic — and
+invalid key codes.
+
+**Only bound keys are ever delayed.** Buffering adds up to `grace_ms` of latency,
+and it applies **only** to keys bound to an action in the cursor layer, and
+**only** while the layer is off. Three categories are never buffered and never
+delayed:
+
+- keys with no cursor-layer binding — nothing to disambiguate;
+- keys bound to `key.passthrough` — they behave identically in both modes;
+- every key, once the layer is already engaged — the ambiguity the window exists
+  to resolve cannot arise.
+
+This matters because the delay is otherwise invisible to the user: a keyboard
+that felt sluggish on ordinary typing would be a worse product than one without
+the layer at all.
 
 ### 6.4 Motion integrator
 
@@ -936,6 +1120,21 @@ pump. Returning non-zero from the hook proc suppresses the event.
   (default 300 ms) or Windows silently unhooks it. Therefore the hook proc
   **MUST** do nothing but decide suppression and enqueue; all dispatch, IPC and
   logging happen on other threads.
+- **The event path performs no dynamic allocation.** The layer engine runs
+  inside the hook, so this is a hard requirement rather than an optimisation:
+  an allocation can block on a heap lock held by any other thread in the
+  process, and a hook that stalls is a hook that gets unregistered.
+
+  Concretely, that means the engine holds all per-event state in fixed-size
+  arrays indexed by key code rather than in node-based hash containers, resolves
+  the key codes it compares against once at construction rather than by name per
+  event, and writes into a fixed-capacity `DecisionBuffer` rather than a
+  `std::vector` whose capacity the caller might not have reserved. Every one of
+  those capacities has a defined overflow behaviour — documented in
+  `layer_engine.hpp` — rather than undefined behaviour or a reallocation.
+
+  Allocating convenience overloads exist for tests and for callers that are not
+  on the hook path. They are not used by the hook.
 - The core **MUST** detect having been unhooked and re-install automatically.
 - Keys cannot be intercepted while an **elevated** window has focus unless the
   core itself runs elevated. Running unelevated is the default; the UI states
@@ -1391,7 +1590,15 @@ explicit commitments.
 | Layout editor | Property test: every canvas operation (move, resize, align, distribute, snap, add, delete, segment edit) leaves a document that still validates. Round-trip test: save → load → save is byte-identical. Undo/redo returns to the exact prior document |
 | Layer engine | **Pure unit tests over a synthetic event trace.** The engine takes events and a clock and returns decisions — no OS involved. This is where the grace window and P7 are proven. |
 | Grace window | Table-driven: for each of the three resolutions in §6.3, assert the exact output event sequence |
-| P7 invariant | Property test: for any random event sequence with random mode changes, assert every forwarded press has a matching forwarded release |
+| P7 invariant | Property test over 200 randomised event sequences, across all three activation modes and including modifiers and a `key.passthrough` binding: assert every forwarded press has a matching forwarded release once the sequence is wound down |
+| P7 mirror | The same sweep in the opposite direction: assert no release is ever forwarded without a matching forwarded press, so a suppressed key held across a mode change cannot produce an orphan key-up |
+| Property-test coverage | Assert the generator is not degenerate: that it actually produced forwards, suppressions, actions, action releases, buffered presses and repeats in quantity. A generator that quietly stopped exercising a path would keep passing and prove nothing |
+| Event ordering | Exact-sequence tests: buffered presses expiring together, buffered presses promoted by CapsLock, held actions released on leaving the layer, and `release_all` all emit in press order. Plus a replay test asserting identical decision sequences across repeated runs |
+| Allocation contract | Drive the engine through many event cycles against one `DecisionBuffer` and assert it never overflows its fixed capacity; separately construct the true worst-case unwind and assert the derived capacity holds it |
+| Forced capacity overflow | Deliberately exceed each bounded list — forwarded presses, held actions, buffered presses — with synthetic key codes, and assert the fail-safe: no forwarded press left unreleased, no action started without a release, no keystroke silently dropped where degrading would do. Observing that ordinary traffic does not overflow proves nothing about overflow |
+| Key domain | Assert a code interned beyond the built-in vocabulary is tracked like any other, that an invalid code is suppressed in both directions, and that the largest valid id is tracked, bindable and safe to index |
+| Malformed CapsLock | Duplicate press does not double-toggle; orphan release does not change the mode or the latch; a stale press time cannot latch the layer later; an escape gesture suppressed for want of capacity leaves the mode and latch untouched through both its press and its release, in all three activation modes |
+| Reload | Assert a pending press survives a reload that keeps its binding, keeps its original press time, and resolves as a forwarded keystroke when the binding is removed |
 | Motion | Assert diagonal speed equals cardinal speed; assert fractional accumulation never loses pixels; assert the ramp is monotonic |
 | IPC | Golden-file tests of serialised messages; a fake client that stops reading, asserting the core does not block |
 | Overlay | `pytest-qt` against the mock backend; render each bundled layout at several scales and assert no key overlaps and no clipped legends |
