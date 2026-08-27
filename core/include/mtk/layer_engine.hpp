@@ -72,16 +72,29 @@ public:
     void setConfig(const EngineConfig& config);
     void setBoundKeys(std::unordered_set<KeyCode> bound);
 
-    // Feed one physical key event. Returns every decision it produced -- one
-    // event can produce several, because resolving a buffered press emits both
-    // its press and its release.
-    std::vector<Decision> onKey(KeyCode code, KeyState state, TimePoint now);
+    // Feed one physical key event, appending to `out`.
+    //
+    // One event can produce several decisions: resolving a buffered press
+    // emits both its press and its release, and a CapsLock press can promote
+    // several buffered keys at once.
+    //
+    // Appends rather than returns because on Windows this runs inside the
+    // low-level hook, which must decide suppression synchronously and return
+    // fast. The caller keeps one buffer and clears it between events, so the
+    // hot path does not allocate.
+    void onKey(KeyCode code, KeyState state, TimePoint now,
+               std::vector<Decision>& out);
 
     // Must be called regularly. Resolves buffered presses whose grace window
     // has lapsed without CapsLock arriving.
-    std::vector<Decision> tick(TimePoint now);
+    void tick(TimePoint now, std::vector<Decision>& out);
 
     // Release everything, unconditionally. Every exit path calls this (P7).
+    void releaseAll(std::vector<Decision>& out);
+
+    // Allocating conveniences. For tests and for callers not on the hot path.
+    std::vector<Decision> onKey(KeyCode code, KeyState state, TimePoint now);
+    std::vector<Decision> tick(TimePoint now);
     std::vector<Decision> releaseAll();
 
     [[nodiscard]] Mode mode() const { return mode_; }
@@ -95,14 +108,27 @@ private:
         TimePoint pressedAt;
     };
 
-    std::vector<Decision> onCapsLock(KeyState state, TimePoint now);
-    void enterCursorMode(bool latched);
-    std::vector<Decision> leaveCursorMode();
+    void onCapsLock(KeyState state, TimePoint now, std::vector<Decision>& out);
+    void promoteBuffered(TimePoint now, std::vector<Decision>& out);
+    void leaveCursorMode(std::vector<Decision>& out);
+
+    // Emit a Forward for a press, recording it so its release is guaranteed to
+    // be forwarded too. Every forwarded press goes through here; that is what
+    // makes principle P7 provable rather than merely intended.
+    void forwardPress(KeyCode code, KeyState state, std::vector<Decision>& out);
 
     EngineConfig config_;
     Mode mode_ = Mode::Normal;
     bool latched_ = false;
     std::optional<TimePoint> capsPressedAt_;
+    // True when the current CapsLock press was forwarded to the OS as a real
+    // CapsLock. Its release must be forwarded too.
+    bool capsForwarded_ = false;
+    // Whether the layer was already latched when the current CapsLock press
+    // began. In hybrid mode this is what separates a tap that latches on from
+    // a tap that latches off -- the press itself clears `latched_`, so the
+    // release has no other way to tell the two apart.
+    bool capsWasLatched_ = false;
 
     std::unordered_set<KeyCode> bound_;
     std::unordered_set<KeyCode> heldActions_;

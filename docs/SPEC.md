@@ -774,6 +774,22 @@ or by any binding with action `layer.release`.
 press while Shift is physically held is not a layer gesture: the core synthesizes
 a genuine CapsLock press/release to the OS and does not change mode.
 
+**What the layer does to keys it has no binding for.** While `CURSOR` is
+engaged, each physical key falls into exactly one of three cases:
+
+| Key | Treatment |
+|-----|-----------|
+| Bound in the cursor layer | Runs its action. Suppressed; nothing reaches the OS. |
+| A modifier (`Shift`/`Control`/`Alt`/`Meta`) | **Forwarded.** Ctrl+click and Shift+drag must keep working, and a layer that broke them would be useless for the pointer control it exists to provide. |
+| Anything else | **Suppressed.** |
+
+Suppressing the third case is deliberate: the cursor layer is a *mode*, not an
+overlay on normal typing. The overlay draws those keys blank and dimmed (§9.4)
+precisely to say they do nothing, and a key that silently typed a character
+while the map showed it as empty would be the worst of both. `key.passthrough`
+(§7.6) is the escape hatch for a key that must still reach the OS inside the
+layer.
+
 **The grace window (inherited from the prototype).** A key bound in the cursor
 layer, pressed while in `NORMAL`, is *ambiguous* — the user may be typing it, or
 may be a few milliseconds ahead of the CapsLock that was meant to precede it.
