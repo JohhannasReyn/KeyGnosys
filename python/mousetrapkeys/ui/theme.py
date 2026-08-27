@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from PySide6.QtGui import QColor
 
-from ..documents import Theme
+from ..documents import KeyStyle, Theme
 
 
 def parse_color(value: str, opacity: float = 1.0) -> QColor:
@@ -87,6 +87,34 @@ class ResolvedTheme:
         if role in ("modifier", "system", "toggle", "nav", "numpad"):
             return self.key_face_alt
         return self.key_face
+
+    # -- per-key overrides (SPEC 4.1.4) -----------------------------------
+    #
+    # A layout may set colours on an individual key, so a user can mark up
+    # their own board -- tinting the keys they are still learning, say --
+    # without forking an entire theme. Anything unset falls through.
+
+    def key_face_override(self, style: KeyStyle | None, role: str) -> QColor:
+        if style is not None and style.face:
+            return parse_color(style.face)
+        return self.face_for_role(role)
+
+    def key_text_override(self, style: KeyStyle | None,
+                          dim: bool = False) -> QColor:
+        if style is not None and style.text:
+            return parse_color(style.text)
+        return self.key_text_dim if dim else self.key_text
+
+    def key_border_override(self, style: KeyStyle | None) -> QColor:
+        if style is not None and style.border:
+            return parse_color(style.border)
+        return self.key_border
+
+    def accent_override(self, style: KeyStyle | None) -> QColor:
+        """This key's feedback colour."""
+        if style is not None and style.accent:
+            return parse_color(style.accent)
+        return self.accent
 
 
 def system_is_dark() -> bool:

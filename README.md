@@ -45,9 +45,10 @@ yet, so the layer draws but does not yet drive.
 
 | | |
 |---|---|
-| ✅ | On-screen keyboard: four layouts, all four legend layers, key feedback, themes, opacity, pinning, click-through |
+| ✅ | On-screen keyboard: five layouts, all four legend layers, key feedback, themes, opacity, pinning, click-through |
 | ✅ | Data-driven layouts, bindings, themes and app profiles, with user overrides |
-| ✅ | Configuration persistence, document validation and diagnostics |
+| ✅ | Segmented keys — a real L-shaped ISO Enter, drawn and hit-tested as one key |
+| ✅ | Configuration persistence, graded validation, and diagnostics |
 | 🚧 | Native core — key interception, pointer control, window management ([`core/`](core/README.md), milestones M2–M4) |
 | 🚧 | Settings and visual binding editor (M5) |
 | 🚧 | Visual layout editor (M6) |
@@ -91,15 +92,16 @@ mousetrapkeys --backend mock      # force the mock backend
 
 ## Keyboard layouts
 
-Four ship, and **adding another is dropping a JSON file into a directory** — no
+Five ship, and **adding another is dropping a JSON file into a directory** — no
 code change, no recompile. That is a hard design requirement, not a nice-to-have.
 
 | id | |
 |----|---|
 | `us-ansi-104` | ![](docs/images/layout-us-ansi-104.png) |
-| `us-iso-105` | Full-size ISO: the tall L-shaped Enter, a short left Shift, and the extra `IntlBackslash` key beside it |
+| `us-iso-105` | ![](docs/images/layout-us-iso-105.png) |
 | `thinkpad-compact` | ![](docs/images/layout-thinkpad-compact.png) |
-| `asus-compact` | ![](docs/images/layout-asus-compact.png) |
+| `asus-vivobook-s` | ![](docs/images/layout-asus-vivobook-s.png) |
+| `asus-zenbook` | ![](docs/images/layout-asus-zenbook.png) |
 
 > **On "104" vs "105".** "105-key" conventionally means the ISO board; the
 > standard US full-size keyboard is ANSI 104. Both ship under their conventional
@@ -108,19 +110,31 @@ code change, no recompile. That is a hard design requirement, not a nice-to-have
 ### Key shapes
 
 A key is drawn as **one or more rectangles** sharing a single identity. Nearly
-every key is one rectangle; an ISO Enter is two, forming its L.
+every key is one rectangle; an ISO Enter is two, forming its L — 105 keys, 106
+segments.
 
-The segments are a drawing detail and nothing more — one key, one label, one
+The segments are a drawing detail and nothing more: one key, one label, one
 highlight, one hit-test target. Press Enter on an ISO board and the whole L
-lights up, because it *is* one key. Arbitrary SVG paths were rejected: they solve
-one key shape at the cost of a node editor, path hit-testing and path overlap
-detection, while rectangles keep dragging, snapping and aligning trivial.
+lights up, because it *is* one key. Click in the notch — inside its bounding box
+but outside the key — and you hit the Backslash underneath, as you should.
+
+The outline is drawn as a genuine union, so the inner corner of the L stays
+square. Rounding it, which is what uniting two rounded rectangles would do,
+leaves a visible pinch where the segments meet.
+
+Arbitrary SVG paths were rejected: they solve one key shape at the cost of a node
+editor, path hit-testing and path overlap detection, while rectangles keep
+dragging, snapping and aligning trivial.
 
 ### Making your own
 
 The laptop layouts are **representative templates**, not model-exact
-reproductions — ThinkPad and Asus boards vary by model and year. Correcting one
-to match your actual machine is expected, so it is meant to be easy.
+reproductions — ThinkPad and Asus boards vary by model and year, and each
+records the family it was modelled on in `metadata.model`. Correcting one to
+match your actual machine is expected, so it is meant to be easy.
+
+Note that the two Asus templates differ in the way that matters: `asus-zenbook`
+has no numeric keypad, `asus-vivobook-s` does.
 
 A **visual layout editor** is specified for M6: duplicate a template, drag keys
 around, resize with handles, snap to a grid, align and distribute, edit the
@@ -241,7 +255,7 @@ See [SPEC section 12](docs/SPEC.md#12-security-and-permissions).
 
 ```sh
 pip install -e ".[dev]"
-pytest                                  # 45 tests, no display required
+pytest                                  # 90 tests, no display required
 python tools/gen_layouts.py             # regenerate the bundled layouts
 python tools/render_preview.py          # re-render the images in this README
 ```

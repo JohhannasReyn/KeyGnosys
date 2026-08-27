@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from . import actions
-from .documents import BindingSet, Layout, Profile, canonical_modifiers
+from .documents import BindingSet, Key, Layout, Profile, canonical_modifiers
 
 
 class LegendLayer(str, Enum):
@@ -110,9 +110,14 @@ class AppState:
 
     # -- legend resolution -------------------------------------------------
 
-    def render_key(self, code: str, base: str, shift: str | None,
-                   sub: str | None, role: str) -> KeyRender:
-        """Resolve one key to its text and style for the current state."""
+    def render_key(self, key: Key) -> KeyRender:
+        """Resolve one logical key to its text and style for the current state.
+
+        Takes the whole key rather than its parts because a key is one thing:
+        one identity, one label, one highlight -- however many segments it is
+        drawn from.
+        """
+        code, role = key.code, key.role
         layer = self.active_layer()
 
         if layer is LegendLayer.CURSOR:
@@ -122,17 +127,17 @@ class AppState:
                              sub=None, led=self._led_for(code))
 
         if layer is LegendLayer.MODIFIER:
-            text, dim = self._shortcut_legend(code, base)
+            text, dim = self._shortcut_legend(code, key.base)
             return KeyRender(text=text, style=self._style_for(code, role),
                              dim=dim, sub=None, led=self._led_for(code))
 
         if layer is LegendLayer.SHIFT:
-            text = shift if shift is not None else base.upper()
+            text = key.shift if key.shift is not None else key.base.upper()
             return KeyRender(text=text, style=self._style_for(code, role),
-                             dim=False, sub=sub, led=self._led_for(code))
+                             dim=False, sub=key.sub, led=self._led_for(code))
 
-        return KeyRender(text=base, style=self._style_for(code, role),
-                         dim=False, sub=sub, led=self._led_for(code))
+        return KeyRender(text=key.base, style=self._style_for(code, role),
+                         dim=False, sub=key.sub, led=self._led_for(code))
 
     def _cursor_legend(self, code: str) -> tuple[str, bool]:
         """(text, dim) for a key while the cursor layer is engaged."""

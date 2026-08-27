@@ -15,7 +15,7 @@ from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget
 
-from ..documents import Key, Layout
+from ..documents import Key, Layout, Segment
 from ..state import AppState, KeyStyle
 from .theme import ResolvedTheme
 
@@ -45,6 +45,9 @@ class KeyboardView(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMouseTracking(False)
 
+        #: key id -> outline path, invalidated whenever geometry changes.
+        self._path_cache: dict[str, QPainterPath] = {}
+
         self._fade_timer = QTimer(self)
         self._fade_timer.setInterval(int(1000 / FADE_FPS))
         self._fade_timer.timeout.connect(self._advance_fade)
@@ -53,6 +56,7 @@ class KeyboardView(QWidget):
 
     def set_layout_doc(self, layout: Layout | None) -> None:
         self._layout = layout
+        self._path_cache.clear()
         self.updateGeometry()
         self._resize_to_layout()
         self.update()
@@ -63,6 +67,7 @@ class KeyboardView(QWidget):
 
     def set_scale(self, scale: float) -> None:
         self._scale = max(0.4, min(2.0, scale))
+        self._path_cache.clear()
         self._resize_to_layout()
         self.update()
 
@@ -105,19 +110,72 @@ class KeyboardView(QWidget):
         from PySide6.QtCore import QSize
         return QSize(int(round(w)), int(round(h)))
 
-    def key_rect(self, key: Key) -> QRectF:
+    def segment_rect(self, segment: Segment) -> QRectF:
         pad = BOARD_PAD_PX * self._scale
         gap = KEY_GAP_PX * self._scale
         return QRectF(
-            pad + key.x * self.unit + gap / 2,
-            pad + key.y * self.unit + gap / 2,
-            key.w * self.unit - gap,
-            key.h * self.unit - gap,
+            pad + segment.x * self.unit + gap / 2,
+            pad + segment.y * self.unit + gap / 2,
+            segment.w * self.unit - gap,
+            segment.h * self.unit - gap,
         )
 
+    def key_rect(self, key: Key) -> QRectF:
+        """The key's bounding box, for damage regions and hit tests."""
+        rects = [self.segment_rect(s) for s in key.segments]
+        out = rects[0]
+        for r in rects[1:]:
+            out = out.united(r)
+        return out
+
+    def key_path(self, key: Key) -> QPainterPath:
+        """The key's outline: the union of its segments, drawn as one shape.
+
+        Interior corners -- where two segments meet -- must stay square. A real
+        ISO Enter has a sharp inner corner, and rounding it produces a visible
+        pinch. Uniting rounded rectangles alone would round every corner, so
+        each shared edge gets a plain "bridge" rectangle spanning it, which
+        fills the notches the rounding would otherwise leave.
+
+        Paths are cached per key: this is called on every repaint, and a union
+        is not cheap enough to redo for a keystroke.
+        """
+        cached = self._path_cache.get(key.id)
+        if cached is not None:
+            return cached
+
+        radius = 5.0 * self._scale
+        rects = [self.segment_rect(s) for s in key.segments]
+
+        path = QPainterPath()
+        for rect in rects:
+            rounded = QPainterPath()
+            rounded.addRoundedRect(rect, radius, radius)
+            path = path.united(rounded)
+
+        for i, a in enumerate(rects):
+            for b in rects[i + 1:]:
+                bridge = _bridge(a, b, radius)
+                if bridge is not None:
+                    filler = QPainterPath()
+                    filler.addRect(bridge)
+                    path = path.united(filler)
+
+        self._path_cache[key.id] = path
+        return path
+
+    def label_rect(self, key: Key) -> QRectF:
+        """Where the legend goes: the largest segment, not the bounding box.
+
+        The centre of an L-shape's bounding box is in the notch, outside the
+        key entirely.
+        """
+        return self.segment_rect(key.largest_segment)
+
     def key_at(self, pos) -> Key | None:
+        """A point inside any segment hits the whole key."""
         for key in self._visible_keys():
-            if self.key_rect(key).contains(pos):
+            if any(self.segment_rect(s).contains(pos) for s in key.segments):
                 return key
         return None
 
@@ -185,45 +243,57 @@ class KeyboardView(QWidget):
     def _paint_key(self, painter: QPainter, key: Key, rect: QRectF,
                    radius: float) -> None:
         theme = self._theme
-        render = self._state.render_key(key.code, key.base, key.shift,
-                                        key.sub, key.role)
+        render = self._state.render_key(key)
         fade = self._state.fading.get(key.code, 0.0)
 
-        face = theme.face_for_role(key.role)
-        text_color = theme.key_text_dim if render.dim else theme.key_text
-        border = theme.key_border
+        # A key may override theme colours for itself, so a user can mark up
+        # their own board without forking a whole theme (SPEC 4.1.4).
+        face = theme.key_face_override(key.style, key.role)
+        text_color = theme.key_text_override(
+            key.style, dim=render.dim)
+        border = theme.key_border_override(key.style)
+        accent = theme.accent_override(key.style)
 
         if render.style is KeyStyle.PRESSED:
-            face = theme.accent
+            face = accent
             text_color = theme.accent_text
-            border = theme.accent
+            border = accent
         elif render.style is KeyStyle.LATCHED:
             face = theme.latched
             text_color = theme.accent_text
             border = theme.latched
         elif fade > 0:
-            face = _blend(face, theme.accent, fade)
+            face = _blend(face, accent, fade)
             text_color = _blend(text_color, theme.accent_text, fade)
-            border = _blend(border, theme.accent, fade)
+            border = _blend(border, accent, fade)
         elif render.style is KeyStyle.UNBOUND:
             face = _with_alpha(face, face.alpha() * 0.45)
             text_color = theme.key_sub_text
 
         painter.setPen(border)
         painter.setBrush(face)
-        painter.drawRoundedRect(rect, radius, radius)
+        if len(key.segments) == 1:
+            # The common case must not pay for the rare one: a plain rounded
+            # rect, no path union, no cache lookup.
+            painter.drawRoundedRect(rect, radius, radius)
+        else:
+            painter.drawPath(self.key_path(key))
+
+        # Everything below is positioned on the largest segment, so an L-shaped
+        # key labels itself in its wide part rather than in the notch.
+        label_rect = self.label_rect(key)
 
         if render.led is not None:
-            self._paint_led(painter, rect, render.led)
+            self._paint_led(painter, label_rect, render.led)
 
         if render.text:
-            self._paint_label(painter, rect, render.text, text_color, key)
+            self._paint_label(painter, label_rect, render.text, text_color, key)
 
         if render.sub:
             painter.setPen(theme.key_sub_text)
             painter.setFont(self._font(7.0))
-            painter.drawText(rect.adjusted(0, 3 * self._scale,
-                                           -5 * self._scale, 0),
+            painter.drawText(label_rect.adjusted(0, 3 * self._scale,
+                                                 -5 * self._scale, 0),
                              Qt.AlignRight | Qt.AlignTop, render.sub)
 
     def _paint_led(self, painter: QPainter, rect: QRectF, on: bool) -> None:
@@ -290,6 +360,33 @@ class KeyboardView(QWidget):
             self.keyClicked.emit(key.code)
         else:
             super().mousePressEvent(event)
+
+
+def _bridge(a: QRectF, b: QRectF, radius: float) -> QRectF | None:
+    """A filler rectangle spanning the edge two segments share, or None.
+
+    Uniting rounded rectangles rounds every corner, including the ones on the
+    inside of an L where two segments meet. This rectangle covers that seam so
+    the joint reads as one continuous key.
+
+    Returns None for segments that do not share an edge -- including ones that
+    merely touch at a corner, where there is no seam to fill.
+    """
+    eps = 0.5   # sub-pixel: adjacent segments rarely land exactly equal
+
+    ox1, ox2 = max(a.left(), b.left()), min(a.right(), b.right())
+    oy1, oy2 = max(a.top(), b.top()), min(a.bottom(), b.bottom())
+
+    overlap_x = ox2 - ox1
+    overlap_y = oy2 - oy1
+
+    if overlap_x > eps and overlap_y > -eps:
+        # Stacked vertically, sharing a horizontal edge.
+        return QRectF(ox1, oy1 - radius, overlap_x, overlap_y + radius * 2)
+    if overlap_y > eps and overlap_x > -eps:
+        # Side by side, sharing a vertical edge.
+        return QRectF(ox1 - radius, oy1, overlap_x + radius * 2, overlap_y)
+    return None
 
 
 def _blend(a: QColor, b: QColor, t: float) -> QColor:

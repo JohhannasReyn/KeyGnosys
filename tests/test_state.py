@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from mousetrapkeys.documents import Registry
+from mousetrapkeys.documents import Key, Registry, Segment
 from mousetrapkeys.state import (
     SLOT_NAME_LIMIT, AppState, KeyStyle, LegendLayer,
 )
@@ -28,8 +28,14 @@ def state(registry: Registry) -> AppState:
     return st
 
 
+def make_key(code: str, base: str, shift=None, sub=None, role="normal") -> Key:
+    """A one-segment key, which is what all but the ISO Enter actually are."""
+    return Key(id=code.lower(), code=code, base=base, shift=shift, sub=sub,
+               role=role, segments=[Segment(id="s0", x=0, y=0)])
+
+
 def render(state: AppState, code: str, base: str, shift=None, role="normal"):
-    return state.render_key(code, base, shift, None, role)
+    return state.render_key(make_key(code, base, shift, role=role))
 
 
 # -- layer selection --------------------------------------------------------

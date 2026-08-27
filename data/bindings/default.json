@@ -1,9 +1,13 @@
 {
-  "schema": "mousetrapkeys/bindings/1",
+  "schema": "mousetrapkeys/bindings/2",
   "id": "default",
   "name": "Default cursor layer",
   "description": "Right hand steers, left hand clicks. Movement sits on the vi keys (HJKL) so the pointer is driven from the home row, and scrolling sits directly above it (YUIO) in the same order. The left hand keeps the click buttons and the precision modifier, so it can act without interrupting motion. Digits jump straight to a window slot; the numeric keypad, being physically a 3x3 grid, warps the pointer to the matching third of the screen.",
-
+  "metadata": {
+    "author": "MouseTrapKeys",
+    "source_template": null,
+    "revision": 1
+  },
   "settings": {
     "pointer_base_speed": 2,
     "pointer_max_speed": 28,
@@ -13,57 +17,266 @@
     "scroll_max_speed": 6,
     "scroll_ramp_ms": 500
   },
-
   "bindings": {
-    "KeyH": { "action": "pointer.move", "params": { "dir": "left" } },
-    "KeyJ": { "action": "pointer.move", "params": { "dir": "down" } },
-    "KeyK": { "action": "pointer.move", "params": { "dir": "up" } },
-    "KeyL": { "action": "pointer.move", "params": { "dir": "right" } },
-    "KeyF": { "action": "pointer.precision", "params": {}, "legend": "Slow" },
-
-    "KeyD": { "action": "button.click", "params": { "button": "left" } },
-    "KeyS": { "action": "button.click", "params": { "button": "right" } },
-    "KeyA": { "action": "button.click", "params": { "button": "middle" } },
-    "Space": { "action": "button.click", "params": { "button": "left" } },
-    "KeyX": { "action": "button.double_click", "params": { "button": "left" } },
-    "KeyG": { "action": "button.drag_lock", "params": { "button": "left" } },
-
-    "KeyY": { "action": "scroll.scroll", "params": { "dir": "left" } },
-    "KeyU": { "action": "scroll.scroll", "params": { "dir": "down" } },
-    "KeyI": { "action": "scroll.scroll", "params": { "dir": "up" } },
-    "KeyO": { "action": "scroll.scroll", "params": { "dir": "right" } },
-    "KeyP": { "action": "scroll.page", "params": { "dir": "up" } },
-    "Semicolon": { "action": "scroll.page", "params": { "dir": "down" } },
-
-    "Quote": { "action": "warp.corner", "params": { "corner": "center" } },
-    "Numpad7": { "action": "warp.grid", "params": { "cell": 1 } },
-    "Numpad8": { "action": "warp.grid", "params": { "cell": 2 } },
-    "Numpad9": { "action": "warp.grid", "params": { "cell": 3 } },
-    "Numpad4": { "action": "warp.grid", "params": { "cell": 4 } },
-    "Numpad5": { "action": "warp.grid", "params": { "cell": 5 } },
-    "Numpad6": { "action": "warp.grid", "params": { "cell": 6 } },
-    "Numpad1": { "action": "warp.grid", "params": { "cell": 7 } },
-    "Numpad2": { "action": "warp.grid", "params": { "cell": 8 } },
-    "Numpad3": { "action": "warp.grid", "params": { "cell": 9 } },
-
-    "KeyN": { "action": "window.cycle", "params": { "dir": "prev" } },
-    "KeyM": { "action": "window.cycle", "params": { "dir": "next" } },
-    "Comma": { "action": "window.focus_monitor", "params": { "target": "prev" } },
-    "Period": { "action": "window.focus_monitor", "params": { "target": "next" } },
-    "KeyB": { "action": "window.move_to_monitor", "params": { "target": "prev" } },
-    "Slash": { "action": "window.move_to_monitor", "params": { "target": "next" } },
-
-    "Digit1": { "action": "window.slot", "params": { "index": 1 } },
-    "Digit2": { "action": "window.slot", "params": { "index": 2 } },
-    "Digit3": { "action": "window.slot", "params": { "index": 3 } },
-    "Digit4": { "action": "window.slot", "params": { "index": 4 } },
-    "Digit5": { "action": "window.slot", "params": { "index": 5 } },
-    "Digit6": { "action": "window.slot", "params": { "index": 6 } },
-    "Digit7": { "action": "window.slot", "params": { "index": 7 } },
-    "Digit8": { "action": "window.slot", "params": { "index": 8 } },
-    "Digit9": { "action": "window.slot", "params": { "index": 9 } },
-
-    "Escape": { "action": "layer.release", "params": {} },
-    "Backquote": { "action": "overlay.toggle", "params": {} }
-  }
+    "KeyH": {
+      "action": "pointer.move",
+      "params": {
+        "dir": "left"
+      }
+    },
+    "KeyJ": {
+      "action": "pointer.move",
+      "params": {
+        "dir": "down"
+      }
+    },
+    "KeyK": {
+      "action": "pointer.move",
+      "params": {
+        "dir": "up"
+      }
+    },
+    "KeyL": {
+      "action": "pointer.move",
+      "params": {
+        "dir": "right"
+      }
+    },
+    "KeyF": {
+      "action": "pointer.precision",
+      "params": {},
+      "legend": "Slow"
+    },
+    "KeyD": {
+      "action": "button.click",
+      "params": {
+        "button": "left"
+      }
+    },
+    "KeyS": {
+      "action": "button.click",
+      "params": {
+        "button": "right"
+      }
+    },
+    "KeyA": {
+      "action": "button.click",
+      "params": {
+        "button": "middle"
+      }
+    },
+    "Space": {
+      "action": "button.click",
+      "params": {
+        "button": "left"
+      }
+    },
+    "KeyX": {
+      "action": "button.double_click",
+      "params": {
+        "button": "left"
+      }
+    },
+    "KeyG": {
+      "action": "button.drag_lock",
+      "params": {
+        "button": "left"
+      }
+    },
+    "KeyY": {
+      "action": "scroll.scroll",
+      "params": {
+        "dir": "left"
+      }
+    },
+    "KeyU": {
+      "action": "scroll.scroll",
+      "params": {
+        "dir": "down"
+      }
+    },
+    "KeyI": {
+      "action": "scroll.scroll",
+      "params": {
+        "dir": "up"
+      }
+    },
+    "KeyO": {
+      "action": "scroll.scroll",
+      "params": {
+        "dir": "right"
+      }
+    },
+    "KeyP": {
+      "action": "scroll.page",
+      "params": {
+        "dir": "up"
+      }
+    },
+    "Semicolon": {
+      "action": "scroll.page",
+      "params": {
+        "dir": "down"
+      }
+    },
+    "Quote": {
+      "action": "warp.corner",
+      "params": {
+        "corner": "center"
+      }
+    },
+    "Numpad7": {
+      "action": "warp.grid",
+      "params": {
+        "cell": 1
+      }
+    },
+    "Numpad8": {
+      "action": "warp.grid",
+      "params": {
+        "cell": 2
+      }
+    },
+    "Numpad9": {
+      "action": "warp.grid",
+      "params": {
+        "cell": 3
+      }
+    },
+    "Numpad4": {
+      "action": "warp.grid",
+      "params": {
+        "cell": 4
+      }
+    },
+    "Numpad5": {
+      "action": "warp.grid",
+      "params": {
+        "cell": 5
+      }
+    },
+    "Numpad6": {
+      "action": "warp.grid",
+      "params": {
+        "cell": 6
+      }
+    },
+    "Numpad1": {
+      "action": "warp.grid",
+      "params": {
+        "cell": 7
+      }
+    },
+    "Numpad2": {
+      "action": "warp.grid",
+      "params": {
+        "cell": 8
+      }
+    },
+    "Numpad3": {
+      "action": "warp.grid",
+      "params": {
+        "cell": 9
+      }
+    },
+    "KeyN": {
+      "action": "window.cycle",
+      "params": {
+        "dir": "prev"
+      }
+    },
+    "KeyM": {
+      "action": "window.cycle",
+      "params": {
+        "dir": "next"
+      }
+    },
+    "Comma": {
+      "action": "window.focus_monitor",
+      "params": {
+        "target": "prev"
+      }
+    },
+    "Period": {
+      "action": "window.focus_monitor",
+      "params": {
+        "target": "next"
+      }
+    },
+    "KeyB": {
+      "action": "window.move_to_monitor",
+      "params": {
+        "target": "prev"
+      }
+    },
+    "Slash": {
+      "action": "window.move_to_monitor",
+      "params": {
+        "target": "next"
+      }
+    },
+    "Digit1": {
+      "action": "window.slot",
+      "params": {
+        "index": 1
+      }
+    },
+    "Digit2": {
+      "action": "window.slot",
+      "params": {
+        "index": 2
+      }
+    },
+    "Digit3": {
+      "action": "window.slot",
+      "params": {
+        "index": 3
+      }
+    },
+    "Digit4": {
+      "action": "window.slot",
+      "params": {
+        "index": 4
+      }
+    },
+    "Digit5": {
+      "action": "window.slot",
+      "params": {
+        "index": 5
+      }
+    },
+    "Digit6": {
+      "action": "window.slot",
+      "params": {
+        "index": 6
+      }
+    },
+    "Digit7": {
+      "action": "window.slot",
+      "params": {
+        "index": 7
+      }
+    },
+    "Digit8": {
+      "action": "window.slot",
+      "params": {
+        "index": 8
+      }
+    },
+    "Digit9": {
+      "action": "window.slot",
+      "params": {
+        "index": 9
+      }
+    },
+    "Escape": {
+      "action": "layer.release",
+      "params": {}
+    },
+    "Backquote": {
+      "action": "overlay.toggle",
+      "params": {}
+    }
+  },
+  "unassigned": []
 }

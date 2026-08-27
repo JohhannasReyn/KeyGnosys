@@ -8,9 +8,14 @@ import pytest
 
 from mousetrapkeys import paths
 from mousetrapkeys.documents import (
-    BindingSet, DocumentError, Layout, Profile, Registry, Theme,
-    canonical_modifiers,
+    Binding, BindingSet, DiagnosticSink, DocumentError, Layout, Profile,
+    Registry, Segment, Theme, canonical_modifiers,
 )
+
+
+def _flat_key(code: str = "KeyA", x: float = 0) -> dict:
+    """A schema-1 style key: geometry directly on the key, no segments."""
+    return {"code": code, "x": x, "y": 0, "legend": {"base": code[-1]}}
 
 
 @pytest.fixture(scope="module")
@@ -28,7 +33,7 @@ def test_all_bundled_documents_load(registry: Registry) -> None:
 
 def test_expected_layouts_present(registry: Registry) -> None:
     for layout_id in ("us-ansi-104", "us-iso-105", "thinkpad-compact",
-                      "asus-compact"):
+                      "asus-zenbook", "asus-vivobook-s"):
         assert layout_id in registry.layouts
 
 
@@ -39,12 +44,13 @@ def test_key_counts_match_their_names(registry: Registry) -> None:
 
 
 def test_no_layout_has_overlapping_keys(registry: Registry) -> None:
+    """Between *different* logical keys. A key's own segments are exempt."""
     for layout in registry.layouts.values():
         keys = layout.keys
         for i, a in enumerate(keys):
             for b in keys[i + 1:]:
                 assert not a.overlaps(b), (
-                    f"{layout.id}: {a.code} overlaps {b.code}")
+                    f"{layout.id}: {a.id} overlaps {b.id}")
 
 
 def test_keys_stay_within_declared_size(registry: Registry) -> None:
@@ -79,27 +85,42 @@ def test_profiles_canonicalise_modifier_combinations(registry: Registry) -> None
 def test_layout_rejects_unknown_schema_major() -> None:
     with pytest.raises(DocumentError, match="not supported"):
         Layout.from_dict({"schema": "mousetrapkeys/layout/9", "id": "x",
-                          "keys": [{"code": "KeyA", "x": 0, "y": 0,
-                                    "legend": {"base": "A"}}]})
+                          "keys": [_flat_key()]})
 
 
 def test_layout_rejects_bad_id() -> None:
     with pytest.raises(DocumentError, match="id must match"):
-        Layout.from_dict({"schema": "mousetrapkeys/layout/1", "id": "Not Valid",
-                          "keys": [{"code": "KeyA", "x": 0, "y": 0,
-                                    "legend": {"base": "A"}}]})
+        Layout.from_dict({"schema": "mousetrapkeys/layout/2", "id": "Not Valid",
+                          "keys": [_flat_key()]})
 
 
 def test_layout_rejects_empty_keys() -> None:
     with pytest.raises(DocumentError, match="non-empty"):
-        Layout.from_dict({"schema": "mousetrapkeys/layout/1", "id": "x",
+        Layout.from_dict({"schema": "mousetrapkeys/layout/2", "id": "x",
                           "keys": []})
 
 
-def test_layout_rejects_key_without_legend() -> None:
-    with pytest.raises(DocumentError, match="legend.base"):
-        Layout.from_dict({"schema": "mousetrapkeys/layout/1", "id": "x",
-                          "keys": [{"code": "KeyA", "x": 0, "y": 0}]})
+def test_bad_key_is_dropped_but_the_layout_still_loads() -> None:
+    """A key-level failure must never blank the whole keyboard (P6)."""
+    sink = DiagnosticSink()
+    layout = Layout.from_dict({
+        "schema": "mousetrapkeys/layout/2", "id": "x",
+        "keys": [
+            _flat_key("KeyA", 0),
+            {"code": "KeyB", "segments": [{"x": 1, "y": 0}]},   # no legend
+            {"code": "KeyC", "legend": {"base": "C"},
+             "segments": [{"x": 2, "y": 0, "w": 0}]},           # zero width
+            _flat_key("KeyD", 3),
+        ],
+    }, sink)
+    assert [k.code for k in layout.keys] == ["KeyA", "KeyD"]
+    assert sum(1 for d in sink if d.code == "layout.key_invalid") == 2
+
+
+def test_layout_with_no_usable_keys_is_rejected() -> None:
+    with pytest.raises(DocumentError, match="no valid keys"):
+        Layout.from_dict({"schema": "mousetrapkeys/layout/2", "id": "x",
+                          "keys": [{"code": "KeyA", "segments": []}]})
 
 
 def test_theme_rejects_missing_tokens() -> None:

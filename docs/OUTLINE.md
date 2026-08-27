@@ -202,7 +202,7 @@ Everything user-facing is one of four JSON document types. Each is versioned by 
 
 | Kind | Answers | Shipped examples |
 |------|---------|------------------|
-| **Layout** | Where are the keys, and what shape are they? | `us-ansi-104`, `us-iso-105`, `thinkpad-compact`, `asus-compact` |
+| **Layout** | Where are the keys, and what shape are they? | `us-ansi-104`, `us-iso-105`, `thinkpad-compact`, `asus-vivobook-s`, `asus-zenbook` |
 | **Bindings** | What does each key do in the cursor layer? | `default` |
 | **Theme** | What colours? | `dark`, `light` |
 | **App profile** | Which app is this, and what are its shortcuts? | Chrome, VS Code, file manager, terminal |
