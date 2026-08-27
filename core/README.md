@@ -12,9 +12,10 @@ not written yet. What exists today:
 |---|---|
 | ✅ | `mtk_engine`: the platform-free library, CMake target, warning setup |
 | ✅ | `src/keycode.cpp` — the key vocabulary, interning, modifier grouping |
-| ✅ | Test harness and `ctest` wiring; 9 tests, clean under `-Werror -Wconversion` |
+| ✅ | `src/layer_engine.cpp` — the CapsLock state machine, the grace window, and the P7 forwarded-release invariant with its mirror |
+| ✅ | Test harness and `ctest` wiring; 96 tests, clean under `-Werror -Wconversion` |
 | ✅ | Interface headers defining the seam ([`include/mtk/`](include/mtk/)) |
-| 🚧 | Layer engine, motion integrator, action dispatch, IPC server (**M2**) |
+| 🚧 | Motion integrator, action dispatch, IPC server (rest of **M2**) |
 | 🚧 | Windows backend: hook, `SendInput`, Win32 windows (**M3**) |
 | 🚧 | Linux/X11 backend: evdev, uinput, EWMH, XRandR (**M4**) |
 
@@ -82,7 +83,10 @@ failing output automatically; to run a test binary directly for more detail:
 ### Why it is split this way
 
 **`mtk_engine` touches no OS API.** No device, no thread, no system call. It
-takes events and a clock and returns decisions. That is a design constraint, not
+takes events and a clock and returns decisions. `test_layer_engine` exercises
+the whole CapsLock state machine on a synthetic timeline, including a property
+test that replays 200 random event sequences and asserts no key is ever left
+stranded down. That is a design constraint, not
 an accident: it is the only way the concurrency-sensitive logic inherited from
 the original prototype — the CapsLock race window, the forwarded-release
 invariant — can be tested at all. `ctest` needs no display, no privileges and no
