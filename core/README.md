@@ -13,7 +13,7 @@ not written yet. What exists today:
 | ✅ | `mtk_engine`: the platform-free library, CMake target, warning setup |
 | ✅ | `src/keycode.cpp` — the key vocabulary, interning, modifier grouping |
 | ✅ | `src/layer_engine.cpp` — the CapsLock state machine, the grace window, and the P7 forwarded-release invariant with its mirror |
-| ✅ | Test harness and `ctest` wiring; 94 tests, clean under `-Werror -Wconversion` |
+| ✅ | Test harness and `ctest` wiring; 96 tests, clean under `-Werror -Wconversion` |
 | ✅ | Interface headers defining the seam ([`include/mtk/`](include/mtk/)) |
 | 🚧 | Motion integrator, action dispatch, IPC server (rest of **M2**) |
 | 🚧 | Windows backend: hook, `SendInput`, Win32 windows (**M3**) |

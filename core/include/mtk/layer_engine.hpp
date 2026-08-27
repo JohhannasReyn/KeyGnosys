@@ -260,7 +260,13 @@ private:
     // Returns false, and emits a Suppress instead, when the obligation cannot
     // be recorded. Creating an obligation that cannot be discharged would be
     // strictly worse than dropping the keystroke.
-    bool forwardPress(KeyCode code, KeyState state, DecisionBuffer& out);
+    //
+    // `suppressAs` is the state that Suppress reports. It is almost always the
+    // press being forwarded, but the grace-window tap replay forwards a Down
+    // while handling an Up -- and a Suppress must describe the event it
+    // suppressed, not the one it was trying to synthesise.
+    bool forwardPress(KeyCode code, KeyState state, DecisionBuffer& out,
+                      KeyState suppressAs = KeyState::Down);
     void forgetForwarded(KeyCode code);
 
     Slot& slot(KeyCode code) { return slots_[code.id()]; }

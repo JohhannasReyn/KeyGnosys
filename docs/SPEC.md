@@ -143,7 +143,7 @@ not to await permission:
   turned out to be, and its release obligation is recorded;
 - forwarded presses are untouched. P7 outranks a config reload.
 
-Multiple keys resolved by one reload are emitted in press order (§6.3.2).
+Multiple keys resolved by one reload are emitted in press order (§6.3.3).
 
 ### 3.4 Update and migration policy
 
@@ -887,7 +887,20 @@ it, not merely observed not to happen under ordinary traffic.
 Capacity drops **MUST** be counted and exposed, so that a condition this
 unreachable surfaces as a diagnostic if it ever occurs.
 
-#### 6.3.2 Event ordering
+#### 6.3.2 Decisions describe the event they resolve
+
+A `Suppress` decision **MUST** report the `KeyState` of the input event it
+suppressed, not of some other event the engine was attempting to synthesise.
+The one case where these differ is the grace-window tap replay, which forwards
+a press while handling a release: if that press cannot be forwarded, the
+resulting `Suppress` reports the **release**.
+
+The rule exists so a `Suppress` is self-describing. Logging, tracing,
+diagnostics and any future IPC consumer read the decision stream without access
+to the event that produced it, and a decision that misreports its own state is
+a trap for every one of them.
+
+#### 6.3.3 Event ordering
 
 Decisions **MUST** be emitted in a deterministic order, and that order **MUST**
 be the order the keys were pressed in. This applies to every place the engine
@@ -903,7 +916,7 @@ simultaneous movement keys starts first, and whether a bug reproduces. Leaving
 it to a hash table's iteration order would make the engine's output depend on
 nothing the user can see or control.
 
-#### 6.3.3 Malformed and duplicate events
+#### 6.3.4 Malformed and duplicate events
 
 The engine **MUST** tolerate physical event streams that do not alternate
 cleanly. A dropped event, a stuck driver, or a device re-plugged mid-keypress
