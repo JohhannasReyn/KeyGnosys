@@ -1,16 +1,16 @@
 {
   "schema": "mousetrapkeys/layout/2",
-  "id": "us-iso-105",
-  "name": "US-International Full-Size (ISO 105)",
-  "description": "Full-size ISO variant: the tall L-shaped Enter, a short left Shift, and the extra IntlBackslash key beside it. This is the board usually meant by \"105-key\".",
+  "id": "asus-vivobook-s",
+  "name": "Asus Vivobook S 15/16 (laptop)",
+  "description": "Asus Vivobook S 15 / S 16, which unlike the Zenbook carries a numeric keypad and a navigation row above it. A starting template, not a model-exact reproduction.",
   "metadata": {
     "author": "MouseTrapKeys",
     "source_template": null,
-    "model": "Generic ISO full-size",
+    "model": "Asus Vivobook S 15 / S 16",
     "revision": 1
   },
   "size": {
-    "w": 22.5,
+    "w": 19.25,
     "h": 6.25
   },
   "keys": [
@@ -24,8 +24,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 0,
-          "y": 0
+          "x": 0.0,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -39,8 +40,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 2.0,
-          "y": 0
+          "x": 1.0714,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -54,8 +56,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 3.0,
-          "y": 0
+          "x": 2.1428,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -69,8 +72,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 4.0,
-          "y": 0
+          "x": 3.2142,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -84,8 +88,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 5.0,
-          "y": 0
+          "x": 4.2856,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -99,8 +104,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 6.5,
-          "y": 0
+          "x": 5.357,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -114,8 +120,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 7.5,
-          "y": 0
+          "x": 6.4284,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -129,8 +136,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 8.5,
-          "y": 0
+          "x": 7.4998,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -144,8 +152,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 9.5,
-          "y": 0
+          "x": 8.5712,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -159,8 +168,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 11.0,
-          "y": 0
+          "x": 9.6426,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -174,8 +184,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 12.0,
-          "y": 0
+          "x": 10.714,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -189,8 +200,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 13.0,
-          "y": 0
+          "x": 11.7854,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -204,8 +216,25 @@
       "segments": [
         {
           "id": "s0",
-          "x": 14.0,
-          "y": 0
+          "x": 12.8568,
+          "y": 0,
+          "w": 1.0714
+        }
+      ]
+    },
+    {
+      "id": "delete",
+      "code": "Delete",
+      "legend": {
+        "base": "Del"
+      },
+      "role": "system",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 13.9282,
+          "y": 0,
+          "w": 1.0714
         }
       ]
     },
@@ -215,7 +244,7 @@
       "legend": {
         "base": "PrtSc"
       },
-      "role": "system",
+      "role": "nav",
       "segments": [
         {
           "id": "s0",
@@ -225,12 +254,12 @@
       ]
     },
     {
-      "id": "scroll-lock",
-      "code": "ScrollLock",
+      "id": "home",
+      "code": "Home",
       "legend": {
-        "base": "Scroll"
+        "base": "Home"
       },
-      "role": "toggle",
+      "role": "nav",
       "segments": [
         {
           "id": "s0",
@@ -240,16 +269,31 @@
       ]
     },
     {
-      "id": "pause",
-      "code": "Pause",
+      "id": "end",
+      "code": "End",
       "legend": {
-        "base": "Pause"
+        "base": "End"
       },
-      "role": "system",
+      "role": "nav",
       "segments": [
         {
           "id": "s0",
           "x": 17.25,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "id": "insert",
+      "code": "Insert",
+      "legend": {
+        "base": "Ins"
+      },
+      "role": "nav",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 18.25,
           "y": 0
         }
       ]
@@ -833,8 +877,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 12.75,
-          "y": 3.25
+          "x": 13.5,
+          "y": 2.25,
+          "w": 1.5
         }
       ]
     },
@@ -848,15 +893,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 13.5,
-          "y": 2.25,
-          "w": 1.5
-        },
-        {
-          "id": "s1",
-          "x": 13.75,
+          "x": 12.75,
           "y": 3.25,
-          "w": 1.25
+          "w": 2.25
         }
       ]
     },
@@ -872,22 +911,7 @@
           "id": "s0",
           "x": 0,
           "y": 4.25,
-          "w": 1.25
-        }
-      ]
-    },
-    {
-      "id": "intl-backslash",
-      "code": "IntlBackslash",
-      "legend": {
-        "base": "\\",
-        "shift": "|"
-      },
-      "segments": [
-        {
-          "id": "s0",
-          "x": 1.25,
-          "y": 4.25
+          "w": 2.25
         }
       ]
     },
@@ -1067,6 +1091,21 @@
       ]
     },
     {
+      "id": "fn",
+      "code": "Fn",
+      "legend": {
+        "base": "Fn"
+      },
+      "role": "modifier",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 1.25,
+          "y": 5.25
+        }
+      ]
+    },
+    {
       "id": "meta-left",
       "code": "MetaLeft",
       "legend": {
@@ -1076,9 +1115,8 @@
       "segments": [
         {
           "id": "s0",
-          "x": 1.25,
-          "y": 5.25,
-          "w": 1.25
+          "x": 2.25,
+          "y": 5.25
         }
       ]
     },
@@ -1092,7 +1130,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 2.5,
+          "x": 3.25,
           "y": 5.25,
           "w": 1.25
         }
@@ -1107,9 +1145,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 3.75,
+          "x": 4.5,
           "y": 5.25,
-          "w": 6.25
+          "w": 5.5
         }
       ]
     },
@@ -1124,40 +1162,7 @@
         {
           "id": "s0",
           "x": 10,
-          "y": 5.25,
-          "w": 1.25
-        }
-      ]
-    },
-    {
-      "id": "meta-right",
-      "code": "MetaRight",
-      "legend": {
-        "base": "Win"
-      },
-      "role": "modifier",
-      "segments": [
-        {
-          "id": "s0",
-          "x": 11.25,
-          "y": 5.25,
-          "w": 1.25
-        }
-      ]
-    },
-    {
-      "id": "context-menu",
-      "code": "ContextMenu",
-      "legend": {
-        "base": "Menu"
-      },
-      "role": "system",
-      "segments": [
-        {
-          "id": "s0",
-          "x": 12.5,
-          "y": 5.25,
-          "w": 1.25
+          "y": 5.25
         }
       ]
     },
@@ -1171,114 +1176,8 @@
       "segments": [
         {
           "id": "s0",
-          "x": 13.75,
-          "y": 5.25,
-          "w": 1.25
-        }
-      ]
-    },
-    {
-      "id": "insert",
-      "code": "Insert",
-      "legend": {
-        "base": "Ins"
-      },
-      "role": "nav",
-      "segments": [
-        {
-          "id": "s0",
-          "x": 15.25,
-          "y": 1.25
-        }
-      ]
-    },
-    {
-      "id": "home",
-      "code": "Home",
-      "legend": {
-        "base": "Home"
-      },
-      "role": "nav",
-      "segments": [
-        {
-          "id": "s0",
-          "x": 16.25,
-          "y": 1.25
-        }
-      ]
-    },
-    {
-      "id": "page-up",
-      "code": "PageUp",
-      "legend": {
-        "base": "PgUp"
-      },
-      "role": "nav",
-      "segments": [
-        {
-          "id": "s0",
-          "x": 17.25,
-          "y": 1.25
-        }
-      ]
-    },
-    {
-      "id": "delete",
-      "code": "Delete",
-      "legend": {
-        "base": "Del"
-      },
-      "role": "nav",
-      "segments": [
-        {
-          "id": "s0",
-          "x": 15.25,
-          "y": 2.25
-        }
-      ]
-    },
-    {
-      "id": "end",
-      "code": "End",
-      "legend": {
-        "base": "End"
-      },
-      "role": "nav",
-      "segments": [
-        {
-          "id": "s0",
-          "x": 16.25,
-          "y": 2.25
-        }
-      ]
-    },
-    {
-      "id": "page-down",
-      "code": "PageDown",
-      "legend": {
-        "base": "PgDn"
-      },
-      "role": "nav",
-      "segments": [
-        {
-          "id": "s0",
-          "x": 17.25,
-          "y": 2.25
-        }
-      ]
-    },
-    {
-      "id": "arrow-up",
-      "code": "ArrowUp",
-      "legend": {
-        "base": "▲"
-      },
-      "role": "nav",
-      "segments": [
-        {
-          "id": "s0",
-          "x": 16.25,
-          "y": 4.25
+          "x": 11,
+          "y": 5.25
         }
       ]
     },
@@ -1292,8 +1191,24 @@
       "segments": [
         {
           "id": "s0",
-          "x": 15.25,
+          "x": 12.0,
           "y": 5.25
+        }
+      ]
+    },
+    {
+      "id": "arrow-up",
+      "code": "ArrowUp",
+      "legend": {
+        "base": "▲"
+      },
+      "role": "nav",
+      "segments": [
+        {
+          "id": "s0",
+          "x": 13.0,
+          "y": 5.25,
+          "h": 0.5
         }
       ]
     },
@@ -1307,8 +1222,9 @@
       "segments": [
         {
           "id": "s0",
-          "x": 16.25,
-          "y": 5.25
+          "x": 13.0,
+          "y": 5.75,
+          "h": 0.5
         }
       ]
     },
@@ -1322,7 +1238,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 17.25,
+          "x": 14.0,
           "y": 5.25
         }
       ]
@@ -1337,7 +1253,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 18.5,
+          "x": 15.25,
           "y": 1.25
         }
       ]
@@ -1352,7 +1268,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 19.5,
+          "x": 16.25,
           "y": 1.25
         }
       ]
@@ -1367,7 +1283,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 20.5,
+          "x": 17.25,
           "y": 1.25
         }
       ]
@@ -1382,7 +1298,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 21.5,
+          "x": 18.25,
           "y": 1.25
         }
       ]
@@ -1397,7 +1313,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 18.5,
+          "x": 15.25,
           "y": 2.25
         }
       ]
@@ -1412,7 +1328,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 19.5,
+          "x": 16.25,
           "y": 2.25
         }
       ]
@@ -1427,7 +1343,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 20.5,
+          "x": 17.25,
           "y": 2.25
         }
       ]
@@ -1442,7 +1358,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 21.5,
+          "x": 18.25,
           "y": 2.25,
           "h": 2
         }
@@ -1458,7 +1374,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 18.5,
+          "x": 15.25,
           "y": 3.25
         }
       ]
@@ -1473,7 +1389,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 19.5,
+          "x": 16.25,
           "y": 3.25
         }
       ]
@@ -1488,7 +1404,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 20.5,
+          "x": 17.25,
           "y": 3.25
         }
       ]
@@ -1503,7 +1419,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 18.5,
+          "x": 15.25,
           "y": 4.25
         }
       ]
@@ -1518,7 +1434,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 19.5,
+          "x": 16.25,
           "y": 4.25
         }
       ]
@@ -1533,7 +1449,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 20.5,
+          "x": 17.25,
           "y": 4.25
         }
       ]
@@ -1548,7 +1464,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 21.5,
+          "x": 18.25,
           "y": 4.25,
           "h": 2
         }
@@ -1564,7 +1480,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 18.5,
+          "x": 15.25,
           "y": 5.25,
           "w": 2
         }
@@ -1580,7 +1496,7 @@
       "segments": [
         {
           "id": "s0",
-          "x": 20.5,
+          "x": 17.25,
           "y": 5.25
         }
       ]

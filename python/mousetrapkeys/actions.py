@@ -214,3 +214,49 @@ def is_held(action: str) -> bool:
 
 def action_names() -> list[str]:
     return sorted(CATALOG)
+
+
+#: Concrete parameter sets per action, enumerating every command a user could
+#: sensibly bind. Actions taking no parameters map to a single empty set.
+#:
+#: `warp.monitor` and friends list only `next`/`prev` and not numeric indices:
+#: a specific monitor index is a thing the user configures on a command they
+#: already have, not one of an unbounded set of menu entries.
+COMMAND_PARAMS: dict[str, list[dict[str, Any]]] = {
+    "pointer.move": [{"dir": d} for d in DIRECTIONS],
+    "pointer.precision": [{}],
+    "button.click": [{"button": b} for b in BUTTONS],
+    "button.double_click": [{"button": b} for b in BUTTONS],
+    "button.drag_lock": [{"button": b} for b in BUTTONS],
+    "scroll.scroll": [{"dir": d} for d in DIRECTIONS],
+    "scroll.page": [{"dir": d} for d in ("up", "down")],
+    "warp.grid": [{"cell": c} for c in range(1, 10)],
+    "warp.corner": [{"corner": c} for c in CORNERS],
+    "warp.monitor": [{"target": t} for t in ("next", "prev")],
+    "window.cycle": [{"dir": d} for d in ("next", "prev")],
+    "window.slot": [{"index": i} for i in range(1, 10)],
+    "window.focus_monitor": [{"target": t} for t in ("next", "prev")],
+    "window.move_to_monitor": [{"target": t} for t in ("next", "prev")],
+    "layer.release": [{}],
+    "overlay.toggle": [{}],
+    "system.reload": [{}],
+    # Deliberately absent: key.passthrough takes an arbitrary key code, so
+    # there is no finite menu of it. The editor offers it as a special entry
+    # that prompts for the key.
+}
+
+
+def catalog_commands() -> list[tuple[str, dict[str, Any]]]:
+    """Every bindable command, as (action, params) pairs.
+
+    This is what the editor's unassigned list derives its "available" half
+    from. It is computed from the live catalog rather than stored in any
+    document, so a command added in a later release appears for users whose
+    configuration predates it (SPEC 3.4.5).
+    """
+    out: list[tuple[str, dict[str, Any]]] = []
+    for name in sorted(CATALOG):
+        for params in COMMAND_PARAMS.get(name, []):
+            if validate_binding(name, params) is None:
+                out.append((name, params))
+    return out
