@@ -101,6 +101,7 @@ KeyCode KeyCode::fromString(std::string_view name) {
     // build does not know must still load and render (SPEC 2.1); it simply
     // never highlights, because no backend will emit it.
     if (table.names.size() >= KeyCode::kMaxId) return KeyCode{};  // id space full
+
     table.names.push_back(key);
     const auto id = static_cast<std::uint16_t>(table.names.size());
     table.ids.emplace(key, id);

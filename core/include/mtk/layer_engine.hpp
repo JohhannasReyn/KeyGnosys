@@ -94,9 +94,12 @@ struct Decision {
 // untracked forwarded press is a key held down forever.
 // ---------------------------------------------------------------------------
 
-// Per-key state is indexed directly by KeyCode::id().
+// Per-key state is indexed directly by KeyCode::id(). Sized from KeyCode's own
+// bound, so every id valid() admits has a slot -- including the boundary one.
 inline constexpr std::size_t kKeyIdSpace =
     static_cast<std::size_t>(KeyCode::kMaxId) + 1;
+static_assert(kKeyIdSpace == 0x10000,
+              "per-key state must cover the whole KeyCode id domain");
 
 // Simultaneously buffered presses.
 inline constexpr std::size_t kMaxPending = 64;
@@ -283,8 +286,13 @@ private:
     // instead of bypassing it (SPEC 6.3.2).
     bool capsPhysicallyDown_ = false;
     std::optional<TimePoint> capsPressedAt_;
-    // True when the current CapsLock press was forwarded to the OS as a real
-    // CapsLock. Its release must be forwarded too.
+    // True when the current CapsLock press was classified as the Shift+CapsLock
+    // escape gesture. Tracked separately from whether forwarding it actually
+    // succeeded: a gesture whose obligation could not be recorded is still a
+    // gesture, and its release must not fall through into layer handling.
+    bool capsEscapeGesture_ = false;
+    // True when that press was also successfully forwarded to the OS. Its
+    // release must then be forwarded too.
     bool capsForwarded_ = false;
     // Whether the layer was already latched when the current CapsLock press
     // began. In hybrid mode this is what separates a tap that latches on from

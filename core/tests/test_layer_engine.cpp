@@ -67,6 +67,17 @@ struct Fixture {
     }
 };
 
+// Distinct interned codes, for driving the bounded lists past capacity.
+std::vector<KeyCode> syntheticKeys(const char* prefix, std::size_t count) {
+    std::vector<KeyCode> keys;
+    keys.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        keys.push_back(KeyCode::fromString(std::string(prefix)
+                                           + std::to_string(i)));
+    }
+    return keys;
+}
+
 // Running press/release depth per key over a decision log.
 struct Depth {
     std::vector<std::pair<KeyCode, int>> entries;
@@ -619,16 +630,6 @@ MTK_TEST(an_orphan_release_of_a_high_id_key_is_suppressed) {
 
 namespace {
 
-std::vector<KeyCode> syntheticKeys(const char* prefix, std::size_t count) {
-    std::vector<KeyCode> keys;
-    keys.reserve(count);
-    for (std::size_t i = 0; i < count; ++i) {
-        keys.push_back(KeyCode::fromString(std::string(prefix)
-                                           + std::to_string(i)));
-    }
-    return keys;
-}
-
 }  // namespace
 
 MTK_TEST(overflowing_the_forwarded_list_suppresses_rather_than_stranding) {
@@ -723,6 +724,153 @@ MTK_TEST(the_decision_buffer_holds_a_full_worst_case_unwind) {
     DecisionBuffer buffer;
     f.engine.releaseAll(buffer);
     MTK_CHECK(!buffer.overflowed());
+}
+
+// ---------------------------------------------------------------------------
+// The id boundary
+//
+// valid() admits every non-zero id, so per-key state must cover every non-zero
+// id. A disagreement between the two is an out-of-bounds access, not a policy
+// question.
+// ---------------------------------------------------------------------------
+
+MTK_TEST(the_largest_key_id_is_tracked_like_any_other) {
+    Fixture f;
+    const KeyCode boundary{KeyCode::kMaxId};
+    MTK_CHECK(boundary.valid());
+
+    MTK_CHECK(has(f.press(boundary, 0), Decision::Kind::Forward, boundary));
+    MTK_CHECK(has(f.release(boundary, 10), Decision::Kind::Forward, boundary));
+
+    // And its obligation survives a panic path, like any other key's.
+    f.press(boundary, 20);
+    MTK_CHECK(has(f.engine.releaseAll(), Decision::Kind::Forward, boundary));
+}
+
+MTK_TEST(the_largest_key_id_can_be_bound) {
+    // A BindingMap containing the boundary value must not index out of bounds.
+    Fixture f;
+    const KeyCode boundary{KeyCode::kMaxId};
+    f.engine.setBindings({{boundary, BindingKind::Action}});
+
+    f.press(CAPS, 0);
+    MTK_CHECK(has(f.press(boundary, 10), Decision::Kind::RunAction, boundary));
+    MTK_CHECK(has(f.release(boundary, 20), Decision::Kind::ReleaseAction,
+                  boundary));
+}
+
+MTK_TEST(the_largest_key_id_can_be_bound_as_passthrough) {
+    Fixture f;
+    const KeyCode boundary{KeyCode::kMaxId};
+    f.engine.setBindings({{boundary, BindingKind::Passthrough}});
+    f.press(CAPS, 0);
+    MTK_CHECK(has(f.press(boundary, 10), Decision::Kind::Forward, boundary));
+    MTK_CHECK(has(f.release(boundary, 20), Decision::Kind::Forward, boundary));
+}
+
+MTK_TEST(every_id_the_validity_contract_admits_has_state) {
+    // The contract, stated as a test rather than left to the reader: the
+    // storage domain and valid() agree at both ends.
+    MTK_CHECK(!KeyCode{0}.valid());
+    MTK_CHECK(KeyCode{1}.valid());
+    MTK_CHECK(KeyCode{KeyCode::kMaxId}.valid());
+    MTK_CHECK_EQ(kKeyIdSpace,
+                 static_cast<std::size_t>(KeyCode::kMaxId) + 1);
+}
+
+// ---------------------------------------------------------------------------
+// A real-CapsLock gesture that could not be forwarded
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Fills the forwarded list to capacity, with Shift held, so the CapsLock that
+// follows classifies as the escape gesture but cannot record its obligation.
+void saturateWithShiftHeld(Fixture& f, const char* prefix) {
+    f.press(LSHIFT, 0);
+    const auto filler = syntheticKeys(prefix, kMaxHeld + 4);
+    for (KeyCode code : filler) f.press(code, 1);
+    MTK_CHECK(f.engine.capacityDrops() > 0);
+}
+
+}  // namespace
+
+MTK_TEST(a_suppressed_escape_gesture_does_not_leave_the_layer_in_hold_mode) {
+    // The press is classified as a real CapsLock, so it never engaged the
+    // layer -- and its release must therefore never leave it either.
+    Fixture f(ActivationMode::Hold);
+    f.press(CAPS, 0);                        // engage the layer first
+    MTK_CHECK(f.engine.mode() == Mode::Cursor);
+    f.release(CAPS, 10);
+    f.press(CAPS, 20);                       // hold it down again
+    MTK_CHECK(f.engine.mode() == Mode::Cursor);
+    f.release(CAPS, 30);
+
+    Fixture g(ActivationMode::Hold);
+    saturateWithShiftHeld(g, "EscHold");
+    g.press(CAPS, 100);                      // gesture; forwarding fails
+    MTK_CHECK(has(g.last, Decision::Kind::Suppress, CAPS));
+    MTK_CHECK(!has(g.last, Decision::Kind::Forward, CAPS));
+    MTK_CHECK(g.engine.mode() == Mode::Normal);
+
+    g.release(CAPS, 200);
+    MTK_CHECK(has(g.last, Decision::Kind::Suppress, CAPS));
+    MTK_CHECK(!has(g.last, Decision::Kind::Forward, CAPS));
+    MTK_CHECK(g.engine.mode() == Mode::Normal);
+}
+
+MTK_TEST(a_suppressed_escape_gesture_does_not_toggle_the_layer) {
+    Fixture f(ActivationMode::Toggle);
+    saturateWithShiftHeld(f, "EscToggle");
+    f.press(CAPS, 100);
+    MTK_CHECK(f.engine.mode() == Mode::Normal);
+    MTK_CHECK(has(f.last, Decision::Kind::Suppress, CAPS));
+
+    f.release(CAPS, 200);
+    MTK_CHECK(f.engine.mode() == Mode::Normal);
+    MTK_CHECK(has(f.last, Decision::Kind::Suppress, CAPS));
+}
+
+MTK_TEST(a_suppressed_escape_gesture_does_not_latch_in_hybrid_mode) {
+    Fixture f(ActivationMode::Hybrid);
+    saturateWithShiftHeld(f, "EscHybrid");
+    f.press(CAPS, 100);
+    f.release(CAPS, 110);                    // a tap, which would normally latch
+    MTK_CHECK(f.engine.mode() == Mode::Normal);
+    MTK_CHECK(!f.engine.latched());
+    MTK_CHECK(has(f.last, Decision::Kind::Suppress, CAPS));
+}
+
+MTK_TEST(a_suppressed_escape_gesture_emits_no_orphan_release) {
+    // Its press never reached the OS, so its release must not either.
+    Fixture f(ActivationMode::Hybrid);
+    saturateWithShiftHeld(f, "EscOrphan");
+
+    std::vector<Decision> log;
+    for (const auto& d : f.press(CAPS, 100)) log.push_back(d);
+    for (const auto& d : f.release(CAPS, 200)) log.push_back(d);
+    for (const auto& d : f.engine.releaseAll()) log.push_back(d);
+
+    for (const auto& d : log) {
+        if (d.code == CAPS) {
+            MTK_CHECK(d.kind != Decision::Kind::Forward);
+        }
+    }
+}
+
+MTK_TEST(a_forwardable_escape_gesture_still_works_after_the_list_drains) {
+    // The suppression is a capacity condition, not a latch: once there is room
+    // again, the gesture behaves normally.
+    Fixture f(ActivationMode::Hybrid);
+    saturateWithShiftHeld(f, "EscDrain");
+    f.press(CAPS, 100);
+    f.release(CAPS, 110);
+    f.engine.releaseAll();                   // drains the forwarded list
+
+    f.press(LSHIFT, 200);
+    MTK_CHECK(has(f.press(CAPS, 210), Decision::Kind::Forward, CAPS));
+    MTK_CHECK(f.engine.mode() == Mode::Normal);
+    MTK_CHECK(has(f.release(CAPS, 220), Decision::Kind::Forward, CAPS));
 }
 
 // ---------------------------------------------------------------------------

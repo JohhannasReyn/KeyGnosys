@@ -853,7 +853,10 @@ merely intended.
 
 #### 6.3.1 State capacity and the key domain
 
-Per-key state **MUST** cover the entire `KeyCode` id space. There is deliberately
+Per-key state **MUST** cover the entire `KeyCode` id space, and the storage
+domain **MUST** agree with the validity contract at both ends: every id that
+`valid()` admits has a slot, including the largest one. A disagreement between
+the two is an out-of-bounds access, not a policy question. There is deliberately
 no "untracked" class of key: a key the engine cannot hold state for is a key
 whose invariants it cannot maintain, and forwarding such events blindly breaks
 both P7 and its mirror — an orphan release is forwarded, and a forwarded press
@@ -923,6 +926,12 @@ entirely:
 | A duplicate CapsLock press | Suppressed, or forwarded as a repeat if the press was a real CapsLock. It **MUST NOT** re-run activation — in `toggle` mode that would flip the layer twice for one physical press. |
 | A CapsLock release with no matching press | Suppressed, and **MUST NOT** change the mode, the latch, or anything else. |
 | A CapsLock release after `release_all` | The same: `release_all` clears the physical-down flag, so the release that follows is an orphan by definition. |
+| A `Shift+CapsLock` gesture whose forwarding could not be recorded | Press and release both suppressed. It remains an **escape gesture** throughout: the press never engaged the layer, so the release **MUST NOT** leave it. |
+
+The escape-gesture classification **MUST** be tracked independently of whether
+forwarding it to the OS succeeded. Deriving one from the other means a gesture
+that failed on a capacity bound falls through into layer-release handling, where
+it can leave a layer its press never engaged.
 
 The recorded press time **MUST** be cleared on release. Left set, it remains
 available to a later malformed event, which could latch the layer from a clock
@@ -1574,8 +1583,8 @@ explicit commitments.
 | Event ordering | Exact-sequence tests: buffered presses expiring together, buffered presses promoted by CapsLock, held actions released on leaving the layer, and `release_all` all emit in press order. Plus a replay test asserting identical decision sequences across repeated runs |
 | Allocation contract | Drive the engine through many event cycles against one `DecisionBuffer` and assert it never overflows its fixed capacity; separately construct the true worst-case unwind and assert the derived capacity holds it |
 | Forced capacity overflow | Deliberately exceed each bounded list — forwarded presses, held actions, buffered presses — with synthetic key codes, and assert the fail-safe: no forwarded press left unreleased, no action started without a release, no keystroke silently dropped where degrading would do. Observing that ordinary traffic does not overflow proves nothing about overflow |
-| Key domain | Assert a code interned beyond the built-in vocabulary is tracked like any other, and that an invalid code is suppressed in both directions |
-| Malformed CapsLock | Duplicate press does not double-toggle; orphan release does not change the mode or the latch; a stale press time cannot latch the layer later |
+| Key domain | Assert a code interned beyond the built-in vocabulary is tracked like any other, that an invalid code is suppressed in both directions, and that the largest valid id is tracked, bindable and safe to index |
+| Malformed CapsLock | Duplicate press does not double-toggle; orphan release does not change the mode or the latch; a stale press time cannot latch the layer later; an escape gesture suppressed for want of capacity leaves the mode and latch untouched through both its press and its release, in all three activation modes |
 | Reload | Assert a pending press survives a reload that keeps its binding, keeps its original press time, and resolves as a forwarded keystroke when the binding is removed |
 | Motion | Assert diagonal speed equals cardinal speed; assert fractional accumulation never loses pixels; assert the ramp is monotonic |
 | IPC | Golden-file tests of serialised messages; a fake client that stops reading, asserting the core does not block |
