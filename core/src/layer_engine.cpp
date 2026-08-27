@@ -39,13 +39,17 @@ void LayerEngine::setBoundKeys(std::unordered_set<KeyCode> bound) {
     bound_ = std::move(bound);
 }
 
+void LayerEngine::setPassthroughKeys(std::unordered_set<KeyCode> keys) {
+    passthroughKeys_ = std::move(keys);
+}
+
 // ---------------------------------------------------------------------------
 // P7: every forwarded press is recorded so its release is guaranteed to follow
 // ---------------------------------------------------------------------------
 
 void LayerEngine::forwardPress(KeyCode code, KeyState state,
                                std::vector<Decision>& out) {
-    passthrough_.insert(code);
+    forwardedPresses_.insert(code);
     out.push_back(forward(code, state));
 }
 
@@ -74,12 +78,19 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
             // A key already flagged as forwarded should not be pressed again
             // without an intervening release, but if the OS says so, staying
             // consistent beats asserting.
-            if (passthrough_.count(code)) {
+            if (forwardedPresses_.count(code)) {
                 out.push_back(forward(code, state));
                 return;
             }
 
             if (mode_ == Mode::Cursor) {
+                // An explicit `key.passthrough` binding reaches the OS even
+                // inside the layer, and is tracked like any other forwarded
+                // press so P7 covers it.
+                if (passthroughKeys_.count(code)) {
+                    forwardPress(code, state, out);
+                    return;
+                }
                 if (bound_.count(code)) {
                     heldActions_.insert(code);
                     out.push_back(runAction(code));
@@ -99,7 +110,10 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
                 return;
             }
 
-            if (!bound_.count(code)) {
+            // A passthrough key does the same thing in both modes, so there
+            // is nothing for the grace window to disambiguate. Buffering it
+            // would cost latency and buy nothing.
+            if (!bound_.count(code) || passthroughKeys_.count(code)) {
                 forwardPress(code, state, out);
                 return;
             }
@@ -114,8 +128,8 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
 
         case KeyState::Up: {
             // P7. Unconditional, whatever the mode has become in the meantime.
-            if (passthrough_.count(code)) {
-                passthrough_.erase(code);
+            if (forwardedPresses_.count(code)) {
+                forwardedPresses_.erase(code);
                 out.push_back(forward(code, state));
                 return;
             }
@@ -140,7 +154,7 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
         }
 
         case KeyState::Repeat: {
-            if (passthrough_.count(code)) {
+            if (forwardedPresses_.count(code)) {
                 out.push_back(forward(code, state));
                 return;
             }
@@ -206,7 +220,7 @@ void LayerEngine::onCapsLock(KeyState state, TimePoint now,
     // Release.
     if (capsForwarded_) {
         capsForwarded_ = false;
-        passthrough_.erase(caps);
+        forwardedPresses_.erase(caps);
         out.push_back(forward(caps, state));
         return;
     }
@@ -291,10 +305,10 @@ void LayerEngine::releaseAll(std::vector<Decision>& out) {
 
     // P7, the whole point of it: every press we forwarded gets its release,
     // even on a panic path.
-    for (KeyCode code : passthrough_) {
+    for (KeyCode code : forwardedPresses_) {
         out.push_back(forward(code, KeyState::Up));
     }
-    passthrough_.clear();
+    forwardedPresses_.clear();
 
     // Buffered presses never reached the OS, so there is nothing to release.
     // Dropping them is right for a panic path: replaying them as keystrokes
