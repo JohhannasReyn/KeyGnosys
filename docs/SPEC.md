@@ -779,16 +779,25 @@ engaged, each physical key falls into exactly one of three cases:
 
 | Key | Treatment |
 |-----|-----------|
-| Bound in the cursor layer | Runs its action. Suppressed; nothing reaches the OS. |
+| Bound to `key.passthrough` | **Forwarded.** The escape hatch (§7.6), for a key that must still reach the OS inside the layer. |
+| Bound to any other action | Runs its action. Suppressed; nothing reaches the OS. |
 | A modifier (`Shift`/`Control`/`Alt`/`Meta`) | **Forwarded.** Ctrl+click and Shift+drag must keep working, and a layer that broke them would be useless for the pointer control it exists to provide. |
 | Anything else | **Suppressed.** |
 
-Suppressing the third case is deliberate: the cursor layer is a *mode*, not an
+Suppressing the last case is deliberate: the cursor layer is a *mode*, not an
 overlay on normal typing. The overlay draws those keys blank and dimmed (§9.4)
 precisely to say they do nothing, and a key that silently typed a character
-while the map showed it as empty would be the worst of both. `key.passthrough`
-(§7.6) is the escape hatch for a key that must still reach the OS inside the
-layer.
+while the map showed it as empty would be the worst of both.
+
+**The escape hatch requires an explicit binding.** A key reaches the OS inside
+the layer only because it is bound to `key.passthrough`. Having no binding is
+never treated as permission to type — an unbound key is suppressed, without
+exception. The engine is told which keys are passthrough separately from which
+keys are bound, so the distinction cannot be lost.
+
+**A passthrough key is never delayed by the grace window.** It does the same
+thing whether the layer is engaged or not, so there is nothing to disambiguate,
+and buffering it would cost latency and buy nothing.
 
 **The grace window (inherited from the prototype).** A key bound in the cursor
 layer, pressed while in `NORMAL`, is *ambiguous* — the user may be typing it, or
@@ -801,16 +810,50 @@ Such a press is **buffered**, not forwarded, for up to `grace_ms`. It resolves a
 | The key is released | Ordinary tap. Forward press+release together, in order. |
 | `grace_ms` elapses | Ordinary hold. Forward the press, mark **passthrough**. |
 
-**The passthrough invariant (P7).** A key whose press was forwarded to the OS is
-flagged. Its release **MUST** also be forwarded, unconditionally, regardless of
-what the mode has become in the meantime. Violating this leaves a key stuck down
-in the compositor. This invariant applies equally to: mode changes, config
-reloads, `release_all`, client disconnects, and process shutdown — every exit path
-**MUST** run `OutputBackend::releaseAll()`.
+**The forwarded-release invariant (P7).** A key whose press was forwarded to the
+OS is flagged. Its release **MUST** also be forwarded, unconditionally,
+regardless of what the mode has become in the meantime. Violating this leaves a
+key stuck down in the compositor. The invariant applies equally to mode changes,
+config reloads, `release_all`, client disconnects, and process shutdown — every
+exit path **MUST** run `OutputBackend::releaseAll()`.
 
-Buffering adds up to `grace_ms` of latency, but **only** to keys that are bound in
-the cursor layer, and **only** when they are typed while the layer is off. Keys
-with no cursor-layer binding are never buffered and never delayed.
+It covers **every** press that reaches the OS, not only the grace-window replay:
+
+| Forwarded press | Why it is at risk |
+|-----------------|-------------------|
+| Ordinary typing while the layer is off | The layer may engage before the key is released |
+| A **modifier** forwarded inside the layer | The layer may deactivate, or change mode, while the modifier is still physically held |
+| A **`key.passthrough`** binding | Same: the layer may drop while the key is held |
+| A key replayed when the **grace window** lapses | The layer may engage immediately afterwards |
+| A **real CapsLock** from the escape gesture | Shift is commonly released first, changing the modifier state mid-press |
+
+There is exactly one code path by which a press reaches the OS, and it records
+the key as it goes. That is what makes the invariant checkable rather than
+merely intended.
+
+**The mirror obligation.** A release **MUST NOT** be forwarded unless the
+matching press was forwarded. If the layer deactivates while suppressed keys are
+still physically held — an unbound key, or one that was running an action — their
+releases **MUST** be suppressed too. Forwarding them would send the OS a key-up
+for a key it never saw go down, which is the same class of corruption as a stuck
+key, in the opposite direction.
+
+Both directions are proved by property tests over randomised event sequences
+(§13), not merely asserted.
+
+**Only bound keys are ever delayed.** Buffering adds up to `grace_ms` of latency,
+and it applies **only** to keys bound to an action in the cursor layer, and
+**only** while the layer is off. Three categories are never buffered and never
+delayed:
+
+- keys with no cursor-layer binding — nothing to disambiguate;
+- keys bound to `key.passthrough` — they behave identically in both modes;
+- every key, once the layer is already engaged — the ambiguity the window exists
+  to resolve cannot arise.
+
+This matters because the delay is otherwise invisible to the user: a keyboard
+that felt sluggish on ordinary typing would be a worse product than one without
+the layer at all.
 
 ### 6.4 Motion integrator
 
@@ -1407,7 +1450,8 @@ explicit commitments.
 | Layout editor | Property test: every canvas operation (move, resize, align, distribute, snap, add, delete, segment edit) leaves a document that still validates. Round-trip test: save → load → save is byte-identical. Undo/redo returns to the exact prior document |
 | Layer engine | **Pure unit tests over a synthetic event trace.** The engine takes events and a clock and returns decisions — no OS involved. This is where the grace window and P7 are proven. |
 | Grace window | Table-driven: for each of the three resolutions in §6.3, assert the exact output event sequence |
-| P7 invariant | Property test: for any random event sequence with random mode changes, assert every forwarded press has a matching forwarded release |
+| P7 invariant | Property test over 200 randomised event sequences, across all three activation modes and including modifiers and a `key.passthrough` binding: assert every forwarded press has a matching forwarded release once the sequence is wound down |
+| P7 mirror | The same sweep in the opposite direction: assert no release is ever forwarded without a matching forwarded press, so a suppressed key held across a mode change cannot produce an orphan key-up |
 | Motion | Assert diagonal speed equals cardinal speed; assert fractional accumulation never loses pixels; assert the ramp is monotonic |
 | IPC | Golden-file tests of serialised messages; a fake client that stops reading, asserting the core does not block |
 | Overlay | `pytest-qt` against the mock backend; render each bundled layout at several scales and assert no key overlaps and no clipped legends |

@@ -72,6 +72,11 @@ public:
     void setConfig(const EngineConfig& config);
     void setBoundKeys(std::unordered_set<KeyCode> bound);
 
+    // The subset of bound keys whose binding is `key.passthrough` (SPEC 7.6).
+    // These reach the OS even inside the layer. They must be an explicit
+    // binding: a key with no binding at all stays suppressed.
+    void setPassthroughKeys(std::unordered_set<KeyCode> keys);
+
     // Feed one physical key event, appending to `out`.
     //
     // One event can produce several decisions: resolving a buffered press
@@ -131,6 +136,7 @@ private:
     bool capsWasLatched_ = false;
 
     std::unordered_set<KeyCode> bound_;
+    std::unordered_set<KeyCode> passthroughKeys_;
     std::unordered_set<KeyCode> heldActions_;
     std::unordered_map<KeyCode, Pending> pending_;
 
@@ -138,7 +144,12 @@ private:
     // forwarded, regardless of the mode by then. This set is the whole of
     // principle P7, and nothing may remove an entry except the matching
     // release or releaseAll().
-    std::unordered_set<KeyCode> passthrough_;
+    //
+    // Everything that reaches the OS lands here -- ordinary typing, modifiers
+    // forwarded inside the layer, keys replayed when the grace window lapses,
+    // explicit `key.passthrough` bindings, and a real CapsLock. There is no
+    // second path to the OS, which is what makes the invariant checkable.
+    std::unordered_set<KeyCode> forwardedPresses_;
 
     std::unordered_set<KeyCode> heldModifiers_;
 };

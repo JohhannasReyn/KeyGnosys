@@ -24,6 +24,8 @@ const KeyCode J = KeyCode::fromString("KeyJ");
 const KeyCode Q = KeyCode::fromString("KeyQ");
 const KeyCode LSHIFT = KeyCode::fromString("ShiftLeft");
 const KeyCode LCTRL = KeyCode::fromString("ControlLeft");
+// Bound to `key.passthrough`: reaches the OS even inside the layer.
+const KeyCode BKSP = KeyCode::fromString("Backspace");
 
 TimePoint at(int ms) {
     return TimePoint{} + std::chrono::milliseconds(ms);
@@ -40,7 +42,8 @@ struct Fixture {
         config.grace = std::chrono::milliseconds(50);
         config.hybridTap = std::chrono::milliseconds(200);
         engine.setConfig(config);
-        engine.setBoundKeys({H, J});
+        engine.setBoundKeys({H, J, BKSP});
+        engine.setPassthroughKeys({BKSP});
     }
 
     std::vector<Decision>& press(KeyCode code, int ms) {
@@ -241,7 +244,8 @@ MTK_TEST(the_escape_gesture_can_be_turned_off) {
     config.shiftCapsIsRealCapsLock = false;
     Fixture f;
     f.engine.setConfig(config);
-    f.engine.setBoundKeys({H, J});
+    f.engine.setBoundKeys({H, J, BKSP});
+    f.engine.setPassthroughKeys({BKSP});
     f.press(LSHIFT, 0);
     f.press(CAPS, 10);
     MTK_CHECK(f.engine.mode() == Mode::Cursor);
@@ -328,7 +332,7 @@ MTK_TEST(p7_holds_over_random_event_sequences) {
     // Property test. For any interleaving of presses, releases, ticks and mode
     // changes, every Forward(Down) must be matched by a Forward(Up) once the
     // sequence is wound down.
-    const std::vector<KeyCode> keys = {H, J, Q, LCTRL, LSHIFT};
+    const std::vector<KeyCode> keys = {H, J, Q, LCTRL, LSHIFT, BKSP};
     const std::vector<ActivationMode> modes = {
         ActivationMode::Hold, ActivationMode::Toggle, ActivationMode::Hybrid};
 
@@ -390,6 +394,160 @@ MTK_TEST(p7_holds_over_random_event_sequences) {
                      + " left with press/release imbalance "
                      + std::to_string(entry.second));
                 break;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// key.passthrough -- the escape hatch, and only when explicitly bound
+// ---------------------------------------------------------------------------
+
+MTK_TEST(an_explicit_passthrough_binding_reaches_the_os_inside_the_layer) {
+    Fixture f;
+    f.press(CAPS, 0);
+    MTK_CHECK(has(f.press(BKSP, 10), Decision::Kind::Forward, BKSP));
+    MTK_CHECK(has(f.release(BKSP, 20), Decision::Kind::Forward, BKSP));
+}
+
+MTK_TEST(an_unbound_key_is_never_treated_as_passthrough) {
+    // The escape hatch requires an explicit binding. Absence of a binding is
+    // not permission to type.
+    Fixture f;
+    f.press(CAPS, 0);
+    MTK_CHECK(has(f.press(Q, 10), Decision::Kind::Suppress, Q));
+    MTK_CHECK(!has(f.last, Decision::Kind::Forward, Q));
+}
+
+MTK_TEST(a_passthrough_key_is_not_delayed_by_the_grace_window) {
+    // It does the same thing in both modes, so there is nothing to
+    // disambiguate and no reason to make the user wait for it.
+    Fixture f;
+    MTK_CHECK(has(f.press(BKSP, 0), Decision::Kind::Forward, BKSP));
+    MTK_CHECK_EQ(countKind(f.last, Decision::Kind::Buffer), std::size_t{0});
+}
+
+MTK_TEST(p7_covers_passthrough_keys_across_a_mode_change) {
+    Fixture f(ActivationMode::Hold);
+    f.press(CAPS, 0);
+    f.press(BKSP, 10);             // forwarded inside the layer
+    f.release(CAPS, 500);          // layer drops while it is still held
+    MTK_CHECK(f.engine.mode() == Mode::Normal);
+    MTK_CHECK(has(f.release(BKSP, 600), Decision::Kind::Forward, BKSP));
+}
+
+// ---------------------------------------------------------------------------
+// Modifiers held across a mode change
+// ---------------------------------------------------------------------------
+
+MTK_TEST(a_modifier_release_survives_the_layer_deactivating) {
+    // Ctrl goes down inside the layer, the layer drops while it is still held,
+    // and the release must still reach the OS -- otherwise the compositor
+    // believes Ctrl is held forever.
+    Fixture f(ActivationMode::Hold);
+    f.press(CAPS, 0);
+    f.press(LCTRL, 10);
+    f.release(CAPS, 500);
+    MTK_CHECK(f.engine.mode() == Mode::Normal);
+    MTK_CHECK(has(f.release(LCTRL, 600), Decision::Kind::Forward, LCTRL));
+}
+
+MTK_TEST(a_modifier_release_survives_release_all) {
+    Fixture f;
+    f.press(CAPS, 0);
+    f.press(LSHIFT, 10);
+    auto out = f.engine.releaseAll();
+    MTK_CHECK(has(out, Decision::Kind::Forward, LSHIFT));
+}
+
+MTK_TEST(a_modifier_held_from_before_the_layer_still_releases) {
+    Fixture f;
+    f.press(LCTRL, 0);             // forwarded in normal mode
+    f.press(CAPS, 10);             // layer engages around it
+    MTK_CHECK(has(f.release(LCTRL, 20), Decision::Kind::Forward, LCTRL));
+}
+
+// ---------------------------------------------------------------------------
+// Suppressed keys must not produce orphan releases
+// ---------------------------------------------------------------------------
+
+MTK_TEST(a_suppressed_key_held_across_deactivation_releases_suppressed) {
+    // Its press never reached the OS, so forwarding its release would be a
+    // key-up for a key the OS never saw go down.
+    Fixture f(ActivationMode::Hold);
+    f.press(CAPS, 0);
+    f.press(Q, 10);                // suppressed
+    f.release(CAPS, 500);          // layer drops, Q still physically held
+    MTK_CHECK(has(f.release(Q, 600), Decision::Kind::Suppress, Q));
+    MTK_CHECK(!has(f.last, Decision::Kind::Forward, Q));
+}
+
+MTK_TEST(an_action_key_held_across_deactivation_releases_suppressed) {
+    Fixture f(ActivationMode::Hold);
+    f.press(CAPS, 0);
+    f.press(H, 10);                // RunAction; nothing reached the OS
+    f.release(CAPS, 500);          // ReleaseAction emitted here
+    MTK_CHECK(has(f.last, Decision::Kind::ReleaseAction, H));
+    MTK_CHECK(has(f.release(H, 600), Decision::Kind::Suppress, H));
+    MTK_CHECK(!has(f.last, Decision::Kind::Forward, H));
+}
+
+MTK_TEST(every_forwarded_release_has_a_matching_forwarded_press) {
+    // The mirror of P7, and the property that stops the engine emitting a
+    // key-up the OS has no key-down for. Same random sweep, opposite
+    // direction: the depth counter must never go negative.
+    const std::vector<KeyCode> keys = {H, J, Q, LCTRL, LSHIFT, BKSP};
+    const std::vector<ActivationMode> modes = {
+        ActivationMode::Hold, ActivationMode::Toggle, ActivationMode::Hybrid};
+
+    for (unsigned seed = 0; seed < 200; ++seed) {
+        std::mt19937 rng(seed);
+        Fixture f(modes[seed % modes.size()]);
+
+        std::vector<bool> down(keys.size(), false);
+        bool capsDown = false;
+        std::vector<Decision> log;
+        int clock = 0;
+
+        for (int step = 0; step < 60; ++step) {
+            clock += static_cast<int>(rng() % 120);
+            const unsigned choice = rng() % 10;
+            if (choice == 0) {
+                f.engine.tick(at(clock), log);
+            } else if (choice == 1) {
+                f.engine.onKey(CAPS, capsDown ? KeyState::Up : KeyState::Down,
+                               at(clock), log);
+                capsDown = !capsDown;
+            } else {
+                const std::size_t i = rng() % keys.size();
+                f.engine.onKey(keys[i], down[i] ? KeyState::Up : KeyState::Down,
+                               at(clock), log);
+                down[i] = !down[i];
+            }
+        }
+
+        std::vector<std::pair<KeyCode, int>> depth;
+        auto bump = [&depth](KeyCode code, int delta) -> int {
+            for (auto& entry : depth) {
+                if (entry.first == code) {
+                    entry.second += delta;
+                    return entry.second;
+                }
+            }
+            depth.emplace_back(code, delta);
+            return delta;
+        };
+
+        bool broken = false;
+        for (const auto& d : log) {
+            if (d.kind != Decision::Kind::Forward || broken) continue;
+            if (d.state == KeyState::Down) {
+                bump(d.code, 1);
+            } else if (d.state == KeyState::Up && bump(d.code, -1) < 0) {
+                mtk::test::fail("seed " + std::to_string(seed) + ": "
+                                + std::string(d.code.toString())
+                                + " released without a forwarded press");
+                broken = true;
             }
         }
     }
