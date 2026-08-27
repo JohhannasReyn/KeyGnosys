@@ -399,6 +399,11 @@ void LayerEngine::onCapsLock(KeyState state, TimePoint now,
         const bool shiftHeld = slot(shiftLeft_).has(Slot::kModifierHeld)
                                || slot(shiftRight_).has(Slot::kModifierHeld);
         if (config_.shiftCapsIsRealCapsLock && shiftHeld) {
+            // Classified as the escape gesture whether or not the forwarding
+            // obligation can be recorded. If it cannot, the press is suppressed
+            // -- but it stays a gesture, so its release is suppressed too and
+            // the layer is left entirely alone.
+            capsEscapeGesture_ = true;
             capsForwarded_ = forwardPress(capsLock_, state, out);
             return;
         }
@@ -437,11 +442,20 @@ void LayerEngine::onCapsLock(KeyState state, TimePoint now,
     }
     capsPhysicallyDown_ = false;
 
-    if (capsForwarded_) {
-        capsForwarded_ = false;
-        forgetForwarded(capsLock_);
+    if (capsEscapeGesture_) {
+        // A real CapsLock, released. Never touches the mode or the latch --
+        // the press did not engage the layer, so the release cannot leave it.
+        capsEscapeGesture_ = false;
         capsPressedAt_.reset();
-        out.push(forward(capsLock_, state));
+        if (capsForwarded_) {
+            capsForwarded_ = false;
+            forgetForwarded(capsLock_);
+            out.push(forward(capsLock_, state));
+        } else {
+            // The press was suppressed for want of capacity, so forwarding
+            // this release would be an orphan key-up.
+            out.push(suppress(capsLock_, state));
+        }
         return;
     }
 
@@ -565,6 +579,7 @@ void LayerEngine::releaseAll(DecisionBuffer& out) {
 
     capsPhysicallyDown_ = false;
     capsPressedAt_.reset();
+    capsEscapeGesture_ = false;
     capsForwarded_ = false;
     capsWasLatched_ = false;
 }
