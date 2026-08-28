@@ -113,6 +113,8 @@ class IpcClient(CoreClient):
             self.focusChanged.emit(data)
         elif name == "windows":
             self.windowsChanged.emit(data.get("slots") or [])
+        elif name == "overlay_toggle":
+            self.overlayToggleRequested.emit()
         elif name == "diagnostic":
             self.diagnostic.emit(data)
         elif name == "shutdown":

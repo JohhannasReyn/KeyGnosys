@@ -986,15 +986,20 @@ events.
 | `monitors` | `{monitors:[{index, x, y, w, h, primary, name}]}` | Monitor topology changes |
 | `pointer` | `{x, y, monitor}` | Only while cursor layer is engaged, ≤20 Hz |
 | `drag_lock` | `{button, active}` | Drag lock engaged/released |
+| `overlay_toggle` | `{}` | The `overlay.toggle` action fired; the overlay shows or hides itself |
 | `config_changed` | `{kinds:["bindings","layouts",…]}` | Core reloaded config |
-| `diagnostic` | `{level:"info"\|"warn"\|"error", code, message, file?}` | §10 |
+| `diagnostic` | `{level:"info"\|"warn"\|"error", code, message, file?}` | §11 |
 | `shutdown` | `{reason}` | Core is exiting |
+
+`mode` and `modifiers` **MAY** be coalesced within one core tick: two rapid
+transitions inside a single tick produce one event carrying the final state. The
+overlay draws current state, so a superseded intermediate value has no reader.
 
 `key` events are emitted for **all** keys including suppressed ones — this is what
 makes visual feedback work in the cursor layer, where no character reaches the OS.
 
 The core **MUST NOT** include character/text content in `key` events. Only
-positional codes are transmitted. See §11.
+positional codes are transmitted. See §12.
 
 ### 5.4 Commands (overlay → core)
 
@@ -1855,6 +1860,9 @@ Every diagnostic carries a stable machine-readable `code`.
 | `ipc.version_mismatch` | error | Client and core protocol majors differ |
 | `ipc.endpoint_unsafe` | error | A component of the endpoint's path failed a type, ownership or permission check (§5.1.2); the core refused to bind |
 | `ipc.endpoint_in_use` | error | Another core holds the startup lock, or the endpoint is live or not provably stale (§5.1.3); the core refused to start |
+| `ipc.bad_message` | warn | A malformed line, a message that is not a command, or a line past the size limit |
+| `input.queue_overflow` | error | The input thread could not hand work to the core loop; interception degraded and `release_all` issued |
+| `input.publication_dropped` | info | Key-event publication fell behind; overlay feedback may have missed a key |
 
 **The governing rule (P6):** one bad file never prevents the rest from loading,
 and a missing capability is always reported and disabled — never emulated with
