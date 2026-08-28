@@ -49,6 +49,8 @@ add_library(kgn_engine
     src/layer_engine.cpp
     src/json.cpp
     src/motion.cpp
+    src/actions.cpp
+    src/config.cpp
 )
 target_include_directories(kgn_engine PUBLIC include)
 target_link_libraries(kgn_engine PRIVATE kgn_warnings)
@@ -115,6 +117,8 @@ if(KGN_BUILD_TESTS)
     kgn_add_test(test_layer_engine)
     kgn_add_test(test_json)
     kgn_add_test(test_motion)
+    kgn_add_test(test_actions)
+    kgn_add_test(test_config)
 endif()
 
 # ---------------------------------------------------------------------------
