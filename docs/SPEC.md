@@ -104,11 +104,17 @@ positional, which is what the vocabulary is defined to be.
 |------|---------|-------|
 | **Bundled** (read-only) | `<package>/data/` | `<package>/data/` |
 | **User config** | `%APPDATA%\KeyGnosys\` | `$XDG_CONFIG_HOME/keygnosys/` (default `~/.config/keygnosys/`) |
-| **Runtime/socket** | `\\.\pipe\keygnosys` | `$XDG_RUNTIME_DIR/keygnosys/core.sock` |
+| **Runtime/socket** | `\\.\pipe\keygnosys` | `$XDG_RUNTIME_DIR/keygnosys/core.sock`, with a fallback when that is unset — §5.1.1 |
 | **Logs** | `%LOCALAPPDATA%\KeyGnosys\logs\` | `$XDG_STATE_HOME/keygnosys/logs/` |
 
-Both roots contain the same four subdirectories: `layouts/`, `bindings/`,
+Both config roots contain the same four subdirectories: `layouts/`, `bindings/`,
 `themes/`, `profiles/`.
+
+The runtime endpoint is the one location in this table that is not merely a
+place to put files — it carries every keystroke the user types. Its resolution,
+its ownership requirements and the rules for recovering one left behind by a
+crashed core are specified in [§5.1.1](#51-transport) to §5.1.3, which are
+normative for the core, the overlay and the launcher alike.
 
 ### 3.2 Shadowing rule
 
@@ -645,7 +651,7 @@ debugging is worth more than the bytes saved.
 
 | Platform | Endpoint | Access control |
 |----------|----------|----------------|
-| Linux | `$XDG_RUNTIME_DIR/keygnosys/core.sock` (`AF_UNIX`, `SOCK_STREAM`) | Socket mode `0600`, owner-only |
+| Linux | `$XDG_RUNTIME_DIR/keygnosys/core.sock` (`AF_UNIX`, `SOCK_STREAM`), or the §5.1.1 fallback | Socket mode `0600`, in a directory verified per §5.1.2 |
 | Windows | `\\.\pipe\keygnosys` (named pipe, message mode) | DACL restricted to the creating user |
 
 The core is the server and **MUST** accept multiple concurrent clients. Events are
@@ -655,6 +661,140 @@ A client that stops reading **MUST NOT** block the core. Each client has a bound
 outbound queue (default 256 messages); on overflow the core drops the oldest
 *event* messages, emits one `diagnostic`, and keeps running. Replies are never
 dropped.
+
+#### 5.1.1 Endpoint resolution
+
+**One rule, derived the same way by everyone.** The core, the overlay and the
+launcher **MUST** resolve the endpoint by the rule below, and **MUST NOT** each
+carry a private variant of it. `keygnosys.paths.ipc_endpoint()` is that rule on
+the Python side; the core implements the identical rule natively. A component
+that resolved it differently would report a running core its peers cannot find,
+or connect to a path nothing is listening on, and either failure looks from the
+outside like the core is broken.
+
+**Windows.** `\\.\pipe\keygnosys`. Constant.
+
+**Linux.** `<runtime base>/keygnosys/core.sock`, where:
+
+| Condition | Runtime base | Resulting endpoint |
+|-----------|--------------|--------------------|
+| `$XDG_RUNTIME_DIR` is set | its value | `/run/user/1000/keygnosys/core.sock` |
+| `$XDG_RUNTIME_DIR` is unset | `/tmp/keygnosys-<uid>`, `<uid>` being the real uid | `/tmp/keygnosys-1000/keygnosys/core.sock` |
+
+The `keygnosys` component appears twice in the fallback form. That is the
+intended consequence of there being one composition rule rather than two, and it
+is left as it is: a second rule that existed only to tidy up a path is a second
+rule that can be implemented inconsistently by the core and the overlay.
+
+**Why there is a fallback.** `$XDG_RUNTIME_DIR` is set by `pam_systemd` or
+`elogind` at login, and is absent on non-systemd installations without elogind,
+in bare `startx` sessions, and in minimal containers. Refusing to run in those
+environments would be an unforced platform restriction, so the fallback exists
+and is specified rather than left to chance.
+
+**Both forms are per-user, by construction.** `$XDG_RUNTIME_DIR` is per-user by
+definition; the fallback embeds the uid in its name. Two users on one machine
+never resolve to the same endpoint.
+
+#### 5.1.2 Ownership and permissions
+
+The endpoint carries every keystroke the user types. Anything able to substitute
+its own socket at the endpoint path receives them, so the directory containing
+the endpoint is part of the security boundary and not merely a location.
+
+`$XDG_RUNTIME_DIR` is safe by construction: the XDG Base Directory
+specification requires it to be owned by the user, accessible to nobody else
+(mode `0700`), and created and destroyed with the session.
+
+`/tmp` is not. It is world-writable with the sticky bit set, and while the
+sticky bit prevents another user from deleting entries the core created, **it
+does not prevent another user from creating `/tmp/keygnosys-<uid>` first.** A
+directory belongs to whoever creates it, and the owner of a directory may unlink
+what is inside it. An attacker who wins that race owns the directory the core is
+about to bind in, and can replace the core's socket with one of their own — to
+which the overlay would then connect, and into which it would read every
+keystroke. That is the worst failure available to this system. The fallback is
+therefore never merely *used*; it is verified.
+
+Before binding, the core **MUST**, in this order:
+
+1. create the runtime directory with mode `0700` if it does not exist;
+2. `lstat` it and refuse unless it is a real directory — **not** a symbolic link;
+3. refuse unless it is owned by the uid the core is running as;
+4. refuse unless its mode grants no access to group or other;
+5. create the socket itself with mode `0600`.
+
+On any refusal the core **MUST** emit `ipc.endpoint_unsafe` (§11) naming the
+path and the property that failed, and **MUST NOT** start the input backend. It
+**MUST NOT** attempt to make an unsafe directory safe — no `chmod`, no `chown`,
+no delete-and-recreate. The core cannot distinguish a hostile directory from one
+it merely does not understand, and the cost of guessing wrong is silent
+keystroke interception. Refusing loudly is the specified behaviour (P6).
+
+These checks apply to **both** forms, not only the fallback.
+`$XDG_RUNTIME_DIR` is expected to pass them trivially, and verifying it anyway
+costs nothing and removes the need to trust an environment variable that a
+process able to set the core's environment could have pointed anywhere.
+
+#### 5.1.3 Binding, liveness and stale endpoints
+
+**Only the core creates, binds, renames or removes an endpoint.** The overlay
+connects and nothing more. The launcher connects, to probe for a running core,
+and nothing more ([LAUNCHING.md §5](LAUNCHING.md#5-detecting-an-existing-instance)).
+Neither **MUST** ever delete an endpoint, on any code path, including error and
+cleanup paths.
+
+**Cross-user removal is structurally impossible, not merely forbidden.** The
+endpoint always lives inside a directory the core has verified to be owned by
+itself and inaccessible to anyone else (§5.1.2), and the core operates only
+within that directory. There is therefore no path by which one user's core
+reaches another user's endpoint — the guarantee does not rest on a check at the
+point of deletion.
+
+**A live endpoint is never stolen.** How that is enforced differs by platform,
+because the two platforms disagree about whether an endpoint can be stale at
+all.
+
+**Linux.** A bound `AF_UNIX` socket leaves a filesystem entry that outlives the
+process, so `bind()` on it fails with `EADDRINUSE` and the core must decide
+whether the endpoint is live or abandoned. `connect()` is the only test:
+
+| `connect()` result | Meaning | The core **MUST** |
+|--------------------|---------|-------------------|
+| succeeds | A core is listening | Refuse to start, report that a core is already running, leave the endpoint untouched |
+| `ECONNREFUSED` | Nothing is listening; the socket outlived its process | Treat as stale; it **MAY** then recover it |
+| `ENOENT` | Nothing is there | Bind normally |
+| anything else | Staleness is not proven | Refuse to start, emit `ipc.endpoint_in_use`, leave the endpoint untouched |
+
+`ECONNREFUSED` is the **only** admissible evidence of staleness. A process
+listing, a PID file, and the socket's age are not evidence and **MUST NOT** be
+used: each of them can be wrong in the direction that removes a live core's
+endpoint.
+
+Recovery **SHOULD** be performed by binding a uniquely named temporary socket in
+the same directory and `rename()`ing it onto the canonical path. `rename()` is
+atomic, so two cores racing to recover the same stale endpoint leave exactly one
+endpoint behind and no interval in which the path is missing. Unlinking first
+and then binding leaves exactly that interval, and a client that connects inside
+it fails in a way indistinguishable from the core being absent.
+
+**Windows.** A named pipe is a kernel object, not a filesystem entry; its name
+ceases to exist when the last handle to it closes. **There is no such thing as a
+stale named pipe**, so on Windows there is nothing to recover and nothing to
+delete.
+
+The hazard there is the opposite one. By default `CreateNamedPipe` on a name
+that already exists *succeeds*, creating an additional **instance** of the same
+pipe and silently joining whoever created it — so a second core, or a process
+that pre-created the name, would begin accepting connections intended for the
+first. The core **MUST** therefore create the endpoint with
+`FILE_FLAG_FIRST_PIPE_INSTANCE`, which fails if any instance already exists.
+That one flag delivers both required properties: a live endpoint cannot be
+stolen, and a name squatted in advance is detected rather than joined.
+
+On failure the core **MUST** refuse to start and emit `ipc.endpoint_in_use`. It
+**MUST NOT** retry under a different name — a core on an endpoint its clients do
+not resolve to is worse than no core — and there is nothing for it to remove.
 
 ### 5.2 Envelope
 
@@ -1548,6 +1688,8 @@ Every diagnostic carries a stable machine-readable `code`.
 | `window.unsupported` | warn | A window operation is unavailable on this backend |
 | `ipc.client_overflow` | warn | A client's queue overflowed; events dropped |
 | `ipc.version_mismatch` | error | Client and core protocol majors differ |
+| `ipc.endpoint_unsafe` | error | The endpoint's directory failed an ownership or permission check (§5.1.2); the core refused to bind |
+| `ipc.endpoint_in_use` | error | The endpoint is live, or could not be proven stale (§5.1.3); the core refused to start |
 
 **The governing rule (P6):** one bad file never prevents the rest from loading,
 and a missing capability is always reported and disabled — never emulated with
@@ -1568,7 +1710,12 @@ explicit commitments.
    reporting upload.
 3. **The IPC endpoint is owner-only** (§5.1). Any other process reading it would
    see every keystroke the user types, so this is a correctness requirement, not
-   a nicety.
+   a nicety. It covers the *directory* the endpoint sits in as much as the
+   endpoint itself: a directory another user owns is a directory in which the
+   core's socket can be replaced by theirs, so the core verifies ownership and
+   mode before it binds and refuses rather than repairs (§5.1.2). Only the core
+   ever creates or removes an endpoint; the overlay and the launcher connect and
+   nothing else (§5.1.3).
 4. **Positional codes only on the wire** (§5.3). The core does not resolve
    keystrokes to characters, so the IPC stream cannot reconstruct typed text
    without independently knowing the user's keyboard layout.

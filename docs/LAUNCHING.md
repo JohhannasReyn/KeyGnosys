@@ -235,17 +235,13 @@ The launcher **MUST** determine whether a core is running by connecting to the
 KeyGnosys IPC endpoint. It **MUST NOT** invent a lock file, a PID file, a mutex,
 or a process-name scan for this purpose.
 
-The endpoint is the one specified in SPEC §3.1 and §5.1:
-
-| Platform | Endpoint |
-|----------|----------|
-| Windows | `\\.\pipe\keygnosys` |
-| Linux | `$XDG_RUNTIME_DIR/keygnosys/core.sock` |
-
-The launcher **MUST** resolve the endpoint by the same rule the overlay uses —
-`keygnosys.paths.ipc_endpoint()` — including any fallback that function applies
-when `$XDG_RUNTIME_DIR` is unset. A launcher that probes a different path than
-the overlay connects to would report a running core the overlay cannot find.
+**The endpoint rule is [SPEC §5.1.1](SPEC.md#5-ipc-protocol), and this document
+does not restate it.** The core, the overlay and the launcher are all bound by
+that one rule — including the fallback applied on Linux when
+`$XDG_RUNTIME_DIR` is unset — and a launcher that probed a path its peers do not
+resolve to would report a running core the overlay cannot find. On the Python
+side the rule is `keygnosys.paths.ipc_endpoint()`; the launcher **MUST** obtain
+the endpoint from that same rule rather than composing a path of its own.
 
 **A connection that succeeds and yields `hello` is the only proof of life.** The
 endpoint merely existing proves nothing: a Unix socket file outlives the process
@@ -254,10 +250,12 @@ inspection. `hello` additionally tells the launcher the core version, protocol
 version, active backends, capabilities and limitations, all of which the
 diagnostics report wants anyway (§8.2).
 
-The launcher **MUST NOT** delete, move, or recreate the endpoint, under any
-option including `--repair`. Recovering from an endpoint left behind by a
-crashed core is the core's own responsibility at bind time, and is an open M2
-question (§12).
+The launcher **MUST NOT** create, delete, move, or recreate the endpoint, under
+any option including `--repair`. Only the core does any of that, and recovering
+an endpoint left behind by a crashed core is the core's own responsibility at
+bind time — specified in [SPEC §5.1.3](SPEC.md#5-ipc-protocol), which also fixes
+the rule that a live endpoint is never stolen. The launcher connects and reads;
+that is the whole of its relationship with the endpoint.
 
 **Only the core is single-instance.** Two cores are harmful — two device grabs
 on Linux, two hooks on Windows — and the launcher's job is to make that
@@ -634,9 +632,7 @@ Recorded so a later reader can tell an omission from an oversight.
 |-----------|-----|
 | **Stopping a running instance** | No `--stop` verb in this surface. Stopping is done from the overlay's control bar or by ending the process. If a verb is wanted later it takes the next free exit code (§10.1) |
 | **A machine-readable report** | No `--json`. There is no consumer for it yet, and a format shipped without one is a format that will be wrong |
-| **Recovering a stale IPC endpoint** | A Unix socket file outlives its process. Recovering at bind time is the core's responsibility and is an open **M2** question; the launcher never touches the endpoint (§5) |
 | **Overlay single-instance** | No IPC command enumerates connected clients, and a second overlay is harmless (§5). If wanted, it belongs in the overlay |
-| **The `$XDG_RUNTIME_DIR` fallback** | `paths.ipc_endpoint()` applies a fallback that SPEC §3.1 and §5.1 do not document. The launcher defers to the function rather than restating the rule; reconciling code and SPEC is separate work |
 | **macOS** | No backend exists (OUTLINE §8). The launcher does not pretend otherwise; it exits **3** |
 | **Wayland** | X11 is the supported Linux display environment for v1 (SPEC §8.5). The launcher exits **3** rather than starting something that will half-work |
 | **Packaged installation** | M7. An installer places files and system integration; the launcher prepares and starts a checkout (§1.1) |
