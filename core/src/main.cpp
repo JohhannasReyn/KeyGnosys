@@ -59,7 +59,6 @@ void printUsage() {
         "\n"
         "Usage: keygnosys-core [options]\n"
         "\n"
-        "  --endpoint <address>    Listen here instead of the resolved endpoint\n"
         "  --bindings <id>         Bindings document id (default: default)\n"
         "  --bindings-file <path>  Load this bindings document, ignoring the id\n"
         "  --config-dir <path>     User configuration root\n"
@@ -96,9 +95,11 @@ int main(int argc, char** argv) {
             std::printf("keygnosys-core 0.1.0\n");
             return 0;
         }
-        if (argument == "--endpoint") {
-            if (!takeValue(argc, argv, i, "--endpoint", options.endpoint)) return 2;
-        } else if (argument == "--bindings") {
+        // There is deliberately no option to move the endpoint. SPEC 5.1.1
+        // gives one rule that the core, the overlay and the launcher all
+        // derive from; a core listening elsewhere is a core its clients cannot
+        // find.
+        if (argument == "--bindings") {
             if (!takeValue(argc, argv, i, "--bindings", options.bindingsId)) return 2;
         } else if (argument == "--bindings-file") {
             if (!takeValue(argc, argv, i, "--bindings-file", options.bindingsFile)) {

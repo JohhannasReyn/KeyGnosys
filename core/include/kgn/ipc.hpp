@@ -43,6 +43,17 @@ inline constexpr const char* kProtocolVersion = "1.0";
 // Per-client outbound bound, in messages (SPEC section 5.1).
 inline constexpr std::size_t kClientQueueLimit = 256;
 
+// The hard ceiling on one client's outbound queue.
+//
+// The soft bound above is an EVENT policy: on overflow the oldest event is
+// dropped. Replies are never dropped, so a client that sends commands forever
+// and never reads has a queue nothing can shed -- "one reply per command" does
+// not make the total finite when the commands do not stop. Growing without
+// limit would defeat the reason the bound exists, so past this ceiling the
+// client is disconnected instead: no reply is dropped, the queue stays
+// bounded, and the cost falls on the connection that caused it.
+inline constexpr std::size_t kClientQueueHardLimit = 4 * kClientQueueLimit;
+
 // The longest single line the server will assemble before giving up on a
 // client. A message with no newline is not a message, and a client that sends
 // one without end must not be able to grow the server's memory without bound.
@@ -156,6 +167,11 @@ public:
     // counted here, because replies are never dropped.
     [[nodiscard]] std::uint64_t eventsDropped() const { return eventsDropped_; }
     [[nodiscard]] std::uint64_t badMessages() const { return badMessages_; }
+    // Clients disconnected because their outbound queue passed the hard
+    // ceiling -- they sent commands faster than they read the answers.
+    [[nodiscard]] std::uint64_t overloadedClients() const {
+        return overloadedClients_;
+    }
     [[nodiscard]] const HelloInfo& hello() const { return hello_; }
 
     // Test seam: the sequence number the next event to this client will carry.
@@ -208,6 +224,7 @@ private:
     ClientId nextClientId_ = 1;
     std::uint64_t eventsDropped_ = 0;
     std::uint64_t badMessages_ = 0;
+    std::uint64_t overloadedClients_ = 0;
     bool closed_ = false;
 };
 

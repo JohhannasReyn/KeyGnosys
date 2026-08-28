@@ -662,6 +662,26 @@ outbound queue (default 256 messages); on overflow the core drops the oldest
 *event* messages, emits one `diagnostic`, and keeps running. Replies are never
 dropped.
 
+**When the queue is all replies.** Dropping the oldest event is an *event*
+policy, and it cannot bound a queue that holds none. A client is free to send
+commands indefinitely while never reading, and "one reply per command" bounds
+nothing when the commands do not stop, so the two rules above — a bounded queue,
+and replies that are never dropped — cannot both hold by shedding messages.
+
+They are reconciled by bounding the **client** rather than the memory:
+
+1. A client whose outbound queue has reached the bound **MUST** have its input
+   left unread until the queue drains. Consuming a command that cannot be
+   answered is what turns a slow client into an unbounded one, and declining to
+   read it is ordinary backpressure — the client's own writes block instead.
+2. A client whose outbound queue nevertheless passes a hard ceiling (**four
+   times** the bound) **MUST** be disconnected, with a diagnostic. No reply is
+   dropped, because there is no longer a client to deliver one to; the queue
+   stays bounded; and the cost falls on the connection that caused it.
+
+The ceiling is a backstop, not the mechanism. Reaching it means backpressure
+was outrun within a single read.
+
 #### 5.1.1 Endpoint resolution
 
 **One rule, derived the same way by everyone.** The core, the overlay and the
@@ -758,6 +778,24 @@ to abandon by accident. The core **MUST** bind through the verified descriptor
 — by `fchdir` to it and binding a relative name, or through
 `/proc/self/fd/<dirfd>/core.sock` — and **MUST NOT** bind by reassembling the
 absolute path.
+
+**What this does and does not reach.** The scope is the components in the table
+above: the runtime base and the runtime directory, plus the fallback root's
+sticky bit. Components *above* the runtime base are deliberately out of scope.
+On a conforming system they are root-owned and not private — `/run` and
+`/run/user` are `0755` — so they cannot be required to be private, and
+`/var/run` is a symbolic link to `/run` on Debian and Ubuntu, so refusing an
+intermediate link would refuse a legitimate `$XDG_RUNTIME_DIR` outright.
+
+The practical consequence is that `O_NOFOLLOW` on the runtime base is applied
+to its **final component**, which is exactly what "not a symbolic link" in the
+table means and all it can mean. It is not a weaker check than the fallback
+form gets: there, the same flag reaches every component the core owns, because
+there the core owns one more of them.
+
+Verifying an inode does not, and cannot, guarantee that the *pathname* still
+resolves to it later. That is precisely why the fallback root's sticky bit is
+required (above), and why nothing beyond it is claimed here.
 
 **The uid is unambiguous.** The core **MUST NOT** be installed setuid or setgid;
 §12.5 grants it access by group membership, not by identity change. Real and

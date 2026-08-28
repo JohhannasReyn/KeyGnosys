@@ -126,6 +126,39 @@ bool openVerifiedChild(int parent, const char* name, bool create, DirFd& out,
     return verifyDirFd(out.get(), what.c_str(), result);
 }
 
+// The runtime base named by an externally supplied $XDG_RUNTIME_DIR.
+//
+// O_NOFOLLOW applies to the FINAL component only, which is exactly the scope
+// SPEC 5.1.2 puts the base in: it must be "a real directory and not a symbolic
+// link", and its own parents are not components this core owns. Opening it
+// without the flag would follow a link and then verify the wrong inode -- the
+// core would be safely anchored somewhere the pathname no longer describes,
+// while every client resolving that pathname went to the link's target.
+//
+// The flag is deliberately not extended to the components above it. On a
+// conforming system those are root-owned and not private (/run and /run/user
+// are 0755), so they cannot be required to be private; and /var/run is a
+// symlink to /run on Debian and Ubuntu, so refusing an intermediate link would
+// refuse a legitimate $XDG_RUNTIME_DIR outright.
+bool openVerifiedBase(const std::string& path, DirFd& out, OwnResult& result) {
+    const int fd =
+        ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) {
+        const int code = errno;
+        const bool occupied = code == ELOOP || code == ENOTDIR;
+        result = {occupied ? OwnStatus::Unsafe : OwnStatus::Failed,
+                  "ipc.endpoint_unsafe",
+                  "cannot open " + path + ": " +
+                      (code == ELOOP ? std::string("it is a symbolic link")
+                       : code == ENOTDIR
+                           ? std::string("it is not a directory")
+                           : describeErrno(code))};
+        return false;
+    }
+    out = DirFd(fd);
+    return verifyDirFd(out.get(), path.c_str(), result);
+}
+
 // The fallback root, `/tmp`. It is world-writable by design and MUST NOT be
 // required to be private -- but its sticky bit is load-bearing. Without it
 // another user can rename our verified directory aside and put their own at
@@ -260,6 +293,26 @@ std::string resolveEndpoint() {
     return resolveRuntimeDirectory() + "/" + kSocketName;
 }
 
+namespace {
+
+// The fallback form for this user, spelled out once. Whether an address uses
+// the fallback LAYOUT -- a sticky world-writable root with a per-user
+// directory beneath it -- is a property of the address, and comparing against
+// this is how that is decided.
+//
+// It deliberately does not consult $XDG_RUNTIME_DIR. Inferring the layout from
+// the environment while slicing a caller-supplied path lets the two disagree:
+// an address that is not the fallback would then be checked under the
+// fallback's rules, or the reverse, and the safety argument for each depends
+// on the shape it was written for.
+std::string fallbackEndpoint() {
+    return "/tmp/keygnosys-" +
+           std::to_string(static_cast<unsigned long>(::getuid())) + "/keygnosys/" +
+           kSocketName;
+}
+
+}  // namespace
+
 // ---------------------------------------------------------------------------
 
 struct EndpointOwner::Impl {
@@ -293,8 +346,8 @@ OwnResult EndpointOwner::acquire(const std::string& address) {
     const std::string dirPath = address.substr(0, lastSlash);
     const std::string leaf = address.substr(lastSlash + 1);
 
-    const char* xdg = std::getenv("XDG_RUNTIME_DIR");
-    const bool usingFallback = (xdg == nullptr || xdg[0] == '\0');
+    // The layout is a property of the address, not of the environment.
+    const bool usingFallback = (address == fallbackEndpoint());
 
     DirFd base;
     if (usingFallback) {
@@ -314,18 +367,17 @@ OwnResult EndpointOwner::acquire(const std::string& address) {
             return result;
         }
     } else {
-        // $XDG_RUNTIME_DIR is verified too, not trusted. It is an environment
+        // The base is verified, never trusted: it comes from an environment
         // variable, and a process able to set the core's environment could
-        // have pointed it anywhere.
+        // have pointed it anywhere. O_NOFOLLOW refuses a symbolic link at the
+        // base itself, which is what SPEC 5.1.2 requires of it.
         const std::size_t baseSlash = dirPath.find_last_of('/');
         const std::string basePath = dirPath.substr(0, baseSlash);
-        const int fd = ::open(basePath.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-        if (fd < 0) {
+        if (basePath.empty()) {
             return {OwnStatus::Failed, "ipc.endpoint_unsafe",
-                    "cannot open " + basePath + ": " + describeErrno(errno)};
+                    "endpoint address has no runtime base"};
         }
-        base = DirFd(fd);
-        if (!verifyDirFd(base.get(), basePath.c_str(), result)) return result;
+        if (!openVerifiedBase(basePath, base, result)) return result;
     }
 
     const std::string childName = dirPath.substr(dirPath.find_last_of('/') + 1);

@@ -512,6 +512,79 @@ KGN_TEST(replies_are_never_dropped_however_full_the_queue) {
     KGN_CHECK(replyFor(*channel, "c99")["ok"].asBool());
 }
 
+KGN_TEST(a_client_that_floods_commands_without_reading_is_still_bounded) {
+    // "One reply per command" does not make the total finite: a client can
+    // send commands forever. Replies are never dropped, so the queue cannot
+    // shed them -- which leaves only bounding the client, not the memory.
+    Harness harness = makeServer();
+    auto channel = harness.connect();
+    channel->stalled = true;
+
+    for (int i = 0; i < 4000; ++i) {
+        channel->fromClient += command("ping", "c" + std::to_string(i));
+    }
+    for (int i = 0; i < 50; ++i) harness.server->poll();
+
+    KGN_CHECK(harness.server->queueDepth(1) <= kgn::kClientQueueHardLimit);
+}
+
+KGN_TEST(a_client_whose_queue_is_full_stops_having_its_commands_read) {
+    // Real backpressure: commands that cannot be answered are not consumed,
+    // so the queue stops growing at the source rather than at the limit.
+    Harness harness = makeServer();
+    auto channel = harness.connect();
+    channel->stalled = true;
+    for (int i = 0; i < 4000; ++i) {
+        channel->fromClient += command("ping", "c" + std::to_string(i));
+    }
+    for (int i = 0; i < 50; ++i) harness.server->poll();
+    // Unread input remains: the server declined to consume what it could not
+    // answer, instead of reading it all and queueing the replies.
+    KGN_CHECK(!channel->fromClient.empty() || !harness.server->clientCount());
+}
+
+KGN_TEST(a_client_past_the_hard_ceiling_is_disconnected_not_grown) {
+    // The backstop, reached by handing the server replies it cannot shed
+    // without the read path's backpressure getting a chance to stop it.
+    Harness harness = makeServer();
+    auto channel = harness.connect();
+    channel->stalled = true;
+
+    // Every command in one read, so the whole batch is parsed before the queue
+    // can drain: this is the case the ceiling exists for.
+    std::string flood;
+    for (int i = 0; i < 6000; ++i) {
+        flood += command("ping", "c" + std::to_string(i));
+    }
+    channel->fromClient = flood;
+    for (int i = 0; i < 200; ++i) harness.server->poll();
+
+    // Either backpressure held the queue at the soft bound, or the ceiling
+    // ended the connection. What must NOT happen is unbounded growth.
+    KGN_CHECK(harness.server->queueDepth(1) <= kgn::kClientQueueHardLimit);
+    if (harness.server->clientCount() == 0) {
+        KGN_CHECK(harness.server->overloadedClients() >= std::uint64_t{1});
+    }
+}
+
+KGN_TEST(a_client_that_reads_again_resumes_being_served) {
+    // Backpressure must be temporary, not a one-way door.
+    Harness harness = makeServer();
+    auto channel = harness.connect();
+    channel->stalled = true;
+    for (int i = 0; i < 2000; ++i) {
+        channel->fromClient += command("ping", "c" + std::to_string(i));
+    }
+    for (int i = 0; i < 20; ++i) harness.server->poll();
+    KGN_CHECK(!channel->fromClient.empty());
+
+    channel->stalled = false;
+    for (int i = 0; i < 4000; ++i) harness.server->poll();
+    KGN_CHECK(harness.server->clientCount() == std::size_t{1});
+    KGN_CHECK(channel->fromClient.empty());
+    KGN_CHECK(replyFor(*channel, "c1999")["ok"].asBool());
+}
+
 KGN_TEST(a_drained_queue_reports_a_later_overflow_again) {
     Harness harness = makeServer();
     auto channel = harness.connect();
