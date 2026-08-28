@@ -73,6 +73,19 @@ std::size_t Server::queueDepth(ClientId client) const {
 bool Server::enqueue(Session& session, std::string line, bool isReply) {
     if (session.closing) return true;
 
+    // The soft bound below is an EVENT policy. It cannot bound a queue that is
+    // all replies, because replies are never dropped and a client is free to
+    // send commands forever -- "one reply per command" bounds nothing when the
+    // commands do not stop. Past the hard ceiling the connection ends instead:
+    // no reply is dropped, memory stays bounded, and the cost falls on the
+    // client that caused it. Reaching this at all means backpressure was
+    // outrun, since readFrom() stops consuming commands at the soft bound.
+    if (session.outbound.size() >= kClientQueueHardLimit) {
+        session.closing = true;
+        ++overloadedClients_;
+        return false;
+    }
+
     if (session.outbound.size() >= kClientQueueLimit) {
         // Drop the oldest EVENT to make room. Replies are never dropped, and
         // the message currently half-written cannot be withdrawn, so the
@@ -241,6 +254,12 @@ void Server::handleLine(Session& session, const std::string& line) {
 void Server::readFrom(Session& session) {
     char buffer[4096];
     for (;;) {
+        // Backpressure, and the reason the hard ceiling is a backstop rather
+        // than the mechanism: a client whose queue is full has its input left
+        // unread. Consuming commands that cannot be answered is what turns a
+        // slow client into an unbounded one.
+        if (session.outbound.size() >= kClientQueueLimit) return;
+
         const int got = session.connection->read(buffer, sizeof(buffer));
         if (got < 0) {
             session.closing = true;
@@ -250,6 +269,9 @@ void Server::readFrom(Session& session) {
         session.inbound.append(buffer, static_cast<std::size_t>(got));
 
         for (;;) {
+            // Re-checked per line: one read can carry hundreds of
+            // commands, and the queue must not run away between two checks.
+            if (session.outbound.size() >= kClientQueueLimit) return;
             const std::size_t newline = session.inbound.find('\n');
             if (newline == std::string::npos) break;
             std::string line = session.inbound.substr(0, newline);

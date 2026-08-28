@@ -524,8 +524,9 @@ OwnResult Core::start() {
     if (impl_->started) return {OwnStatus::Ok, "", "already started"};
     impl_->startedAt = Clock::now();
 
-    const std::string address =
-        impl_->options.endpoint.empty() ? resolveEndpoint() : impl_->options.endpoint;
+    const std::string address = impl_->options.endpointOverrideForTests.empty()
+                                    ? resolveEndpoint()
+                                    : impl_->options.endpointOverrideForTests;
 
     // The endpoint comes first. Nothing else the core does matters if another
     // core already owns it, and refusing before touching configuration keeps

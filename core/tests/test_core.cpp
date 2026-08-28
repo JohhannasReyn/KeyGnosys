@@ -221,7 +221,7 @@ struct Fixture {
 
     static CoreOptions options(const std::string& endpoint) {
         CoreOptions opts;
-        opts.endpoint = endpoint;
+        opts.endpointOverrideForTests = endpoint;
         // Point the search somewhere empty so the test never picks up a
         // document from the developer's own configuration.
         opts.configDir = "/nonexistent-kgn-config";

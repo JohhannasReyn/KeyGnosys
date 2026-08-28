@@ -33,9 +33,16 @@
 namespace kgn {
 
 struct CoreOptions {
-    // Empty means the address resolveEndpoint() derives (SPEC 5.1.1). Set
-    // explicitly by tests, which must not contend for the real one.
-    std::string endpoint;
+    // TEST-ONLY injection point. Never set from the command line, and there is
+    // no option that sets it.
+    //
+    // SPEC 5.1.1 gives ONE endpoint rule and requires the core, the overlay
+    // and the launcher to derive from it, so a core listening anywhere else is
+    // a core its own clients cannot find. This exists solely so tests need not
+    // contend for the real endpoint, and the ownership rules stay correct for
+    // it because the endpoint owner decides its layout from the address rather
+    // than from the environment.
+    std::string endpointOverrideForTests;
     std::string bindingsId = "default";
     // An explicit path wins over the id search entirely.
     std::string bindingsFile;

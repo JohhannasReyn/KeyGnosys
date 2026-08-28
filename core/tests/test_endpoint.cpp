@@ -311,6 +311,28 @@ KGN_TEST(a_symlink_where_the_runtime_directory_belongs_is_refused) {
     ::rmdir(elsewhere.c_str());
 }
 
+KGN_TEST(a_symlinked_runtime_base_is_refused) {
+    // $XDG_RUNTIME_DIR is externally supplied, and SPEC 5.1.2 requires the
+    // runtime base to be "a real directory and NOT a symbolic link" like every
+    // other component the core owns. Opening it by path without O_NOFOLLOW
+    // would follow the link and then verify the wrong inode -- the core would
+    // be anchored somewhere the pathname no longer describes.
+    TempRuntime runtime;
+    const std::string real = runtime.path() + "/real";
+    const std::string link = runtime.path() + "/link";
+    KGN_CHECK_EQ(::mkdir(real.c_str(), 0700), 0);
+    KGN_CHECK_EQ(::symlink(real.c_str(), link.c_str()), 0);
+    ::setenv("XDG_RUNTIME_DIR", link.c_str(), 1);
+
+    EndpointOwner owner;
+    const auto result = owner.acquire(link + "/keygnosys/core.sock");
+    KGN_CHECK(result.status == OwnStatus::Unsafe);
+    KGN_CHECK_EQ(result.code, std::string("ipc.endpoint_unsafe"));
+
+    ::unlink(link.c_str());
+    ::rmdir(real.c_str());
+}
+
 KGN_TEST(a_regular_file_where_the_runtime_directory_belongs_is_refused) {
     TempRuntime runtime;
     const int fd = ::open(runtime.runtimeDir().c_str(), O_CREAT | O_WRONLY, 0600);
@@ -336,6 +358,50 @@ KGN_TEST(an_unsafe_directory_is_refused_rather_than_repaired) {
     // Untouched: still exactly as it was found.
     KGN_CHECK_EQ(static_cast<int>(modeOf(runtime.runtimeDir())), 0757);
     KGN_CHECK(!exists(runtime.runtimeDir() + "/core.sock"));
+}
+
+KGN_TEST(the_layout_is_decided_by_the_address_not_by_the_environment) {
+    // The endpoint owner must not infer which ownership rules apply from
+    // $XDG_RUNTIME_DIR while slicing a caller-supplied path: the two can
+    // disagree, and the safety argument for each layout depends on the shape
+    // it was written for. Here the environment says "fallback" while the
+    // address is not the fallback form, and the address wins.
+    TempRuntime runtime;
+    ::unsetenv("XDG_RUNTIME_DIR");
+
+    // Two levels down, so the fallback rules would demand a sticky bit on a
+    // directory that has none -- which is what made this observable.
+    const std::string nested = runtime.path() + "/nested";
+    KGN_CHECK_EQ(::mkdir(nested.c_str(), 0700), 0);
+    const std::string endpoint = nested + "/keygnosys/core.sock";
+
+    EndpointOwner owner;
+    const auto result = owner.acquire(endpoint);
+    KGN_CHECK(result.ok());
+
+    owner.release();
+    ::unlink((nested + "/keygnosys/core.lock").c_str());
+    ::rmdir((nested + "/keygnosys").c_str());
+    ::rmdir(nested.c_str());
+}
+
+KGN_TEST(the_canonical_fallback_address_still_gets_the_fallback_rules) {
+    // The mirror of the test above: the fallback form is recognised by its
+    // shape, so the sticky root and the extra owned level are still checked.
+    const char* previous = std::getenv("XDG_RUNTIME_DIR");
+    const std::string saved = previous != nullptr ? previous : "";
+    ::unsetenv("XDG_RUNTIME_DIR");
+    const std::string address = kgn::resolveEndpoint();
+    KGN_CHECK(address.rfind("/tmp/keygnosys-", 0) == 0);
+
+    EndpointOwner owner;
+    const auto result = owner.acquire(address);
+    // /tmp is sticky on any conforming system, so this should be reachable;
+    // what matters is that it is not refused for a fallback-shaped reason.
+    KGN_CHECK(result.status != OwnStatus::Unsafe);
+    owner.release();
+
+    if (previous != nullptr) ::setenv("XDG_RUNTIME_DIR", saved.c_str(), 1);
 }
 
 KGN_TEST(an_address_with_no_directory_component_is_refused) {
