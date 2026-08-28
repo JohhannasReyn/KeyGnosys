@@ -55,8 +55,10 @@ KGN_TEST(schema_version_is_parsed_from_the_schema_string) {
     KGN_CHECK_EQ(kgn::schemaVersionOf("keygnosys/bindings/", "bindings"), 0);
     KGN_CHECK_EQ(kgn::schemaVersionOf("keygnosys/bindings/x", "bindings"), 0);
     KGN_CHECK_EQ(kgn::schemaVersionOf("", "bindings"), 0);
-    // The old prefix is gone and must not be silently accepted.
-    KGN_CHECK_EQ(kgn::schemaVersionOf("mousetrapkeys/bindings/2", "bindings"), 0);
+    // The prefix must match exactly. A document from some other project, or
+    // from this one under a former name, is not silently accepted.
+    KGN_CHECK_EQ(kgn::schemaVersionOf("someoneelse/bindings/2", "bindings"), 0);
+    KGN_CHECK_EQ(kgn::schemaVersionOf("keygnosys/bindings", "bindings"), 0);
 }
 
 // ---------------------------------------------------------------------------

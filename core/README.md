@@ -5,26 +5,69 @@ management, and the JSON Lines IPC server the overlay connects to.
 
 ## Status
 
-The build works end to end — configure, compile, test — but most of the core is
-not written yet. What exists today:
+**Milestone M2 is complete.** `keygnosys-core` builds and runs on both
+platforms, owns its IPC endpoint and serves the protocol. What it does **not**
+do yet is see or synthesise a single key: there are no platform backends until
+M3 and M4, and the core says so — in `hello`, in a diagnostic and on stderr —
+rather than running as something that merely looks like it is working.
 
 | | |
 |---|---|
-| ✅ | `kgn_engine`: the platform-free library, CMake target, warning setup |
+| ✅ | `kgn_engine`: the platform-free library — key vocabulary, layer engine, motion, actions, config, IPC protocol |
 | ✅ | `src/keycode.cpp` — the key vocabulary, interning, modifier grouping |
 | ✅ | `src/layer_engine.cpp` — the CapsLock state machine, the grace window, and the P7 forwarded-release invariant with its mirror |
-| ✅ | Test harness and `ctest` wiring; 96 tests, clean under `-Werror -Wconversion` |
-| ✅ | Interface headers defining the seam ([`include/kgn/`](include/kgn/)) |
-| 🚧 | Motion integrator, action dispatch, IPC server (rest of **M2**) |
+| ✅ | `src/motion.cpp` — the 60 Hz integrator: ramp, diagonal normalisation, fractional accumulation |
+| ✅ | `src/actions.cpp` — the action catalog and the dispatcher, with its fail-safe obligation rule |
+| ✅ | `src/config.cpp` — bindings documents, where a bad binding costs exactly that binding |
+| ✅ | `src/json.cpp` — the JSON subset the protocol needs |
+| ✅ | `src/ipc.cpp` — the JSON Lines server: envelopes, sequences, bounded queues, reply routing |
+| ✅ | `kgn_ipc` — endpoint ownership and the platform transports (SPEC 5.1.1–5.1.3) |
+| ✅ | `keygnosys-core` — the executable |
 | 🚧 | Windows backend: hook, `SendInput`, Win32 windows (**M3**) |
 | 🚧 | Linux/X11 backend: evdev, uinput, EWMH, XRandR (**M4**) |
 
-`CMakeLists.txt` lists the M2 sources as comments where they will go, so adding
-one is uncommenting a line rather than working out where it belongs.
-
 The overlay runs today without any of this, on the mock backend
-(`keygnosys --backend mock`), and will connect to the core automatically once
-it starts listening. Nothing in the Python side changes when it does.
+(`keygnosys --backend mock`). It will connect to the core automatically once a
+backend gives the core something to report. Nothing in the Python side changes
+when it does.
+
+## Running it
+
+```sh
+./build/default/core/keygnosys-core          # Linux
+build\default\core\keygnosys-core.exe        # Windows
+```
+
+It takes the endpoint, starts listening, and prints what it cannot do. A second
+instance refuses rather than joining, and names the condition it hit:
+
+```
+keygnosys-core: ipc.endpoint_in_use: another process already owns \\.\pipe\keygnosys
+```
+
+| Option | |
+|--------|--|
+| `--endpoint <address>` | Listen here instead of the resolved endpoint |
+| `--bindings <id>` | Bindings document id (default `default`) |
+| `--bindings-file <path>` | Load this document, ignoring the id |
+| `--config-dir <path>` · `--data-dir <path>` | Where to look for documents |
+
+Exit codes: `0` clean stop, `2` bad usage, `3` the endpoint is already owned,
+`4` the endpoint could not be taken. These are the core's own codes and are
+distinct from the launcher's ([LAUNCHING.md §10](../docs/LAUNCHING.md#10-exit-codes)),
+which is a different program.
+
+### The endpoint
+
+Resolution, ownership and stale recovery are specified in
+[SPEC §5.1.1–5.1.3](../docs/SPEC.md#5-ipc-protocol), and this implements them
+rather than approximating them. On Linux the core verifies every directory
+component it owns against a *descriptor* rather than a path, holds `core.lock`
+with `flock` for the lifetime of the process, and only then probes and binds —
+the lock is what makes the single-instance guarantee hold, because `connect()`
+returns `ECONNREFUSED` for a perfectly healthy core caught between `bind()` and
+`listen()`. On Windows `FILE_FLAG_FIRST_PIPE_INSTANCE` does the same job in one
+kernel call, so there is no lock and nothing to recover.
 
 ## Building
 
@@ -80,6 +123,19 @@ failing output automatically; to run a test binary directly for more detail:
 ./build/default/core/test_keycode
 ```
 
+> **Windows, running from Git Bash.** Git for Windows ships its own
+> `mingw64in` on `PATH`, and its `libstdc++-6.dll` is not the one a UCRT64
+> build links against. Whichever comes first wins, and the losing case is a
+> segfault before the first test prints. Put the toolchain first when running
+> the binaries from that shell:
+>
+> ```sh
+> PATH=/c/msys64/ucrt64/bin:$PATH ctest --preset default
+> ```
+>
+> Running from the MSYS2 UCRT64 shell, from PowerShell, or from an IDE that
+> uses the configured toolchain does not have the problem.
+
 ### Why it is split this way
 
 **`kgn_engine` touches no OS API.** No device, no thread, no system call. It
@@ -92,10 +148,21 @@ the original prototype — the CapsLock race window, the forwarded-release
 invariant — can be tested at all. `ctest` needs no display, no privileges and no
 hardware, and it will stay that way.
 
+**`kgn_ipc` is endpoint ownership and the transports.** It sits apart from
+`kgn_engine` because it must touch an operating system, while the IPC
+*protocol* stays in the engine behind an abstract transport. That is what lets
+every envelope, queue and reply-routing rule be tested against an in-memory
+fake with no socket in sight, and leaves only the ownership rules needing a
+real one.
+
 **`kgn_platform` is where operating systems live**, one implementation per
 platform behind the interfaces in [`include/kgn/backends.hpp`](include/kgn/backends.hpp).
-It is not built yet. Configuring on a platform with no backend is deliberately
-not an error — you get the engine and its tests, which is what M2 needs.
+It is not built yet; the sources arrive with M3 and M4. Configuring on a
+platform with no backend is deliberately not an error — `backends_none.cpp`
+supplies the factory returning null members, which is exactly what
+`backends.hpp` specifies for a capability a platform does not have. It is not a
+fake backend: a stub that swallowed calls and returned plausible values would
+let the core look like it was driving the pointer while nothing moved.
 
 ### Tests
 
@@ -112,7 +179,8 @@ KGN_TEST(name_of_the_thing_being_asserted) {
 ```
 
 Add a test file to `tests/`, then one `kgn_add_test(name)` line in
-`CMakeLists.txt`.
+`CMakeLists.txt` — or `kgn_add_test_with(name kgn_ipc)` if it needs a real
+operating system, as the endpoint and core tests do.
 
 ## The prototype
 

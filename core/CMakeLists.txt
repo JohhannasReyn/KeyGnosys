@@ -81,6 +81,7 @@ if(WIN32)
 else()
     set(KGN_IPC_SOURCES src/endpoint_posix.cpp)
 endif()
+list(APPEND KGN_IPC_SOURCES src/core.cpp)
 
 add_library(kgn_ipc ${KGN_IPC_SOURCES})
 target_link_libraries(kgn_ipc PUBLIC kgn_engine PRIVATE kgn_warnings)
@@ -115,9 +116,27 @@ if(KGN_PLATFORM_SOURCES)
         pkg_check_modules(X11   REQUIRED IMPORTED_TARGET x11 xrandr)
         target_link_libraries(kgn_platform PRIVATE PkgConfig::EVDEV PkgConfig::X11)
     endif()
+else()
+    # No backends on this build. backends_none.cpp supplies the factory that
+    # backends.hpp declares, returning null members -- which is exactly what
+    # that header specifies for a capability this platform does not have. It is
+    # NOT a fake backend: a stub that swallowed calls and returned plausible
+    # values would let the core look like it was driving the pointer while
+    # nothing moved, and P6 exists to forbid precisely that.
+    target_sources(kgn_ipc PRIVATE src/backends_none.cpp)
+endif()
 
-    add_executable(keygnosys-core src/main.cpp)
-    target_link_libraries(keygnosys-core PRIVATE kgn_platform kgn_warnings)
+# ---------------------------------------------------------------------------
+# keygnosys-core -- the executable
+#
+# Built on every platform, backends or not. Its job at M2 is to assemble the
+# platform-neutral core and serve IPC; what it cannot do, it says.
+# ---------------------------------------------------------------------------
+
+add_executable(keygnosys-core src/main.cpp)
+target_link_libraries(keygnosys-core PRIVATE kgn_ipc kgn_warnings)
+if(KGN_PLATFORM_SOURCES)
+    target_link_libraries(keygnosys-core PRIVATE kgn_platform)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -153,6 +172,7 @@ if(KGN_BUILD_TESTS)
     kgn_add_test(test_config)
     kgn_add_test(test_ipc)
     kgn_add_test_with(test_endpoint kgn_ipc)
+    kgn_add_test_with(test_core kgn_ipc)
 endif()
 
 # ---------------------------------------------------------------------------
