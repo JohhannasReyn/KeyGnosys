@@ -1,10 +1,10 @@
 {
-  "schema": "mousetrapkeys/layout/2",
+  "schema": "keygnosys/layout/2",
   "id": "us-ansi-104",
   "name": "US Full-Size (ANSI 104)",
   "description": "Standard US full-size desktop keyboard with function row, navigation cluster and numeric keypad.",
   "metadata": {
-    "author": "MouseTrapKeys",
+    "author": "KeyGnosys",
     "source_template": null,
     "model": "Generic ANSI full-size",
     "revision": 1

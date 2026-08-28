@@ -45,7 +45,7 @@ class ControlBar(QWidget):
         self._grip.setCursor(Qt.SizeAllCursor)
         root.addWidget(self._grip)
 
-        self._title = QLabel("MouseTrapKeys")
+        self._title = QLabel("KeyGnosys")
         self._title.setObjectName("title")
         root.addWidget(self._title)
 
@@ -89,7 +89,7 @@ class ControlBar(QWidget):
         self._hide.clicked.connect(self.hideRequested)
         root.addWidget(self._hide)
 
-        self._quit = _button("✕", "Quit MouseTrapKeys")
+        self._quit = _button("✕", "Quit KeyGnosys")
         self._quit.clicked.connect(self.quitRequested)
         root.addWidget(self._quit)
 

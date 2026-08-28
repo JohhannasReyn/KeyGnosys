@@ -31,7 +31,7 @@ class KeyboardWindow(QWidget):
 
     def __init__(self, state: AppState) -> None:
         super().__init__()
-        self.setWindowTitle("MouseTrapKeys")
+        self.setWindowTitle("KeyGnosys")
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
@@ -137,7 +137,7 @@ class Overlay:
         else:
             self.bar.set_status(
                 "core offline",
-                f"Waiting for mtk-core on {paths.ipc_endpoint()}")
+                f"Waiting for keygnosys-core on {paths.ipc_endpoint()}")
 
     # -- wiring -----------------------------------------------------------
 

@@ -26,11 +26,11 @@ if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
 from PySide6.QtGui import QFont, QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from mousetrapkeys.documents import Registry  # noqa: E402
-from mousetrapkeys.state import AppState  # noqa: E402
-from mousetrapkeys.ui.keyboard_view import KeyboardView  # noqa: E402
-from mousetrapkeys.ui.theme import ResolvedTheme  # noqa: E402
-from mousetrapkeys.ui.fonts import ui_font  # noqa: E402
+from keygnosys.documents import Registry  # noqa: E402
+from keygnosys.state import AppState  # noqa: E402
+from keygnosys.ui.keyboard_view import KeyboardView  # noqa: E402
+from keygnosys.ui.theme import ResolvedTheme  # noqa: E402
+from keygnosys.ui.fonts import ui_font  # noqa: E402
 
 
 def render(view: KeyboardView, path: Path) -> None:

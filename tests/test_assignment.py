@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import pytest
 
-from mousetrapkeys.actions import catalog_commands
-from mousetrapkeys.documents import Binding, BindingSet, DiagnosticSink, Registry
+from keygnosys.actions import catalog_commands
+from keygnosys.documents import Binding, BindingSet, DiagnosticSink, Registry
 
 
 def make_set(**bindings: Binding) -> BindingSet:
     return BindingSet.from_dict({
-        "schema": "mousetrapkeys/bindings/2",
+        "schema": "keygnosys/bindings/2",
         "id": "t",
         "bindings": {code: {"action": b.action, "params": b.params,
                             **({"legend": b.legend} if b.legend else {})}
@@ -170,7 +170,7 @@ def test_available_commands_are_derived_not_stored() -> None:
 
 
 def test_every_catalog_command_is_valid() -> None:
-    from mousetrapkeys.actions import validate_binding
+    from keygnosys.actions import validate_binding
     for action, params in catalog_commands():
         assert validate_binding(action, params) is None, (action, params)
 
@@ -179,7 +179,7 @@ def test_every_catalog_command_is_valid() -> None:
 
 def test_unassigned_entries_load_from_the_document() -> None:
     doc = {
-        "schema": "mousetrapkeys/bindings/2", "id": "t",
+        "schema": "keygnosys/bindings/2", "id": "t",
         "bindings": {"KeyH": {"action": "pointer.move",
                               "params": {"dir": "left"}}},
         "unassigned": [{"action": "button.click", "params": {"button": "right"},
@@ -194,7 +194,7 @@ def test_a_command_both_bound_and_unassigned_keeps_the_binding() -> None:
     """Only reachable by hand-editing, but it must resolve one way."""
     sink = DiagnosticSink()
     doc = {
-        "schema": "mousetrapkeys/bindings/2", "id": "t",
+        "schema": "keygnosys/bindings/2", "id": "t",
         "bindings": {"KeyH": {"action": "pointer.move",
                               "params": {"dir": "left"}}},
         "unassigned": [{"action": "pointer.move", "params": {"dir": "left"}}],
@@ -208,7 +208,7 @@ def test_a_command_both_bound_and_unassigned_keeps_the_binding() -> None:
 def test_invalid_unassigned_entries_are_dropped_not_fatal() -> None:
     sink = DiagnosticSink()
     doc = {
-        "schema": "mousetrapkeys/bindings/2", "id": "t",
+        "schema": "keygnosys/bindings/2", "id": "t",
         "bindings": {"KeyH": {"action": "pointer.move",
                               "params": {"dir": "left"}}},
         "unassigned": [{"action": "pointer.teleport", "params": {}},
@@ -221,7 +221,7 @@ def test_invalid_unassigned_entries_are_dropped_not_fatal() -> None:
 
 def test_schema_1_bindings_get_an_empty_unassigned_list() -> None:
     bindings = BindingSet.from_dict({
-        "schema": "mousetrapkeys/bindings/1", "id": "t",
+        "schema": "keygnosys/bindings/1", "id": "t",
         "bindings": {"KeyH": {"action": "pointer.move",
                               "params": {"dir": "left"}}},
     })

@@ -8,8 +8,8 @@
       "args": [],
       "stopAtEntry": false,
       "externalConsole": true,
-      "cwd": "c:/Projects/mousetrapkeys",
-      "program": "c:/Projects/mousetrapkeys/build/Debug/outDebug",
+      "cwd": "c:/Projects/keygnosys",
+      "program": "c:/Projects/keygnosys/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [
