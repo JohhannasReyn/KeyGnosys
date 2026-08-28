@@ -1,10 +1,10 @@
 {
-  "schema": "mousetrapkeys/layout/2",
+  "schema": "keygnosys/layout/2",
   "id": "asus-zenbook",
   "name": "Asus Zenbook (laptop)",
   "description": "Compact laptop layout modelled on Asus Zenbook and the smaller Vivobook boards. Ctrl is leftmost, Fn second; Delete ends the function row; no numeric keypad.",
   "metadata": {
-    "author": "MouseTrapKeys",
+    "author": "KeyGnosys",
     "source_template": null,
     "model": "Asus Zenbook / Vivobook 14 class",
     "revision": 1

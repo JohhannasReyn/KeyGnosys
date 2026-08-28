@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from mousetrapkeys import paths
-from mousetrapkeys.documents import (
+from keygnosys import paths
+from keygnosys.documents import (
     Binding, BindingSet, DiagnosticSink, DocumentError, Layout, Profile,
     Registry, Segment, Theme, canonical_modifiers,
 )
@@ -84,19 +84,19 @@ def test_profiles_canonicalise_modifier_combinations(registry: Registry) -> None
 
 def test_layout_rejects_unknown_schema_major() -> None:
     with pytest.raises(DocumentError, match="not supported"):
-        Layout.from_dict({"schema": "mousetrapkeys/layout/9", "id": "x",
+        Layout.from_dict({"schema": "keygnosys/layout/9", "id": "x",
                           "keys": [_flat_key()]})
 
 
 def test_layout_rejects_bad_id() -> None:
     with pytest.raises(DocumentError, match="id must match"):
-        Layout.from_dict({"schema": "mousetrapkeys/layout/2", "id": "Not Valid",
+        Layout.from_dict({"schema": "keygnosys/layout/2", "id": "Not Valid",
                           "keys": [_flat_key()]})
 
 
 def test_layout_rejects_empty_keys() -> None:
     with pytest.raises(DocumentError, match="non-empty"):
-        Layout.from_dict({"schema": "mousetrapkeys/layout/2", "id": "x",
+        Layout.from_dict({"schema": "keygnosys/layout/2", "id": "x",
                           "keys": []})
 
 
@@ -104,7 +104,7 @@ def test_bad_key_is_dropped_but_the_layout_still_loads() -> None:
     """A key-level failure must never blank the whole keyboard (P6)."""
     sink = DiagnosticSink()
     layout = Layout.from_dict({
-        "schema": "mousetrapkeys/layout/2", "id": "x",
+        "schema": "keygnosys/layout/2", "id": "x",
         "keys": [
             _flat_key("KeyA", 0),
             {"code": "KeyB", "segments": [{"x": 1, "y": 0}]},   # no legend
@@ -119,26 +119,26 @@ def test_bad_key_is_dropped_but_the_layout_still_loads() -> None:
 
 def test_layout_with_no_usable_keys_is_rejected() -> None:
     with pytest.raises(DocumentError, match="no valid keys"):
-        Layout.from_dict({"schema": "mousetrapkeys/layout/2", "id": "x",
+        Layout.from_dict({"schema": "keygnosys/layout/2", "id": "x",
                           "keys": [{"code": "KeyA", "segments": []}]})
 
 
 def test_theme_rejects_missing_tokens() -> None:
     with pytest.raises(DocumentError, match="missing colour tokens"):
-        Theme.from_dict({"schema": "mousetrapkeys/theme/1", "id": "x",
+        Theme.from_dict({"schema": "keygnosys/theme/1", "id": "x",
                          "tokens": {"surface": "#000000"}})
 
 
 def test_profile_rejects_unknown_modifier() -> None:
     with pytest.raises(DocumentError, match="unknown modifiers"):
-        Profile.from_dict({"schema": "mousetrapkeys/profile/1", "id": "x",
+        Profile.from_dict({"schema": "keygnosys/profile/1", "id": "x",
                            "shortcuts": {"Hyper": {"KeyA": "nope"}}})
 
 
 def test_bad_binding_is_skipped_but_the_document_still_loads() -> None:
     """Principle P6: one bad entry never takes the rest down with it."""
     doc = {
-        "schema": "mousetrapkeys/bindings/1",
+        "schema": "keygnosys/bindings/1",
         "id": "mixed",
         "bindings": {
             "KeyH": {"action": "pointer.move", "params": {"dir": "left"}},
@@ -153,7 +153,7 @@ def test_bad_binding_is_skipped_but_the_document_still_loads() -> None:
 
 def test_one_unreadable_file_does_not_stop_the_rest(tmp_path, monkeypatch) -> None:
     good = {
-        "schema": "mousetrapkeys/layout/1", "id": "good", "name": "Good",
+        "schema": "keygnosys/layout/1", "id": "good", "name": "Good",
         "keys": [{"code": "KeyA", "x": 0, "y": 0, "legend": {"base": "A"}}],
     }
     (tmp_path / "layouts").mkdir()
@@ -172,7 +172,7 @@ def test_user_document_shadows_bundled_one_by_id(tmp_path, monkeypatch) -> None:
     def make(directory, name):
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "layout.json").write_text(json.dumps({
-            "schema": "mousetrapkeys/layout/1", "id": "shared", "name": name,
+            "schema": "keygnosys/layout/1", "id": "shared", "name": name,
             "keys": [{"code": "KeyA", "x": 0, "y": 0, "legend": {"base": "A"}}],
         }))
 

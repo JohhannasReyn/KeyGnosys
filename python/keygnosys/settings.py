@@ -15,7 +15,7 @@ from typing import Any
 from . import paths
 
 DEFAULTS: dict[str, Any] = {
-    "schema": "mousetrapkeys/settings/1",
+    "schema": "keygnosys/settings/1",
     "appearance": {
         "theme": "system",
         "accent": None,

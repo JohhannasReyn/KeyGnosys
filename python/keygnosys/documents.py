@@ -94,7 +94,7 @@ def _schema_major(doc: dict, kind: str, supported: tuple[int, ...]) -> int:
     happens in memory and never rewrites the file (SPEC 3.4.4).
     """
     got = doc.get("schema")
-    want = f"mousetrapkeys/{kind}/"
+    want = f"keygnosys/{kind}/"
     newest = max(supported)
     if not isinstance(got, str) or not got.startswith(want):
         raise DocumentError(f"expected schema {want}{newest}, found {got!r}")

@@ -15,7 +15,7 @@ from .settings import Settings
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="mousetrapkeys",
+        prog="keygnosys",
         description="Pinnable, click-through on-screen keyboard and "
                     "CapsLock cursor layer.",
     )
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
 
     app = QApplication(sys.argv if argv is None else [sys.argv[0], *argv])
-    app.setApplicationName("MouseTrapKeys")
+    app.setApplicationName("KeyGnosys")
     app.setQuitOnLastWindowClosed(False)
 
     registry = load_registry()

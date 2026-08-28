@@ -1,5 +1,5 @@
 {
-  "schema": "mousetrapkeys/profile/1",
+  "schema": "keygnosys/profile/1",
   "id": "vscode",
   "name": "Visual Studio Code",
   "priority": 60,

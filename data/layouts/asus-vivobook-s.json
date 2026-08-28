@@ -1,10 +1,10 @@
 {
-  "schema": "mousetrapkeys/layout/2",
+  "schema": "keygnosys/layout/2",
   "id": "asus-vivobook-s",
   "name": "Asus Vivobook S 15/16 (laptop)",
   "description": "Asus Vivobook S 15 / S 16, which unlike the Zenbook carries a numeric keypad and a navigation row above it. A starting template, not a model-exact reproduction.",
   "metadata": {
-    "author": "MouseTrapKeys",
+    "author": "KeyGnosys",
     "source_template": null,
     "model": "Asus Vivobook S 15 / S 16",
     "revision": 1
