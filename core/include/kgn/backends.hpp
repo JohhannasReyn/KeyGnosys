@@ -17,6 +17,7 @@
 #include <string_view>
 #include <vector>
 
+#include "kgn/diagnostics.hpp"
 #include "kgn/hookchannel.hpp"
 #include "kgn/keycode.hpp"
 
@@ -101,6 +102,11 @@ public:
     // rather than calling the engine directly. Declared here rather than
     // guessed at by the core, so a backend that does not need this simply
     // returns null and the core supplies a local owner.
+    // Conditions the backend noticed on its own thread and could not report
+    // there. A hook procedure must not log, allocate or touch IPC, so it
+    // counts and the core drains. Called from the core loop.
+    virtual void drainDiagnostics(Diagnostics&) {}
+
     [[nodiscard]] virtual std::unique_ptr<EngineOwner> engineOwner(
         WorkRing&, PublicationRing&, StatePublisher&, const EngineConfig&) {
         return nullptr;

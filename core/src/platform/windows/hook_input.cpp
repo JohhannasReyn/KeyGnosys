@@ -1,6 +1,7 @@
 #include "hook_input.hpp"
 
 #include <algorithm>
+#include <string>
 
 namespace kgn::win {
 
@@ -111,6 +112,32 @@ Capabilities HookInput::capabilities() const {
         "Ctrl+Alt+Del and the Secure Attention Sequence are never "
         "interceptable. This is by design in Windows, not a defect.");
     return capabilities;
+}
+
+void HookInput::drainDiagnostics(Diagnostics& out) {
+    // Counted on the hook thread, reported here. One diagnostic per episode
+    // rather than per event: a condition that repeats every keystroke would
+    // otherwise flood the very channel meant to explain it.
+    const std::uint64_t losses = hookLosses_.exchange(0);
+    if (losses != 0) {
+        out.emplace_back(DiagLevel::Warn, "input.hook_lost",
+                         "Windows removed the keyboard hook " +
+                             std::to_string(losses) +
+                             " time(s); it has been re-installed");
+    }
+    const std::uint64_t refused = admissionRefusals_.exchange(0);
+    if (refused != 0) {
+        out.emplace_back(DiagLevel::Error, "input.queue_overflow",
+                         "the core loop fell far enough behind that " +
+                             std::to_string(refused) +
+                             " key press(es) were suppressed rather than "
+                             "risk an obligation that could not be delivered");
+    }
+    if (!installed_.load()) {
+        out.emplace_back(DiagLevel::Error, "input.permission_denied",
+                         "the keyboard hook is not installed; keys are not "
+                         "intercepted");
+    }
 }
 
 std::uint64_t HookInput::takeAdmissionRefusals() {

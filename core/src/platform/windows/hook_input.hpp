@@ -50,6 +50,8 @@ public:
     [[nodiscard]] Capabilities capabilities() const override;
     [[nodiscard]] std::string_view name() const override { return "windows-hook"; }
 
+    void drainDiagnostics(Diagnostics& out) override;
+
     [[nodiscard]] std::unique_ptr<EngineOwner> engineOwner(
         WorkRing& work, PublicationRing& publication, StatePublisher& published,
         const EngineConfig& config) override;

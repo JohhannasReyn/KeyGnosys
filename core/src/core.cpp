@@ -765,6 +765,18 @@ struct Core::Impl {
         server->broadcast("pointer", std::move(data));
     }
 
+    // Whatever the input backend noticed on its own thread. It cannot log or
+    // touch IPC there, so it counts and this reports.
+    void drainBackendDiagnostics() {
+        if (!backends.input) return;
+        Diagnostics found;
+        backends.input->drainDiagnostics(found);
+        for (auto& diagnostic : found) {
+            if (server) server->broadcastDiagnostic(diagnostic);
+            diagnostics.push_back(std::move(diagnostic));
+        }
+    }
+
     void reportNoOutput(const char* action) {
         note(DiagLevel::Warn, "window.unsupported",
              std::string(action) +
@@ -1150,6 +1162,7 @@ void Core::step(TimePoint now) {
         }
     }
 
+    impl_->drainBackendDiagnostics();
     impl_->publishWindowState(now);
     impl_->publishPointer(now);
     impl_->server->poll();
