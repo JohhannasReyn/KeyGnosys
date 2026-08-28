@@ -54,7 +54,12 @@ std::string executableDirectory() {
 
 bool readFile(const std::string& path, std::string& out) {
     std::ifstream stream(path, std::ios::binary);
-    if (!stream) return false;
+    // is_open(), not operator bool. On MinGW/UCRT a freshly constructed
+    // ifstream whose open FAILED still tests true, so `if (!stream)` never
+    // fires and every missing path is read as an empty file -- which the
+    // bindings search then reports as a document that is not valid JSON, once
+    // per path it looked in. Verified on GCC 15.2 / UCRT64.
+    if (!stream.is_open()) return false;
     std::ostringstream buffer;
     buffer << stream.rdbuf();
     out = buffer.str();

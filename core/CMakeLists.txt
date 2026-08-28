@@ -97,7 +97,12 @@ set(KGN_PLATFORM_SOURCES "")
 
 if(WIN32)
     set(KGN_PLATFORM_NAME "windows")
-    # M3 lands these in phase W.
+    set(KGN_PLATFORM_SOURCES
+        src/platform/windows/scancode_keymap.cpp
+        src/platform/windows/hook_input.cpp
+        src/platform/windows/sendinput_output.cpp
+        src/platform/windows/win32_window.cpp
+        src/platform/windows/platform_windows.cpp)
 elseif(UNIX AND NOT APPLE)
     set(KGN_PLATFORM_NAME "linux-x11")
     # M4: evdev_input.cpp uinput_output.cpp x11_window.cpp evdev_keymap.cpp
@@ -173,6 +178,12 @@ if(KGN_BUILD_TESTS)
     kgn_add_test(test_ipc)
     kgn_add_test(test_hookchannel)
     kgn_add_test(test_slots)
+    if(WIN32)
+        # The scancode table is Windows-only, and so is its test. It reaches
+        # into src/platform/windows for the header rather than exporting it:
+        # nothing outside that directory may hold a key translation (P2).
+        kgn_add_test_with(test_scancode_keymap kgn_platform)
+    endif()
     kgn_add_test_with(test_endpoint kgn_ipc)
     kgn_add_test_with(test_core kgn_ipc)
 endif()
