@@ -2362,7 +2362,7 @@ cmake --preset default && cmake --build --preset default && PATH=/c/msys64/ucrt6
 python -m pytest -q
 keygnosys --check
 git diff --check
-grep -rEn 'mousetrapkeys|mousetrap|mtk' --exclude-dir=legacy . | grep -v '^\./\.git'
+git ls-files | grep -v '^legacy/' | xargs grep -EIln 'mousetrapkeys|mousetrap|mtk'
 ```
 
 Expected: both presets clean under `-Werror`; all ctest binaries pass; pytest 90 passed;
