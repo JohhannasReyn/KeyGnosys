@@ -209,6 +209,13 @@ bool LayerEngine::takePending(KeyCode code) {
     return false;
 }
 
+std::optional<TimePoint> LayerEngine::nextDeadline() const {
+    if (pendingCount_ == 0) return std::nullopt;
+    // pending_ is kept in press order and `grace` is uniform across entries,
+    // so the head is always the first to lapse.
+    return pending_[0].pressedAt + config_.grace;
+}
+
 std::vector<KeyCode> LayerEngine::heldActions() const {
     return std::vector<KeyCode>(heldOrder_.data(),
                                 heldOrder_.data() + heldCount_);

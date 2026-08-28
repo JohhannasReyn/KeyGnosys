@@ -204,6 +204,16 @@ public:
     // In press order.
     [[nodiscard]] std::vector<KeyCode> heldActions() const;
 
+    // When the next buffered press's grace window lapses, or nullopt when
+    // nothing is buffered.
+    //
+    // This is what lets the engine's owner wait on a deadline instead of
+    // polling: expiring these is the ONLY timed work the engine has, so a
+    // fixed-cadence tick would be a wakeup per period doing nothing. The
+    // hybrid tap threshold is not timed -- it is measured on the CapsLock
+    // release. Allocation-free and const.
+    [[nodiscard]] std::optional<TimePoint> nextDeadline() const;
+
     // Diagnostics. Non-zero means input was dropped because an obligation
     // could not be recorded -- unreachable from a physical keyboard, and worth
     // surfacing if it ever happens.

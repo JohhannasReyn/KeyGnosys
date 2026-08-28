@@ -1385,6 +1385,31 @@ KGN_TEST(the_decision_buffer_never_reallocates) {
     KGN_CHECK(!buffer.overflowed());
 }
 
+KGN_TEST(the_engine_reports_when_its_next_grace_window_lapses) {
+    // The engine's only timed work is expiring buffered presses, so its owner
+    // should wait on that deadline rather than poll it at 60 Hz.
+    EngineConfig config;
+    config.grace = std::chrono::milliseconds(50);
+    LayerEngine engine(config);
+    engine.setBindings({{KeyCode::fromString("KeyD"), BindingKind::Action},
+                        {KeyCode::fromString("KeyF"), BindingKind::Action}});
+
+    KGN_CHECK(!engine.nextDeadline().has_value());
+
+    engine.onKey(KeyCode::fromString("KeyD"), KeyState::Down, at(100));
+    engine.onKey(KeyCode::fromString("KeyF"), KeyState::Down, at(120));
+
+    // The EARLIEST pending press governs, not the most recent.
+    KGN_CHECK(engine.nextDeadline().has_value());
+    KGN_CHECK(*engine.nextDeadline() == at(150));
+
+    engine.tick(at(150));
+    KGN_CHECK(*engine.nextDeadline() == at(170));
+
+    engine.tick(at(170));
+    KGN_CHECK(!engine.nextDeadline().has_value());
+}
+
 int main() {
     return kgn::test::runAll();
 }
