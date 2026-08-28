@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -60,13 +61,23 @@ const std::vector<std::string>& builtinNames() {
 // during config load and then only read on the input hot path -- but writes can
 // happen at any time via a live config reload, so it is guarded.
 struct Intern {
-    std::vector<std::string> names;                 // id - 1 -> name
+    // A deque, not a vector: toString() returns a string_view into this storage
+    // and then releases the lock, so the storage must never move. A deque's
+    // push_back never invalidates references to existing elements, and entries
+    // are never erased, so a view stays valid for the process lifetime.
+    //
+    // A vector happens to be safe only while every name is short enough for the
+    // small-string optimisation to keep its data inside the std::string object
+    // -- and that object IS moved on reallocation. That is an implementation
+    // accident, not a lifetime guarantee, and M3 introduces the second thread
+    // that makes the difference reachable.
+    std::deque<std::string> names;                  // id - 1 -> name
     std::unordered_map<std::string, std::uint16_t> ids;
     std::mutex mutex;
 
     Intern() {
         const auto& builtin = builtinNames();
-        names = builtin;
+        names.assign(builtin.begin(), builtin.end());
         ids.reserve(builtin.size() * 2);
         for (std::size_t i = 0; i < builtin.size(); ++i) {
             ids.emplace(builtin[i], static_cast<std::uint16_t>(i + 1));
