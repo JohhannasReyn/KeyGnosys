@@ -47,11 +47,11 @@ endif()
 add_library(kgn_engine
     src/keycode.cpp
     src/layer_engine.cpp
-    # Added as milestone M2 lands:
-    #   src/motion.cpp         60 Hz pointer/scroll integrator
-    #   src/actions.cpp        action catalog and dispatch
-    #   src/config.cpp         bindings and settings loading
-    #   src/ipc.cpp            JSON Lines server
+    src/json.cpp
+    src/motion.cpp
+    src/actions.cpp
+    src/config.cpp
+    src/ipc.cpp
 )
 target_include_directories(kgn_engine PUBLIC include)
 target_link_libraries(kgn_engine PRIVATE kgn_warnings)
@@ -64,6 +64,32 @@ target_link_libraries(kgn_engine PRIVATE kgn_warnings)
 # with milestones M3 (Windows) and M4 (Linux/X11). Until then, configuring on
 # an unsupported platform is not an error -- there is simply nothing to build.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# kgn_ipc -- endpoint ownership and the platform transports
+#
+# Separated from kgn_engine because it is the one part of the core that must
+# touch an operating system: sockets on Linux, named pipes on Windows, and the
+# ownership rules of SPEC 5.1.1-5.1.3 that decide who is allowed to create one.
+# The PROTOCOL itself stays in kgn_engine, over the Transport interface, which
+# is what lets every envelope, queue and reply-routing rule be tested with no
+# socket in sight.
+# ---------------------------------------------------------------------------
+
+if(WIN32)
+    set(KGN_IPC_SOURCES src/endpoint_windows.cpp)
+else()
+    set(KGN_IPC_SOURCES src/endpoint_posix.cpp)
+endif()
+list(APPEND KGN_IPC_SOURCES src/core.cpp)
+
+add_library(kgn_ipc ${KGN_IPC_SOURCES})
+target_link_libraries(kgn_ipc PUBLIC kgn_engine PRIVATE kgn_warnings)
+if(WIN32)
+    # advapi32 carries the token and ACL calls that restrict the pipe to its
+    # creating user.
+    target_link_libraries(kgn_ipc PRIVATE advapi32)
+endif()
 
 set(KGN_PLATFORM_SOURCES "")
 
@@ -90,9 +116,27 @@ if(KGN_PLATFORM_SOURCES)
         pkg_check_modules(X11   REQUIRED IMPORTED_TARGET x11 xrandr)
         target_link_libraries(kgn_platform PRIVATE PkgConfig::EVDEV PkgConfig::X11)
     endif()
+else()
+    # No backends on this build. backends_none.cpp supplies the factory that
+    # backends.hpp declares, returning null members -- which is exactly what
+    # that header specifies for a capability this platform does not have. It is
+    # NOT a fake backend: a stub that swallowed calls and returned plausible
+    # values would let the core look like it was driving the pointer while
+    # nothing moved, and P6 exists to forbid precisely that.
+    target_sources(kgn_ipc PRIVATE src/backends_none.cpp)
+endif()
 
-    add_executable(keygnosys-core src/main.cpp)
-    target_link_libraries(keygnosys-core PRIVATE kgn_platform kgn_warnings)
+# ---------------------------------------------------------------------------
+# keygnosys-core -- the executable
+#
+# Built on every platform, backends or not. Its job at M2 is to assemble the
+# platform-neutral core and serve IPC; what it cannot do, it says.
+# ---------------------------------------------------------------------------
+
+add_executable(keygnosys-core src/main.cpp)
+target_link_libraries(keygnosys-core PRIVATE kgn_ipc kgn_warnings)
+if(KGN_PLATFORM_SOURCES)
+    target_link_libraries(keygnosys-core PRIVATE kgn_platform)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -108,16 +152,27 @@ if(KGN_BUILD_TESTS)
     add_library(kgn_test_main INTERFACE)
     target_include_directories(kgn_test_main INTERFACE tests)
 
-    function(kgn_add_test name)
+    # Most tests need only the platform-free engine. kgn_add_test_with takes
+    # the extra libraries for the few that are testing an operating system.
+    function(kgn_add_test_with name)
         add_executable(${name} tests/${name}.cpp)
-        target_link_libraries(${name} PRIVATE kgn_engine kgn_test_main kgn_warnings)
+        target_link_libraries(${name} PRIVATE kgn_engine kgn_test_main kgn_warnings ${ARGN})
         add_test(NAME ${name} COMMAND ${name})
+    endfunction()
+
+    function(kgn_add_test name)
+        kgn_add_test_with(${name})
     endfunction()
 
     kgn_add_test(test_keycode)
     kgn_add_test(test_layer_engine)
-    # Added with M2:
-    #   kgn_add_test(test_motion)         ramp, diagonals, pixel accumulation
+    kgn_add_test(test_json)
+    kgn_add_test(test_motion)
+    kgn_add_test(test_actions)
+    kgn_add_test(test_config)
+    kgn_add_test(test_ipc)
+    kgn_add_test_with(test_endpoint kgn_ipc)
+    kgn_add_test_with(test_core kgn_ipc)
 endif()
 
 # ---------------------------------------------------------------------------
