@@ -1641,6 +1641,17 @@ it shares its canvas, selection model and hit-testing with the M5 binding editor
 Building the binding editor first means the layout editor inherits working
 infrastructure rather than inventing it.
 
+**The launcher scripts land between M4 and M5.** Their contract — option
+surface, prerequisite and privilege rules, autostart mechanism and exit codes —
+is specified in [LAUNCHING.md](LAUNCHING.md) and is settled *now*, before M2,
+because M2 creates the `keygnosys-core` executable and the IPC server the
+launcher will manage. The implementation waits for M4 so that it is designed
+against two real platforms rather than against Windows plus a guess: written
+after M3 it would be a Windows-shaped design with a Linux script retrofitted
+into it, and the two platforms disagree on process detachment, endpoint
+semantics, autostart mechanism and toolchain discovery. The launcher is not the
+installer; packaging remains M7.
+
 ---
 
 ## 15. Resolved design decisions
