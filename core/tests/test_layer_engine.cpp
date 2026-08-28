@@ -458,7 +458,10 @@ std::vector<Decision> randomSession(unsigned seed) {
                 // Malformed CapsLock specifically. It is dispatched before the
                 // general duplicate-state logic, so it needs exercising in its
                 // own right rather than only as one key among many.
-                const unsigned which = rng() % 3;
+                // mt19937::result_type is uint_fast32_t, which is 32 bits on
+                // Windows and 64 on LP64 Linux -- narrow explicitly rather than
+                // let -Wconversion decide the build fails on one of them.
+                const unsigned which = static_cast<unsigned>(rng() % 3u);
                 const KeyState state = which == 0   ? KeyState::Down
                                        : which == 1 ? KeyState::Up
                                                     : KeyState::Repeat;
