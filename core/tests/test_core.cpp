@@ -219,13 +219,18 @@ class RecordingOutput : public kgn::OutputBackend {
 public:
     std::vector<std::pair<kgn::KeyCode, bool>> keys;
     std::vector<std::pair<kgn::MouseButton, bool>> buttons;
+    std::vector<kgn::Point> warps;
+    kgn::Point cursor{};
     int releaseAllCalls = 0;
     int releaseAllOrder = 0;
     int* clock = nullptr;
 
     void moveCursorBy(int, int) override {}
-    void moveCursorTo(int, int) override {}
-    kgn::Point cursorPosition() override { return {}; }
+    void moveCursorTo(int x, int y) override {
+        warps.push_back({x, y});
+        cursor = {x, y};
+    }
+    kgn::Point cursorPosition() override { return cursor; }
     void button(kgn::MouseButton b, bool down) override { buttons.emplace_back(b, down); }
     void scroll(int, int) override {}
     void sendKey(kgn::KeyCode code, bool down) override { keys.emplace_back(code, down); }
@@ -266,6 +271,54 @@ public:
         return c;
     }
     std::string_view name() const override { return "recording-input"; }
+};
+
+// An engine owner that accepts everything and applies nothing. Stands in for
+// an input thread that has wedged -- the case the shutdown fallback exists for.
+class NeverAcknowledging : public kgn::EngineOwner {
+public:
+    int submitted = 0;
+
+    bool submit(const kgn::Control&) override {
+        ++submitted;
+        return true;
+    }
+    bool awaitApplied(std::uint32_t, std::chrono::milliseconds) override {
+        return false;
+    }
+};
+
+class RecordingWindow : public kgn::WindowBackend {
+public:
+    std::vector<kgn::WindowInfo> list;
+    std::vector<kgn::MonitorInfo> screens;
+    kgn::WindowId focusedId = 0;
+    std::vector<kgn::WindowId> focusCalls;
+    std::vector<std::pair<kgn::WindowId, int>> moves;
+
+    std::vector<kgn::WindowInfo> windows() override { return list; }
+    std::optional<kgn::WindowInfo> focused() override {
+        for (const auto& info : list) {
+            if (info.id == focusedId) return info;
+        }
+        return std::nullopt;
+    }
+    bool focus(kgn::WindowId id) override {
+        focusCalls.push_back(id);
+        focusedId = id;
+        return true;
+    }
+    std::vector<kgn::MonitorInfo> monitors() override { return screens; }
+    bool moveWindowToMonitor(kgn::WindowId id, int index) override {
+        moves.emplace_back(id, index);
+        return true;
+    }
+    kgn::Capabilities capabilities() const override {
+        kgn::Capabilities c;
+        c.canMoveWindows = true;
+        return c;
+    }
+    std::string_view name() const override { return "recording-window"; }
 };
 
 struct Fixture {
@@ -627,6 +680,246 @@ KGN_TEST(stepping_with_no_input_backend_moves_nothing_and_does_not_spin) {
     KGN_CHECK(fixture.core.start().ok());
     for (int i = 0; i < 200; ++i) fixture.core.step(kgn::Clock::now());
     KGN_CHECK(fixture.core.running());
+}
+
+KGN_TEST(a_key_event_is_published_once_per_physical_event_not_once_per_decision) {
+    // A grace replay is ONE physical Up that produces TWO Forward decisions.
+    // Publishing per decision -- which is what the core did before the streams
+    // were separated -- reports a key press the user never made.
+    Fixture fixture("publish");
+    KGN_CHECK(fixture.core.start().ok());
+
+    RawClient client;
+    KGN_CHECK(client.connect(fixture.address));
+    if (!client.valid()) return;
+    parseLine(client.readLine(fixture.core));   // hello
+
+    const kgn::KeyCode code = kgn::KeyCode::fromString("KeyD");
+    fixture.core.pushWorkForTests({kgn::WorkItem::Kind::SendKey, true, code.id()});
+    fixture.core.pushWorkForTests({kgn::WorkItem::Kind::SendKey, false, code.id()});
+    fixture.core.publishPhysicalForTests({code.id(), kgn::KeyState::Up, true, 0});
+
+    // Drain everything the core has to say, then count. Counting rather than
+    // inspecting the next line matters: an assertion that only looks at what
+    // follows passes just as happily when nothing follows at all.
+    int keyEvents = 0;
+    Json firstKey;
+    for (int i = 0; i < 12; ++i) {
+        const std::string line = client.readLine(fixture.core, 40);
+        if (line.empty()) break;
+        const Json message = parseLine(line);
+        if (message["n"].asString() != "key") continue;
+        if (keyEvents == 0) firstKey = message;
+        ++keyEvents;
+    }
+
+    KGN_CHECK_EQ(keyEvents, 1);
+    KGN_CHECK_EQ(firstKey["d"]["code"].asString(), std::string("KeyD"));
+    KGN_CHECK_EQ(firstKey["d"]["state"].asString(), std::string("up"));
+    KGN_CHECK(firstKey["d"]["suppressed"].asBool());
+    client.close();
+}
+
+KGN_TEST(work_items_reach_the_output_backend_and_publication_does_not) {
+    // The mirror of the test above: a work item drives the backend, a physical
+    // record does not. Conflating them delivers every keystroke twice.
+    kgn::Backends backends;
+    auto output = std::make_unique<RecordingOutput>();
+    RecordingOutput* recorded = output.get();
+    backends.output = std::move(output);
+
+    Fixture fixture("work", std::move(backends));
+    KGN_CHECK(fixture.core.start().ok());
+
+    const kgn::KeyCode code = kgn::KeyCode::fromString("KeyD");
+    fixture.core.publishPhysicalForTests({code.id(), kgn::KeyState::Down, false, 0});
+    fixture.core.step(kgn::Clock::now());
+    KGN_CHECK(recorded->keys.empty());   // a natively forwarded press, not resent
+
+    fixture.core.pushWorkForTests({kgn::WorkItem::Kind::SendKey, true, code.id()});
+    fixture.core.step(kgn::Clock::now());
+    KGN_CHECK_EQ(recorded->keys.size(), std::size_t{1});
+    KGN_CHECK(recorded->keys[0].second);
+}
+
+KGN_TEST(shutdown_releases_everything_even_when_the_engine_owner_never_answers) {
+    // The formal fallback. Obligations partition into three sets and only the
+    // first involves the engine's owner at all -- and that one is discharged
+    // by uninstalling the input backend, not by the owner replying.
+    int clock = 0;
+    auto output = std::make_unique<RecordingOutput>();
+    auto input = std::make_unique<RecordingInput>();
+    RecordingOutput* recordedOutput = output.get();
+    RecordingInput* recordedInput = input.get();
+    recordedOutput->clock = &clock;
+    recordedInput->clock = &clock;
+
+    kgn::Backends backends;
+    backends.output = std::move(output);
+    backends.input = std::move(input);
+
+    const std::string address = uniqueEndpoint("fallback");
+    kgn::CoreOptions opts = Fixture::options(address);
+    opts.controlTimeout = std::chrono::milliseconds(5);
+    kgn::Core core(opts, std::move(backends));
+    auto owner = std::make_unique<NeverAcknowledging>();
+    NeverAcknowledging* recordedOwner = owner.get();
+    core.setEngineOwnerForTests(std::move(owner));
+
+    KGN_CHECK(core.start().ok());
+    core.stop("test finished");
+    removeEndpoint(address);
+
+    KGN_CHECK(recordedOwner->submitted > 0);      // it was asked
+    KGN_CHECK_EQ(recordedInput->stopCalls, 1);    // and stopped regardless
+    KGN_CHECK(recordedOutput->releaseAllCalls >= 1);
+    // Order matters: the input backend must be gone before the output is
+    // released, or new work can arrive after the drain.
+    KGN_CHECK(recordedInput->stopOrder > 0);
+    KGN_CHECK(recordedOutput->releaseAllOrder > recordedInput->stopOrder);
+}
+
+KGN_TEST(a_setting_change_the_engine_never_applied_is_refused_not_reported_ok) {
+    // P6 in the reply path: a core that says "applied" for a change the engine
+    // never saw is worse than one that refuses.
+    const std::string address = uniqueEndpoint("refuse");
+    kgn::CoreOptions opts = Fixture::options(address);
+    opts.controlTimeout = std::chrono::milliseconds(5);
+    kgn::Core core(opts);
+    core.setEngineOwnerForTests(std::make_unique<NeverAcknowledging>());
+    KGN_CHECK(core.start().ok());
+
+    RawClient client;
+    KGN_CHECK(client.connect(address));
+    if (client.valid()) {
+        parseLine(client.readLine(core));   // hello
+        client.send(R"({"v":1,"t":"command","n":"set_activation_mode","id":"c1",)"
+                    R"("d":{"mode":"toggle"}})" "\n");
+
+        Json reply = parseLine(client.readLine(core));
+        for (int i = 0; i < 8 && reply["t"].asString() != "reply"; ++i) {
+            reply = parseLine(client.readLine(core));
+        }
+        KGN_CHECK_EQ(reply["t"].asString(), std::string("reply"));
+        KGN_CHECK(!reply["ok"].asBool());
+        KGN_CHECK_EQ(reply["e"]["code"].asString(),
+                     std::string("input.queue_overflow"));
+        client.close();
+    }
+    core.stop("test finished");
+    removeEndpoint(address);
+}
+
+KGN_TEST(window_slot_focuses_the_registry_entry_and_cycle_walks_slot_order) {
+    auto window = std::make_unique<RecordingWindow>();
+    RecordingWindow* recorded = window.get();
+    kgn::WindowInfo a;
+    a.id = 11;
+    a.title = "alpha";
+    kgn::WindowInfo b;
+    b.id = 22;
+    b.title = "beta";
+    recorded->list = {a, b};
+    recorded->focusedId = 11;
+
+    kgn::Backends backends;
+    backends.window = std::move(window);
+    backends.output = std::make_unique<RecordingOutput>();
+
+    Fixture fixture("winact", std::move(backends));
+    KGN_CHECK(fixture.core.start().ok());
+
+    kgn::Action slot;
+    slot.id = kgn::ActionId::WindowSlot;
+    slot.index = 2;
+    fixture.core.applyWindowForTests(slot);
+    KGN_CHECK_EQ(recorded->focusCalls.back(), kgn::WindowId{22});
+
+    kgn::Action cycle;
+    cycle.id = kgn::ActionId::WindowCycle;
+    cycle.cycle = kgn::Cycle::Next;
+    fixture.core.applyWindowForTests(cycle);
+    KGN_CHECK_EQ(recorded->focusCalls.back(), kgn::WindowId{11});
+}
+
+KGN_TEST(warp_grid_lands_on_the_monitor_the_pointer_is_actually_on) {
+    // SPEC 7.4: the grid is over the CURRENT monitor. Normalising against the
+    // primary is the classic bug that puts the pointer on the wrong screen.
+    auto window = std::make_unique<RecordingWindow>();
+    RecordingWindow* recordedWindow = window.get();
+    kgn::MonitorInfo primary;
+    primary.index = 0;
+    primary.bounds = {0, 0, 1920, 1080};
+    primary.primary = true;
+    kgn::MonitorInfo second;
+    second.index = 1;
+    second.bounds = {1920, 0, 1280, 1024};
+    recordedWindow->screens = {primary, second};
+
+    auto output = std::make_unique<RecordingOutput>();
+    RecordingOutput* recordedOutput = output.get();
+    recordedOutput->cursor = {2560, 512};   // on the SECOND monitor
+
+    kgn::Backends backends;
+    backends.window = std::move(window);
+    backends.output = std::move(output);
+
+    Fixture fixture("warp", std::move(backends));
+    KGN_CHECK(fixture.core.start().ok());
+
+    kgn::Action grid;
+    grid.id = kgn::ActionId::WarpGrid;
+    grid.index = 5;                        // the centre cell
+    fixture.core.applyWarpForTests(grid);
+
+    KGN_CHECK_EQ(recordedOutput->warps.size(), std::size_t{1});
+    KGN_CHECK_EQ(recordedOutput->warps[0].x, 1920 + 1280 / 2);
+    KGN_CHECK_EQ(recordedOutput->warps[0].y, 1024 / 2);
+}
+
+KGN_TEST(a_double_click_is_two_pairs_separated_in_time_and_never_blocks) {
+    auto output = std::make_unique<RecordingOutput>();
+    RecordingOutput* recorded = output.get();
+    kgn::Backends backends;
+    backends.output = std::move(output);
+
+    Fixture fixture("dblclick", std::move(backends));
+    KGN_CHECK(fixture.core.start().ok());
+
+    fixture.core.doubleClickForTests(kgn::MouseButton::Left);
+    // The first pair is immediate; the second must NOT be, or the loop slept.
+    KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{2});
+
+    fixture.core.step(kgn::Clock::now());
+    KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{2});
+
+    fixture.core.step(kgn::Clock::now() + std::chrono::milliseconds(100));
+    KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{4});
+    for (std::size_t i = 0; i < recorded->buttons.size(); ++i) {
+        KGN_CHECK(recorded->buttons[i].second == (i % 2 == 0));
+    }
+}
+
+KGN_TEST(releasing_the_layer_cancels_a_pending_double_click_with_the_button_up) {
+    // P7 over fidelity: half a double click is acceptable, a button left down
+    // is not.
+    auto output = std::make_unique<RecordingOutput>();
+    RecordingOutput* recorded = output.get();
+    kgn::Backends backends;
+    backends.output = std::move(output);
+
+    Fixture fixture("dblcancel", std::move(backends));
+    KGN_CHECK(fixture.core.start().ok());
+
+    fixture.core.doubleClickForTests(kgn::MouseButton::Left);
+    KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{2});
+
+    fixture.core.releaseAllForTests();
+    fixture.core.step(kgn::Clock::now() + std::chrono::milliseconds(500));
+
+    KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{2});   // no third press
+    KGN_CHECK(!recorded->buttons.back().second);              // and it is up
+    KGN_CHECK(recorded->releaseAllCalls >= 1);
 }
 
 int main() { return kgn::test::runAll(); }

@@ -53,6 +53,7 @@ add_library(kgn_engine
     src/config.cpp
     src/ipc.cpp
     src/hookchannel.cpp
+    src/slots.cpp
 )
 target_include_directories(kgn_engine PUBLIC include)
 target_link_libraries(kgn_engine PRIVATE kgn_warnings)
@@ -171,6 +172,7 @@ if(KGN_BUILD_TESTS)
     kgn_add_test(test_config)
     kgn_add_test(test_ipc)
     kgn_add_test(test_hookchannel)
+    kgn_add_test(test_slots)
     kgn_add_test_with(test_endpoint kgn_ipc)
     kgn_add_test_with(test_core kgn_ipc)
 endif()
