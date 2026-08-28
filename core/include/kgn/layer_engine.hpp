@@ -22,12 +22,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include "kgn/clock.hpp"
 #include "kgn/keycode.hpp"
 
 namespace kgn {
-
-using Clock = std::chrono::steady_clock;
-using TimePoint = Clock::time_point;
 
 enum class Mode : std::uint8_t {
     Normal,
