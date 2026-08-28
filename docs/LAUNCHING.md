@@ -235,6 +235,14 @@ The launcher **MUST** determine whether a core is running by connecting to the
 KeyGnosys IPC endpoint. It **MUST NOT** invent a lock file, a PID file, a mutex,
 or a process-name scan for this purpose.
 
+That prohibition is about **instance detection**, and does not reach the core's
+own startup lock ([SPEC §5.1.3](SPEC.md#5-ipc-protocol)). The two solve
+different problems: the core's lock serializes *claiming* the endpoint on Linux,
+where probing and binding cannot be one atomic act, whereas the launcher is only
+ever *asking* whether a core is there. The launcher **MUST NOT** open, read,
+take, or remove that lock; connecting to the endpoint tells it everything it is
+entitled to know.
+
 **The endpoint rule is [SPEC §5.1.1](SPEC.md#5-ipc-protocol), and this document
 does not restate it.** The core, the overlay and the launcher are all bound by
 that one rule — including the fallback applied on Linux when
