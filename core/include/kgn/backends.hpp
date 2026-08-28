@@ -17,6 +17,7 @@
 #include <string_view>
 #include <vector>
 
+#include "kgn/hookchannel.hpp"
 #include "kgn/keycode.hpp"
 
 namespace kgn {
@@ -90,6 +91,20 @@ public:
     // What `hello` calls this backend. A real name, so a client can tell a
     // hook-based build from a driver-based one rather than being told "input".
     [[nodiscard]] virtual std::string_view name() const = 0;
+
+    // The engine owner this backend provides, or null when it does not own one.
+    //
+    // A backend that must answer the OS synchronously -- the Windows low-level
+    // hook -- has to run the layer engine on its own thread, because the
+    // suppression verdict is a function of engine state and the OS will not
+    // wait. So the backend IS the owner, and the core submits control to it
+    // rather than calling the engine directly. Declared here rather than
+    // guessed at by the core, so a backend that does not need this simply
+    // returns null and the core supplies a local owner.
+    [[nodiscard]] virtual std::unique_ptr<EngineOwner> engineOwner(
+        WorkRing&, PublicationRing&, StatePublisher&, const EngineConfig&) {
+        return nullptr;
+    }
 };
 
 // Synthesizes input: pointer motion, buttons, scroll, and replayed keys.
