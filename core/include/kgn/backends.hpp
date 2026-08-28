@@ -9,10 +9,12 @@
 
 #pragma once
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "kgn/keycode.hpp"
@@ -52,10 +54,15 @@ struct WindowInfo {
 
 // What a backend can actually do. Reported to the UI verbatim so an
 // unavailable capability is visible rather than silently absent (P6).
+//
+// Each interface reports its OWN properties, and only those. Reading a
+// pointer-warp capability off the input backend would be asserting something
+// the input backend has no way to know, which is how a build ends up claiming
+// a capability nothing implements.
 struct Capabilities {
-    bool canSuppress = false;
-    bool canWarpAbsolute = false;
-    bool canMoveWindows = false;
+    bool canSuppress = false;        // InputBackend
+    bool canWarpAbsolute = false;    // OutputBackend
+    bool canMoveWindows = false;     // WindowBackend
     // Human-readable, user-facing. e.g. "Cannot intercept keys while an
     // elevated window has focus." Surfaced in `hello.limitations`.
     std::vector<std::string> limitations;
@@ -79,6 +86,10 @@ public:
     virtual bool start(Handler handler) = 0;
     virtual void stop() = 0;
     [[nodiscard]] virtual Capabilities capabilities() const = 0;
+
+    // What `hello` calls this backend. A real name, so a client can tell a
+    // hook-based build from a driver-based one rather than being told "input".
+    [[nodiscard]] virtual std::string_view name() const = 0;
 };
 
 // Synthesizes input: pointer motion, buttons, scroll, and replayed keys.
@@ -99,6 +110,13 @@ public:
     // reload, client disconnect, shutdown, and crash handler. A stranded key
     // press leaves the compositor believing a key is held forever.
     virtual void releaseAll() = 0;
+
+    // The OS double-click interval. Lives here because only the platform can
+    // know it, and the dispatcher must not block waiting for it.
+    [[nodiscard]] virtual std::chrono::milliseconds doubleClickInterval() const = 0;
+
+    [[nodiscard]] virtual Capabilities capabilities() const = 0;
+    [[nodiscard]] virtual std::string_view name() const = 0;
 };
 
 // Enumerates and manipulates windows and monitors.
@@ -112,20 +130,24 @@ public:
 
     [[nodiscard]] virtual std::vector<MonitorInfo> monitors() = 0;
     virtual bool moveWindowToMonitor(WindowId id, int monitorIndex) = 0;
+
+    [[nodiscard]] virtual Capabilities capabilities() const = 0;
+    [[nodiscard]] virtual std::string_view name() const = 0;
 };
 
 // ---------------------------------------------------------------------------
-// Factory. The single place that knows which platform is being built for.
-
+// What a core is built out of. A null member means this build has no such
+// backend, and the core reports that rather than substituting something that
+// merely looks similar (P6).
+//
+// The FACTORY that fills this in does not live here -- see kgn/platform.hpp.
+// Keeping it out is what lets kgn_ipc compose a core from backends it is given
+// without knowing how to make any, so a test can build one from fakes with no
+// platform library linked at all.
 struct Backends {
     std::unique_ptr<InputBackend> input;
     std::unique_ptr<OutputBackend> output;
     std::unique_ptr<WindowBackend> window;
 };
-
-// Returns null members for capabilities unavailable on this platform; the
-// caller reports them rather than substituting something that merely looks
-// similar.
-Backends createBackends();
 
 }  // namespace kgn

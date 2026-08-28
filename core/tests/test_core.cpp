@@ -6,7 +6,11 @@
 // together, that the core is genuinely ready when it says it is, and that it
 // describes what it cannot do rather than pretending.
 
+#include <chrono>
+#include <memory>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "kgn/core.hpp"
@@ -207,12 +211,70 @@ Json parseLine(const std::string& line) {
 }
 
 // A core on its own endpoint, torn down with the test.
+// Test doubles. Recording what the core ASKED for is not the same thing as a
+// fake backend shipped to a user: P6 forbids the second, and these never leave
+// the test binary. They exist because the capability, warp and window paths
+// have no other way to be exercised without a real desktop.
+class RecordingOutput : public kgn::OutputBackend {
+public:
+    std::vector<std::pair<kgn::KeyCode, bool>> keys;
+    std::vector<std::pair<kgn::MouseButton, bool>> buttons;
+    int releaseAllCalls = 0;
+    int releaseAllOrder = 0;
+    int* clock = nullptr;
+
+    void moveCursorBy(int, int) override {}
+    void moveCursorTo(int, int) override {}
+    kgn::Point cursorPosition() override { return {}; }
+    void button(kgn::MouseButton b, bool down) override { buttons.emplace_back(b, down); }
+    void scroll(int, int) override {}
+    void sendKey(kgn::KeyCode code, bool down) override { keys.emplace_back(code, down); }
+    void releaseAll() override {
+        ++releaseAllCalls;
+        if (clock) releaseAllOrder = ++(*clock);
+    }
+    std::chrono::milliseconds doubleClickInterval() const override {
+        return std::chrono::milliseconds(50);
+    }
+    kgn::Capabilities capabilities() const override {
+        kgn::Capabilities c;
+        c.canWarpAbsolute = true;
+        return c;
+    }
+    std::string_view name() const override { return "recording-output"; }
+};
+
+class RecordingInput : public kgn::InputBackend {
+public:
+    int startCalls = 0;
+    int stopCalls = 0;
+    int stopOrder = 0;
+    int* clock = nullptr;
+
+    bool start(Handler) override {
+        ++startCalls;
+        return true;
+    }
+    void stop() override {
+        ++stopCalls;
+        if (clock) stopOrder = ++(*clock);
+    }
+    kgn::Capabilities capabilities() const override {
+        kgn::Capabilities c;
+        c.canSuppress = true;
+        c.limitations.emplace_back("A recording input backend intercepts nothing.");
+        return c;
+    }
+    std::string_view name() const override { return "recording-input"; }
+};
+
 struct Fixture {
     std::string address;
     Core core;
 
-    explicit Fixture(const char* suffix)
-        : address(uniqueEndpoint(suffix)), core(options(address)) {}
+    explicit Fixture(const char* suffix, kgn::Backends backends = {})
+        : address(uniqueEndpoint(suffix)),
+          core(options(address), std::move(backends)) {}
 
     ~Fixture() {
         core.stop("test finished");
@@ -286,6 +348,40 @@ KGN_TEST(hello_admits_that_this_build_has_no_backends) {
     KGN_CHECK(hello["d"]["limitations"].size() >= std::size_t{1});
     KGN_CHECK(hello["d"]["limitations"].at(0).asString().find("No input backend") !=
               std::string::npos);
+    client.close();
+}
+
+KGN_TEST(hello_reads_each_capability_from_the_backend_that_owns_it) {
+    // warp_absolute is a property of the OUTPUT backend. Reading it off the
+    // input backend -- as this once did -- means a build can announce a
+    // capability that nothing in it implements, which is the exact shape of
+    // failure P6 exists to forbid.
+    kgn::Backends backends;
+    backends.input = std::make_unique<RecordingInput>();
+    backends.output = std::make_unique<RecordingOutput>();
+    Fixture fixture("caps", std::move(backends));
+    KGN_CHECK(fixture.core.start().ok());
+
+    RawClient client;
+    KGN_CHECK(client.connect(fixture.address));
+    if (!client.valid()) return;
+
+    const Json hello = parseLine(client.readLine(fixture.core));
+    KGN_CHECK_EQ(hello["d"]["backends"]["input"].asString(),
+                 std::string("recording-input"));
+    KGN_CHECK_EQ(hello["d"]["backends"]["output"].asString(),
+                 std::string("recording-output"));
+    KGN_CHECK(hello["d"]["backends"]["window"].isNull());
+
+    bool suppress = false;
+    bool warp = false;
+    for (std::size_t i = 0; i < hello["d"]["capabilities"].size(); ++i) {
+        const std::string name = hello["d"]["capabilities"].at(i).asString();
+        if (name == "suppress") suppress = true;
+        if (name == "warp_absolute") warp = true;
+    }
+    KGN_CHECK(suppress);
+    KGN_CHECK(warp);
     client.close();
 }
 
