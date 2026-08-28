@@ -61,7 +61,11 @@ std::vector<std::string> bindingsSearchPaths(const CoreOptions& options);
 
 class Core {
 public:
-    explicit Core(CoreOptions options);
+    // Backends are INJECTED rather than constructed here. The core knows how
+    // to compose one; only the executable knows what platform this is. A
+    // default-constructed Backends is a build with none, which is exactly what
+    // `hello` then reports.
+    explicit Core(CoreOptions options, Backends backends = {});
     ~Core();
 
     Core(const Core&) = delete;

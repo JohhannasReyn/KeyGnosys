@@ -516,7 +516,10 @@ struct Core::Impl {
 
 // ---------------------------------------------------------------------------
 
-Core::Core(CoreOptions options) : impl_(std::make_unique<Impl>(std::move(options))) {}
+Core::Core(CoreOptions options, Backends backends)
+    : impl_(std::make_unique<Impl>(std::move(options))) {
+    impl_->backends = std::move(backends);
+}
 
 Core::~Core() { stop("core destroyed"); }
 
@@ -534,15 +537,13 @@ OwnResult Core::start() {
     const OwnResult owned = impl_->owner.acquire(address);
     if (!owned.ok()) return owned;
 
-    impl_->backends = createBackends();
-
     impl_->hello.coreVersion = "0.1.0";
     impl_->hello.platform = platformName();
-    if (impl_->backends.input) impl_->hello.inputBackend = "input";
-    if (impl_->backends.output) impl_->hello.outputBackend = "output";
-    if (impl_->backends.window) impl_->hello.windowBackend = "window";
-    if (impl_->backends.input) {
-        const Capabilities capabilities = impl_->backends.input->capabilities();
+
+    // Each backend reports its OWN capabilities. Reading a pointer-warp
+    // capability off the input backend, as this once did, is how a build ends
+    // up announcing something nothing implements.
+    auto absorb = [&](const Capabilities& capabilities) {
         if (capabilities.canSuppress) impl_->hello.capabilities.emplace_back("suppress");
         if (capabilities.canWarpAbsolute) {
             impl_->hello.capabilities.emplace_back("warp_absolute");
@@ -553,7 +554,21 @@ OwnResult Core::start() {
         for (const auto& limitation : capabilities.limitations) {
             impl_->hello.limitations.push_back(limitation);
         }
-    } else {
+    };
+
+    if (impl_->backends.input) {
+        impl_->hello.inputBackend = std::string(impl_->backends.input->name());
+        absorb(impl_->backends.input->capabilities());
+    }
+    if (impl_->backends.output) {
+        impl_->hello.outputBackend = std::string(impl_->backends.output->name());
+        absorb(impl_->backends.output->capabilities());
+    }
+    if (impl_->backends.window) {
+        impl_->hello.windowBackend = std::string(impl_->backends.window->name());
+        absorb(impl_->backends.window->capabilities());
+    }
+    if (!impl_->backends.input) {
         // Said plainly, in the one place a client is guaranteed to read.
         impl_->hello.limitations.emplace_back(
             "No input backend on this build: keys are not intercepted and the "
