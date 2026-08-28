@@ -47,10 +47,14 @@ keygnosys-core: ipc.endpoint_in_use: another process already owns \\.\pipe\keygn
 
 | Option | |
 |--------|--|
-| `--endpoint <address>` | Listen here instead of the resolved endpoint |
 | `--bindings <id>` | Bindings document id (default `default`) |
 | `--bindings-file <path>` | Load this document, ignoring the id |
 | `--config-dir <path>` · `--data-dir <path>` | Where to look for documents |
+
+There is deliberately no option to move the endpoint.
+[SPEC §5.1.1](../docs/SPEC.md#51-transport) gives one endpoint rule that the
+core, the overlay and the launcher all derive from, and a core listening
+anywhere else is a core its own clients cannot find.
 
 Exit codes: `0` clean stop, `2` bad usage, `3` the endpoint is already owned,
 `4` the endpoint could not be taken. These are the core's own codes and are
