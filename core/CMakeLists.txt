@@ -51,6 +51,7 @@ add_library(kgn_engine
     src/motion.cpp
     src/actions.cpp
     src/config.cpp
+    src/ipc.cpp
 )
 target_include_directories(kgn_engine PUBLIC include)
 target_link_libraries(kgn_engine PRIVATE kgn_warnings)
@@ -63,6 +64,31 @@ target_link_libraries(kgn_engine PRIVATE kgn_warnings)
 # with milestones M3 (Windows) and M4 (Linux/X11). Until then, configuring on
 # an unsupported platform is not an error -- there is simply nothing to build.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# kgn_ipc -- endpoint ownership and the platform transports
+#
+# Separated from kgn_engine because it is the one part of the core that must
+# touch an operating system: sockets on Linux, named pipes on Windows, and the
+# ownership rules of SPEC 5.1.1-5.1.3 that decide who is allowed to create one.
+# The PROTOCOL itself stays in kgn_engine, over the Transport interface, which
+# is what lets every envelope, queue and reply-routing rule be tested with no
+# socket in sight.
+# ---------------------------------------------------------------------------
+
+if(WIN32)
+    set(KGN_IPC_SOURCES src/endpoint_windows.cpp)
+else()
+    set(KGN_IPC_SOURCES src/endpoint_posix.cpp)
+endif()
+
+add_library(kgn_ipc ${KGN_IPC_SOURCES})
+target_link_libraries(kgn_ipc PUBLIC kgn_engine PRIVATE kgn_warnings)
+if(WIN32)
+    # advapi32 carries the token and ACL calls that restrict the pipe to its
+    # creating user.
+    target_link_libraries(kgn_ipc PRIVATE advapi32)
+endif()
 
 set(KGN_PLATFORM_SOURCES "")
 
@@ -107,10 +133,16 @@ if(KGN_BUILD_TESTS)
     add_library(kgn_test_main INTERFACE)
     target_include_directories(kgn_test_main INTERFACE tests)
 
-    function(kgn_add_test name)
+    # Most tests need only the platform-free engine. kgn_add_test_with takes
+    # the extra libraries for the few that are testing an operating system.
+    function(kgn_add_test_with name)
         add_executable(${name} tests/${name}.cpp)
-        target_link_libraries(${name} PRIVATE kgn_engine kgn_test_main kgn_warnings)
+        target_link_libraries(${name} PRIVATE kgn_engine kgn_test_main kgn_warnings ${ARGN})
         add_test(NAME ${name} COMMAND ${name})
+    endfunction()
+
+    function(kgn_add_test name)
+        kgn_add_test_with(${name})
     endfunction()
 
     kgn_add_test(test_keycode)
@@ -119,6 +151,8 @@ if(KGN_BUILD_TESTS)
     kgn_add_test(test_motion)
     kgn_add_test(test_actions)
     kgn_add_test(test_config)
+    kgn_add_test(test_ipc)
+    kgn_add_test_with(test_endpoint kgn_ipc)
 endif()
 
 # ---------------------------------------------------------------------------
