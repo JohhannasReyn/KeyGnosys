@@ -922,4 +922,38 @@ KGN_TEST(releasing_the_layer_cancels_a_pending_double_click_with_the_button_up) 
     KGN_CHECK(recorded->releaseAllCalls >= 1);
 }
 
+KGN_TEST(a_search_path_that_does_not_exist_is_a_miss_not_an_empty_document) {
+    // A missing file must be skipped silently. Reporting it as a document that
+    // failed to parse is both alarming and wrong.
+    //
+    // A guard, not a proven-failing regression test, and the distinction is
+    // worth recording: the defect this protects against reproduces reliably in
+    // keygnosys-core -- four spurious "not valid JSON" warnings on every
+    // startup -- but not inside this binary, where a failed open reports
+    // itself correctly under both the old check and the new one. The evidence
+    // for the fix is that executable-level before and after, not this test.
+    const std::string address = uniqueEndpoint("missing");
+    kgn::CoreOptions opts;
+    opts.endpointOverrideForTests = address;
+    // A directory that EXISTS, with no bindings subdirectory under it. That
+    // shape is what discriminates: an open under a parent that exists is
+    // where the failed ifstream still tested true.
+    opts.configDir = ".";
+    opts.dataDir = ".";
+    kgn::Core core(opts);
+    KGN_CHECK(core.start().ok());
+
+    int malformed = 0;
+    for (const auto& diagnostic : core.diagnostics()) {
+        std::printf("  [diag] %s: %s\n", diagnostic.code.c_str(),
+                    diagnostic.message.c_str());
+        if (diagnostic.message.find("not valid JSON") != std::string::npos) {
+            ++malformed;
+        }
+    }
+    KGN_CHECK_EQ(malformed, 0);
+    core.stop("test finished");
+    removeEndpoint(address);
+}
+
 int main() { return kgn::test::runAll(); }
