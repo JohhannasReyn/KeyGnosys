@@ -47,11 +47,7 @@ endif()
 add_library(kgn_engine
     src/keycode.cpp
     src/layer_engine.cpp
-    # Added as milestone M2 lands:
-    #   src/motion.cpp         60 Hz pointer/scroll integrator
-    #   src/actions.cpp        action catalog and dispatch
-    #   src/config.cpp         bindings and settings loading
-    #   src/ipc.cpp            JSON Lines server
+    src/json.cpp
 )
 target_include_directories(kgn_engine PUBLIC include)
 target_link_libraries(kgn_engine PRIVATE kgn_warnings)
@@ -116,8 +112,7 @@ if(KGN_BUILD_TESTS)
 
     kgn_add_test(test_keycode)
     kgn_add_test(test_layer_engine)
-    # Added with M2:
-    #   kgn_add_test(test_motion)         ramp, diagonals, pixel accumulation
+    kgn_add_test(test_json)
 endif()
 
 # ---------------------------------------------------------------------------
