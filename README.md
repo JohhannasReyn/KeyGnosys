@@ -224,6 +224,7 @@ notifications and configuration, so a stalled GUI can never delay a keystroke.
 
 - **[docs/OUTLINE.md](docs/OUTLINE.md)** — what it is and why the seams fall where they do
 - **[docs/SPEC.md](docs/SPEC.md)** — file formats, wire protocol, state machine, action catalog, platform backends
+- **[docs/LAUNCHING.md](docs/LAUNCHING.md)** — the launcher contract: options, prerequisites, autostart, exit codes (specified; implemented after M4)
 - **[core/README.md](core/README.md)** — native core status and build
 
 ### Platform support
