@@ -5,11 +5,11 @@ management, and the JSON Lines IPC server the overlay connects to.
 
 ## Status
 
-**Milestone M2 is complete.** `keygnosys-core` builds and runs on both
-platforms, owns its IPC endpoint and serves the protocol. What it does **not**
-do yet is see or synthesise a single key: there are no platform backends until
-M3 and M4, and the core says so — in `hello`, in a diagnostic and on stderr —
-rather than running as something that merely looks like it is working.
+**Milestone M3 is complete on Windows.** `keygnosys-core` intercepts keys,
+drives the pointer, and enumerates windows and monitors. On Linux it builds and
+serves the protocol but has no backends until M4, and it says so — in `hello`,
+in a diagnostic and on stderr — rather than running as something that merely
+looks like it is working.
 
 | | |
 |---|---|
@@ -23,13 +23,15 @@ rather than running as something that merely looks like it is working.
 | ✅ | `src/ipc.cpp` — the JSON Lines server: envelopes, sequences, bounded queues, reply routing |
 | ✅ | `kgn_ipc` — endpoint ownership and the platform transports (SPEC 5.1.1–5.1.3) |
 | ✅ | `keygnosys-core` — the executable |
-| 🚧 | Windows backend: hook, `SendInput`, Win32 windows (**M3**) |
+| ✅ | `src/hookchannel.cpp` — the two streams between the input thread and the core loop, and the capacity argument behind them |
+| ✅ | `src/slots.cpp` — stable window slot indices |
+| ✅ | `src/platform/windows/` — the low-level hook, `SendInput`, Win32 windows and monitors (**M3**) |
 | 🚧 | Linux/X11 backend: evdev, uinput, EWMH, XRandR (**M4**) |
 
-The overlay runs today without any of this, on the mock backend
-(`keygnosys --backend mock`). It will connect to the core automatically once a
-backend gives the core something to report. Nothing in the Python side changes
-when it does.
+The overlay connects to a running core automatically on Windows. It still runs
+standalone on the mock backend (`keygnosys --backend mock`) when no core is
+listening — note that `app.py` picks the backend once at startup, so an overlay
+started before the core stays on the mock until it is restarted.
 
 ## Running it
 
@@ -161,12 +163,45 @@ real one.
 
 **`kgn_platform` is where operating systems live**, one implementation per
 platform behind the interfaces in [`include/kgn/backends.hpp`](include/kgn/backends.hpp).
-It is not built yet; the sources arrive with M3 and M4. Configuring on a
-platform with no backend is deliberately not an error — `backends_none.cpp`
-supplies the factory returning null members, which is exactly what
-`backends.hpp` specifies for a capability a platform does not have. It is not a
-fake backend: a stub that swallowed calls and returned plausible values would
-let the core look like it was driving the pointer while nothing moved.
+Configuring on a platform with no backend is deliberately not an error —
+`platform_none.cpp` supplies the factory returning null members, which is
+exactly what `backends.hpp` specifies for a capability a platform does not have.
+It is not a fake backend: a stub that swallowed calls and returned plausible
+values would let the core look like it was driving the pointer while nothing
+moved.
+
+The **factory** lives in [`include/kgn/platform.hpp`](include/kgn/platform.hpp),
+not in `backends.hpp`, and only `keygnosys-core` links `kgn_platform`. The core
+is handed its backends and never constructs one, which is why `test_core` can
+build a core out of recording doubles without linking `user32` or `dwmapi`.
+
+### The thread split
+
+On Windows the hook thread is the **sole mutating owner of the layer engine**.
+It has to be: Windows asks the hook procedure a synchronous question — suppress
+this event or not — and the answer depends on engine state. There is no way to
+answer it from another thread without making the hook wait, and a hook that
+waits past `LowLevelHooksTimeout` is silently unhooked.
+
+So the core never calls a mutating engine method. It submits control messages
+and reads two preallocated single-producer rings:
+
+- **work items** — what the core must *do*: synthesise a key, start or stop an
+  action. Ordered, and provably never dropped. A lost release is a key or a
+  mouse button held down forever.
+- **physical records** — one per hook callback, none for timer or control work.
+  These produce the `key` IPC event. Losing one costs an overlay highlight.
+
+Keeping them apart is not tidiness. It is what makes the queue bound provable:
+`Suppress` and `Buffer` decisions become no work item and cost no capacity, so
+an orphan key release — which a user can produce without end — spends nothing.
+The argument is written out in
+[`include/kgn/hookchannel.hpp`](include/kgn/hookchannel.hpp) and executed by
+`test_hookchannel`.
+
+Mode and modifier publication rides a versioned atomic rather than the work
+ring, so the overlay's benefit never consumes capacity reserved to guarantee a
+release.
 
 ### Tests
 
