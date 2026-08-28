@@ -57,9 +57,10 @@ happens.
 
 ## Status
 
-**Milestone M1.** The on-screen keyboard works today. The native input core does
-not exist yet, so the layer draws and teaches but does not yet drive the
-pointer.
+**Milestone M2.** The on-screen keyboard works today, and the native core now
+builds, runs and serves its IPC protocol. What it does not have yet is a
+platform backend, so the layer draws and teaches but does not yet drive the
+pointer — and the core says so rather than pretending otherwise.
 
 | | |
 |---|---|
@@ -67,7 +68,8 @@ pointer.
 | ✅ | Data-driven layouts, bindings, themes and app profiles, with user overrides |
 | ✅ | Segmented keys — a real L-shaped ISO Enter, drawn and hit-tested as one key |
 | ✅ | Configuration persistence, graded validation, and diagnostics |
-| 🚧 | Native core — key interception, pointer control, window management ([`core/`](core/README.md), milestones M2–M4) |
+| ✅ | Native core: layer engine, motion integrator, action dispatch, JSON Lines IPC server, `keygnosys-core` ([`core/`](core/README.md), M2) |
+| 🚧 | Key interception and pointer control — the platform backends ([`core/`](core/README.md), M3 Windows, M4 Linux/X11) |
 | 🚧 | Settings and visual binding editor (M5) |
 | 🚧 | Visual layout editor (M6) |
 | 🚧 | Installers (M7) |

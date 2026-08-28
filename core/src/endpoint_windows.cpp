@@ -14,6 +14,7 @@
 #include "kgn/endpoint.hpp"
 
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -50,6 +51,16 @@ std::string describeLastError(DWORD code) {
 // it: anything else able to open this pipe would see every keystroke.
 class OwnerOnlySecurity {
 public:
+    // Deliberately immovable. The security descriptor points at the ACL, and
+    // the attributes point at the descriptor, so this object contains pointers
+    // into itself: moving it leaves lpSecurityDescriptor addressing storage
+    // that has gone. Held by unique_ptr so its address is stable instead.
+    OwnerOnlySecurity() = default;
+    OwnerOnlySecurity(const OwnerOnlySecurity&) = delete;
+    OwnerOnlySecurity& operator=(const OwnerOnlySecurity&) = delete;
+    OwnerOnlySecurity(OwnerOnlySecurity&&) = delete;
+    OwnerOnlySecurity& operator=(OwnerOnlySecurity&&) = delete;
+
     bool build(std::string& error) {
         HANDLE token = nullptr;
         if (::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token) == 0) {
@@ -95,7 +106,12 @@ public:
         return true;
     }
 
-    SECURITY_ATTRIBUTES* attributes() { return &attributes_; }
+    SECURITY_ATTRIBUTES* attributes() {
+        // Re-pointed on every use rather than only at build time, so the
+        // invariant holds by construction and not by remembering.
+        attributes_.lpSecurityDescriptor = &descriptor_;
+        return &attributes_;
+    }
 
 private:
     std::vector<char> tokenInfo_;
@@ -117,6 +133,17 @@ HANDLE createInstance(const std::string& name, OwnerOnlySecurity& security, bool
         PIPE_UNLIMITED_INSTANCES, kBufferSize, kBufferSize, 0, security.attributes());
     lastError = handle == INVALID_HANDLE_VALUE ? ::GetLastError() : ERROR_SUCCESS;
     return handle;
+}
+
+// An OVERLAPPED carries the completion state of the operation that used it
+// last. Reusing one without re-initialising it lets a stale Internal status be
+// read back as though it described the new operation, so every re-arm below
+// starts from a fresh structure and only the event handle survives.
+void rearm(OVERLAPPED& overlapped) {
+    const HANDLE event = overlapped.hEvent;
+    overlapped = OVERLAPPED{};
+    overlapped.hEvent = event;
+    if (event != nullptr) ::ResetEvent(event);
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +181,6 @@ public:
                 return -1;
             }
             writePending_ = false;
-            ::ResetEvent(writeOverlapped_.hEvent);
         }
 
         // The bytes are copied rather than written from the caller's buffer,
@@ -162,6 +188,7 @@ public:
         // the server's queue is free to move on the moment this returns.
         const std::size_t take = length < kBufferSize ? length : kBufferSize;
         writeBuffer_.assign(buffer, buffer + take);
+        rearm(writeOverlapped_);
         DWORD wrote = 0;
         if (::WriteFile(handle_, writeBuffer_.data(), static_cast<DWORD>(take), &wrote,
                         &writeOverlapped_) != 0) {
@@ -193,7 +220,7 @@ private:
         if (!readPending_) {
             readBuffer_.resize(kBufferSize);
             DWORD got = 0;
-            ::ResetEvent(readOverlapped_.hEvent);
+            rearm(readOverlapped_);
             if (::ReadFile(handle_, readBuffer_.data(), kBufferSize, &got,
                            &readOverlapped_) != 0) {
                 available_ = got;
@@ -211,7 +238,6 @@ private:
             return false;
         }
         readPending_ = false;
-        ::ResetEvent(readOverlapped_.hEvent);
         if (got == 0) return false;   // orderly close
         available_ = got;
         consumed_ = 0;
@@ -231,7 +257,8 @@ private:
 
 class WinTransport : public Transport {
 public:
-    WinTransport(std::string name, HANDLE first, OwnerOnlySecurity security)
+    WinTransport(std::string name, HANDLE first,
+                 std::unique_ptr<OwnerOnlySecurity> security)
         : name_(std::move(name)), pending_(first), security_(std::move(security)) {
         connectOverlapped_.hEvent = ::CreateEventA(nullptr, TRUE, FALSE, nullptr);
         armConnect();
@@ -251,12 +278,11 @@ public:
         HANDLE accepted = pending_;
         pending_ = INVALID_HANDLE_VALUE;
         connected_ = false;
-        ::ResetEvent(connectOverlapped_.hEvent);
 
         // Create the next instance WITHOUT the first-instance flag: this
         // process already owns the name, and asking for it again would fail.
         DWORD error = ERROR_SUCCESS;
-        pending_ = createInstance(name_, security_, false, error);
+        pending_ = createInstance(name_, *security_, false, error);
         if (pending_ != INVALID_HANDLE_VALUE) armConnect();
 
         return std::make_unique<PipeConnection>(accepted);
@@ -277,7 +303,8 @@ public:
 private:
     void armConnect() {
         connected_ = false;
-        ::ResetEvent(connectOverlapped_.hEvent);
+        if (pending_ == INVALID_HANDLE_VALUE) return;
+        rearm(connectOverlapped_);
         if (::ConnectNamedPipe(pending_, &connectOverlapped_) != 0) {
             connected_ = true;
             return;
@@ -296,7 +323,7 @@ private:
     std::string name_;
     HANDLE pending_ = INVALID_HANDLE_VALUE;
     OVERLAPPED connectOverlapped_{};
-    OwnerOnlySecurity security_;
+    std::unique_ptr<OwnerOnlySecurity> security_;
     bool connected_ = false;
 };
 
@@ -316,14 +343,14 @@ EndpointOwner::~EndpointOwner() { release(); }
 OwnResult EndpointOwner::acquire(const std::string& address) {
     address_ = address;
 
-    OwnerOnlySecurity security;
+    auto security = std::make_unique<OwnerOnlySecurity>();
     std::string error;
-    if (!security.build(error)) {
+    if (!security->build(error)) {
         return {OwnStatus::Unsafe, "ipc.endpoint_unsafe", error};
     }
 
     DWORD code = ERROR_SUCCESS;
-    const HANDLE first = createInstance(address, security, true, code);
+    const HANDLE first = createInstance(address, *security, true, code);
     if (first == INVALID_HANDLE_VALUE) {
         if (code == ERROR_ACCESS_DENIED || code == ERROR_PIPE_BUSY) {
             // Either a core already owns the name, or something else created
@@ -337,7 +364,8 @@ OwnResult EndpointOwner::acquire(const std::string& address) {
                 "cannot create the endpoint: " + describeLastError(code)};
     }
 
-    transport_ = std::make_unique<WinTransport>(address, first, std::move(security));
+    transport_ =
+        std::make_unique<WinTransport>(address, first, std::move(security));
     return {OwnStatus::Ok, "", "listening on " + address};
 }
 
