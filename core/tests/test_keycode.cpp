@@ -6,6 +6,7 @@
 #include "kgn_test.hpp"
 
 #include <string>
+#include <string_view>
 #include <unordered_set>
 
 using kgn::KeyCode;
@@ -91,6 +92,27 @@ KGN_TEST(left_and_right_modifiers_share_a_group) {
     KGN_CHECK_EQ(group("AltRight"), std::string("Alt"));
     KGN_CHECK_EQ(group("MetaLeft"), std::string("Meta"));
     KGN_CHECK_EQ(group("KeyA"), std::string(""));
+}
+
+KGN_TEST(a_returned_name_survives_interning_many_more_keys) {
+    // toString() hands back a view into the intern table's storage and then
+    // releases its lock. If that storage can move, the view dangles -- which
+    // becomes reachable the moment a second thread interns anything, and M3
+    // introduces exactly that thread.
+    //
+    // Short-string optimisation keeping the data inside the std::string is an
+    // implementation accident, not a lifetime guarantee, so this asserts the
+    // guarantee directly.
+    const KeyCode first = KeyCode::fromString("KeyA");
+    const std::string_view view = first.toString();
+    const char* const data = view.data();
+
+    for (int i = 0; i < 4096; ++i) {
+        KeyCode::fromString("Synthetic" + std::to_string(i));
+    }
+
+    KGN_CHECK_EQ(std::string(view), std::string("KeyA"));
+    KGN_CHECK(view.data() == data);
 }
 
 int main() {

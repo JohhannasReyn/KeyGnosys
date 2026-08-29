@@ -52,6 +52,9 @@ add_library(kgn_engine
     src/actions.cpp
     src/config.cpp
     src/ipc.cpp
+    src/hookchannel.cpp
+    src/slots.cpp
+    src/physical.cpp
 )
 target_include_directories(kgn_engine PUBLIC include)
 target_link_libraries(kgn_engine PRIVATE kgn_warnings)
@@ -60,9 +63,9 @@ target_link_libraries(kgn_engine PRIVATE kgn_warnings)
 # kgn_platform -- the half that talks to an operating system
 #
 # One implementation per platform behind the interfaces in
-# include/kgn/backends.hpp (principle P5). Not yet built: the sources arrive
-# with milestones M3 (Windows) and M4 (Linux/X11). Until then, configuring on
-# an unsupported platform is not an error -- there is simply nothing to build.
+# include/kgn/backends.hpp (principle P5), plus the factory in
+# include/kgn/platform.hpp. Configuring on a platform with no backend is not an
+# error: the stub factory returns null members and the core reports them.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -95,8 +98,12 @@ set(KGN_PLATFORM_SOURCES "")
 
 if(WIN32)
     set(KGN_PLATFORM_NAME "windows")
-    # M3: hook_input.cpp sendinput_output.cpp win32_window.cpp
-    #     scancode_keymap.cpp
+    set(KGN_PLATFORM_SOURCES
+        src/platform/windows/scancode_keymap.cpp
+        src/platform/windows/hook_input.cpp
+        src/platform/windows/sendinput_output.cpp
+        src/platform/windows/win32_window.cpp
+        src/platform/windows/platform_windows.cpp)
 elseif(UNIX AND NOT APPLE)
     set(KGN_PLATFORM_NAME "linux-x11")
     # M4: evdev_input.cpp uinput_output.cpp x11_window.cpp evdev_keymap.cpp
@@ -104,10 +111,20 @@ else()
     set(KGN_PLATFORM_NAME "unsupported")
 endif()
 
-if(KGN_PLATFORM_SOURCES)
-    add_library(kgn_platform ${KGN_PLATFORM_SOURCES})
-    target_link_libraries(kgn_platform PUBLIC kgn_engine PRIVATE kgn_warnings)
+# kgn_platform ALWAYS exists. With no real sources it supplies the factory
+# returning null members, which is what backends.hpp specifies for a capability
+# a platform does not have. Only the EXECUTABLE links it, so a test can build a
+# Core out of fakes without dragging in user32, dwmapi or libevdev -- which is
+# the whole reason the factory left backends.hpp.
+if(NOT KGN_PLATFORM_SOURCES)
+    set(KGN_PLATFORM_SOURCES src/platform_none.cpp)
+    set(KGN_PLATFORM_STUB TRUE)
+endif()
 
+add_library(kgn_platform ${KGN_PLATFORM_SOURCES})
+target_link_libraries(kgn_platform PUBLIC kgn_engine PRIVATE kgn_warnings)
+
+if(NOT KGN_PLATFORM_STUB)
     if(WIN32)
         target_link_libraries(kgn_platform PRIVATE user32 dwmapi shcore)
     else()
@@ -116,14 +133,6 @@ if(KGN_PLATFORM_SOURCES)
         pkg_check_modules(X11   REQUIRED IMPORTED_TARGET x11 xrandr)
         target_link_libraries(kgn_platform PRIVATE PkgConfig::EVDEV PkgConfig::X11)
     endif()
-else()
-    # No backends on this build. backends_none.cpp supplies the factory that
-    # backends.hpp declares, returning null members -- which is exactly what
-    # that header specifies for a capability this platform does not have. It is
-    # NOT a fake backend: a stub that swallowed calls and returned plausible
-    # values would let the core look like it was driving the pointer while
-    # nothing moved, and P6 exists to forbid precisely that.
-    target_sources(kgn_ipc PRIVATE src/backends_none.cpp)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -134,10 +143,7 @@ endif()
 # ---------------------------------------------------------------------------
 
 add_executable(keygnosys-core src/main.cpp)
-target_link_libraries(keygnosys-core PRIVATE kgn_ipc kgn_warnings)
-if(KGN_PLATFORM_SOURCES)
-    target_link_libraries(keygnosys-core PRIVATE kgn_platform)
-endif()
+target_link_libraries(keygnosys-core PRIVATE kgn_ipc kgn_platform kgn_warnings)
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -171,6 +177,16 @@ if(KGN_BUILD_TESTS)
     kgn_add_test(test_actions)
     kgn_add_test(test_config)
     kgn_add_test(test_ipc)
+    kgn_add_test(test_hookchannel)
+    kgn_add_test(test_slots)
+    if(WIN32)
+        # The scancode table is Windows-only, and so is its test. It reaches
+        # into src/platform/windows for the header rather than exporting it:
+        # nothing outside that directory may hold a key translation (P2).
+        kgn_add_test_with(test_scancode_keymap kgn_platform)
+        kgn_add_test_with(test_hook_input kgn_platform)
+        kgn_add_test_with(test_sendinput_output kgn_platform)
+    endif()
     kgn_add_test_with(test_endpoint kgn_ipc)
     kgn_add_test_with(test_core kgn_ipc)
 endif()
@@ -182,8 +198,8 @@ message(STATUS "KeyGnosys core ${PROJECT_VERSION}")
 message(STATUS "  build type   : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  compiler     : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "  platform     : ${KGN_PLATFORM_NAME}")
-if(NOT KGN_PLATFORM_SOURCES)
-    message(STATUS "  backends     : none yet (milestones M3/M4) -- engine and tests only")
+if(KGN_PLATFORM_STUB)
+    message(STATUS "  backends     : none on this platform -- engine and tests only")
 endif()
 message(STATUS "  tests        : ${KGN_BUILD_TESTS}")
 message(STATUS "")
