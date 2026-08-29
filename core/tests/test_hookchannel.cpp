@@ -6,6 +6,7 @@
 // exactly because they are pure.
 
 #include "kgn/hookchannel.hpp"
+#include "kgn/physical.hpp"
 
 #include "kgn_test.hpp"
 
@@ -398,6 +399,124 @@ KGN_TEST(the_admission_gate_leaves_room_for_the_whole_release_drain) {
     KGN_CHECK(kWorkRingCapacity >= kWorkAdmissionGate);
     KGN_CHECK_EQ(kWorkRingCapacity - kWorkAdmissionGate + kMaxReleaseWork,
                  kWorkRingCapacity - kDecisionCapacity);
+}
+
+// ---------------------------------------------------------------------------
+// Physical key state
+//
+// The distinction this class exists for: the engine tracks what the software
+// OWES, and that can be reset. This tracks what the user's FINGERS are doing,
+// and nothing the software does can change it.
+
+KGN_TEST(a_second_down_for_a_held_key_is_a_repeat_and_the_first_is_not) {
+    PhysicalKeyState physical;
+    const KeyCode a = KeyCode::fromString("KeyA");
+
+    KGN_CHECK(physical.observe(a, false) == KeyState::Down);
+    KGN_CHECK(physical.observe(a, false) == KeyState::Repeat);
+    KGN_CHECK(physical.observe(a, false) == KeyState::Repeat);
+    KGN_CHECK(physical.observe(a, true) == KeyState::Up);
+    KGN_CHECK(physical.observe(a, false) == KeyState::Down);
+}
+
+KGN_TEST(a_control_driven_engine_reset_cannot_falsify_physical_state) {
+    // The sequence: physical Down, release_all, hardware autorepeat, physical
+    // Up. A release_all that cleared the physical bitmap would report the
+    // autorepeat as a FRESH press -- and a fresh press for a key the OS
+    // already believes is down owes a second release that will never come.
+    //
+    // release_all is modelled by doing nothing to this object at all, which is
+    // the whole point: there is no operation on it that a control message may
+    // legitimately perform.
+    PhysicalKeyState physical;
+    const KeyCode a = KeyCode::fromString("KeyA");
+
+    KGN_CHECK(physical.observe(a, false) == KeyState::Down);
+    KGN_CHECK(physical.down(a));
+
+    // ... release_all happens here, on the engine, not on this ...
+
+    KGN_CHECK(physical.observe(a, false) == KeyState::Repeat);
+    KGN_CHECK(physical.down(a));
+    KGN_CHECK(physical.observe(a, true) == KeyState::Up);
+    KGN_CHECK(!physical.down(a));
+}
+
+KGN_TEST(a_modifier_held_across_a_reset_is_still_published_as_held) {
+    // A user holding Shift when release_all arrives is still holding Shift.
+    // Publishing it as released leaves the overlay lying for the whole
+    // duration of the hold, because no further event arrives until they let go.
+    PhysicalKeyState physical;
+    const KeyCode shift = KeyCode::fromString("ShiftLeft");
+    PublishedState state;
+
+    physical.observe(shift, false);
+    physical.fillModifiers(state);
+    KGN_CHECK(state.shift);
+
+    // ... release_all, set_enabled(false), set_enabled(true) all happen here ...
+
+    physical.fillModifiers(state);
+    KGN_CHECK(state.shift);
+
+    physical.observe(shift, true);
+    physical.fillModifiers(state);
+    KGN_CHECK(!state.shift);
+}
+
+KGN_TEST(left_and_right_modifiers_share_a_group_and_neither_masks_the_other) {
+    PhysicalKeyState physical;
+    PublishedState state;
+
+    physical.observe(KeyCode::fromString("ControlLeft"), false);
+    physical.observe(KeyCode::fromString("ControlRight"), false);
+    physical.fillModifiers(state);
+    KGN_CHECK(state.control);
+
+    // Releasing one must not clear the group while the other is still held.
+    physical.observe(KeyCode::fromString("ControlLeft"), true);
+    physical.fillModifiers(state);
+    KGN_CHECK(state.control);
+
+    physical.observe(KeyCode::fromString("ControlRight"), true);
+    physical.fillModifiers(state);
+    KGN_CHECK(!state.control);
+}
+
+KGN_TEST(every_modifier_group_is_tracked) {
+    PhysicalKeyState physical;
+    PublishedState state;
+    for (const char* name : {"ShiftLeft", "ControlLeft", "AltLeft", "MetaLeft"}) {
+        physical.observe(KeyCode::fromString(name), false);
+    }
+    physical.fillModifiers(state);
+    KGN_CHECK(state.shift && state.control && state.alt && state.meta);
+}
+
+KGN_TEST(an_ordinary_key_is_not_mistaken_for_a_modifier) {
+    PhysicalKeyState physical;
+    PublishedState state;
+    physical.observe(KeyCode::fromString("KeyS"), false);
+    physical.fillModifiers(state);
+    KGN_CHECK(!state.shift && !state.control && !state.alt && !state.meta);
+}
+
+KGN_TEST(forgetting_is_available_but_only_clears_when_asked) {
+    // The one legitimate use is after the hook is uninstalled, when the bitmap
+    // describes a keyboard nobody is watching.
+    PhysicalKeyState physical;
+    const KeyCode a = KeyCode::fromString("KeyA");
+    physical.observe(a, false);
+    KGN_CHECK(physical.down(a));
+    physical.forgetAll();
+    KGN_CHECK(!physical.down(a));
+    KGN_CHECK(physical.observe(a, false) == KeyState::Down);
+}
+
+KGN_TEST(an_invalid_code_is_reported_without_touching_the_bitmap) {
+    PhysicalKeyState physical;
+    KGN_CHECK(physical.observe(KeyCode{}, false) == KeyState::Down);
+    KGN_CHECK(!physical.down(KeyCode{}));
 }
 
 int main() { return kgn::test::runAll(); }

@@ -768,9 +768,9 @@ struct Core::Impl {
     // Whatever the input backend noticed on its own thread. It cannot log or
     // touch IPC there, so it counts and this reports.
     void drainBackendDiagnostics() {
-        if (!backends.input) return;
         Diagnostics found;
-        backends.input->drainDiagnostics(found);
+        if (backends.input) backends.input->drainDiagnostics(found);
+        if (backends.output) backends.output->drainDiagnostics(found);
         for (auto& diagnostic : found) {
             if (server) server->broadcastDiagnostic(diagnostic);
             diagnostics.push_back(std::move(diagnostic));

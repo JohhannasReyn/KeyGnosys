@@ -54,6 +54,7 @@ add_library(kgn_engine
     src/ipc.cpp
     src/hookchannel.cpp
     src/slots.cpp
+    src/physical.cpp
 )
 target_include_directories(kgn_engine PUBLIC include)
 target_link_libraries(kgn_engine PRIVATE kgn_warnings)
@@ -183,6 +184,8 @@ if(KGN_BUILD_TESTS)
         # into src/platform/windows for the header rather than exporting it:
         # nothing outside that directory may hold a key translation (P2).
         kgn_add_test_with(test_scancode_keymap kgn_platform)
+        kgn_add_test_with(test_hook_input kgn_platform)
+        kgn_add_test_with(test_sendinput_output kgn_platform)
     endif()
     kgn_add_test_with(test_endpoint kgn_ipc)
     kgn_add_test_with(test_core kgn_ipc)

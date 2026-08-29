@@ -49,8 +49,7 @@ private:
 
 // ---------------------------------------------------------------------------
 
-HookInput::HookInput()
-    : engine_(config_), physicallyDown_(kKeyIdSpace, false) {
+HookInput::HookInput() : engine_(config_) {
     wake_ = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);      // auto-reset
     applied_ = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
 }
@@ -179,14 +178,18 @@ LRESULT HookInput::onHook(int code, WPARAM wParam, LPARAM lParam) {
     // the native passthrough path: without it the engine answers
     // Forward(c, Repeat) for a Down, the passthrough rule does not match, and
     // every autorepeat of every key gets suppressed and re-injected.
-    KeyState state = up ? KeyState::Up : KeyState::Down;
-    const std::size_t slot = key.id();
-    if (!up && physicallyDown_[slot]) state = KeyState::Repeat;
-    physicallyDown_[slot] = !up;
+    const KeyState state = physical_.observe(key, up);
+
+    // Published before the enabled check, and from PHYSICAL state. Disabling
+    // is a master switch for interception, not for reporting: the overlay
+    // should still show a modifier the user is holding.
+    republish();
 
     if (!enabled_) {
-        // The master switch. The engine is not consulted at all, so it creates
-        // no obligations while disabled and restarts clean when re-enabled.
+        // The engine is not consulted at all, so it creates no obligations
+        // while disabled and restarts clean when re-enabled. The physical
+        // bitmap above still tracks the keyboard, which is why re-enabling
+        // does not misread the next autorepeat as a fresh press.
         return ::CallNextHookEx(nullptr, code, wParam, lParam);
     }
 
@@ -228,14 +231,11 @@ void HookInput::republish() {
     state.mode = engine_.mode();
     state.latched = engine_.latched();
     state.activation = config_.activation;
-    state.shift = physicallyDown_[KeyCode::fromString("ShiftLeft").id()] ||
-                  physicallyDown_[KeyCode::fromString("ShiftRight").id()];
-    state.control = physicallyDown_[KeyCode::fromString("ControlLeft").id()] ||
-                    physicallyDown_[KeyCode::fromString("ControlRight").id()];
-    state.alt = physicallyDown_[KeyCode::fromString("AltLeft").id()] ||
-                physicallyDown_[KeyCode::fromString("AltRight").id()];
-    state.meta = physicallyDown_[KeyCode::fromString("MetaLeft").id()] ||
-                 physicallyDown_[KeyCode::fromString("MetaRight").id()];
+    // Modifiers describe the KEYBOARD, not the engine. Every code compared
+    // against was resolved once, in PhysicalKeyState's constructor: doing it
+    // here took the intern table's lock eight times per key event, inside the
+    // hook procedure that must not block on a lock at all.
+    physical_.fillModifiers(state);
     published_->publish(state);
 }
 
@@ -275,6 +275,10 @@ void HookInput::run() {
         }
     }
     uninstall();
+    // Only here, and only because the hook is now gone: from this point the
+    // bitmap describes a keyboard nobody is observing, so keeping it would be
+    // stale rather than physical.
+    physical_.forgetAll();
 }
 
 DWORD HookInput::waitTimeout() const {
@@ -323,16 +327,19 @@ void HookInput::drainControl() {
                 translateDecisions(decisions_, KeyCode{}, KeyState::Down, *work_);
                 break;
             case Control::Kind::ReleaseAll:
+                // Engine obligations only. The physical bitmap is deliberately
+                // untouched: release_all discharges what the software owes, it
+                // does not lift the user's finger off a key. Clearing it would
+                // make the next autorepeat look like a fresh press and publish
+                // a held modifier as released.
                 decisions_.clear();
                 engine_.releaseAll(decisions_);
                 translateDecisions(decisions_, KeyCode{}, KeyState::Down, *work_);
-                std::fill(physicallyDown_.begin(), physicallyDown_.end(), false);
                 break;
             case Control::Kind::SetEnabled:
                 decisions_.clear();
                 engine_.releaseAll(decisions_);
                 translateDecisions(decisions_, KeyCode{}, KeyState::Down, *work_);
-                std::fill(physicallyDown_.begin(), physicallyDown_.end(), false);
                 enabled_ = control.flag;
                 break;
             case Control::Kind::Stop:

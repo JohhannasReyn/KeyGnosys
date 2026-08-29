@@ -2,6 +2,8 @@
 
 #include "kgn/layer_engine.hpp"   // kKeyIdSpace
 
+#include <string>
+
 namespace kgn::win {
 namespace {
 
@@ -17,9 +19,14 @@ DWORD buttonFlag(MouseButton button, bool down) {
     return 0;
 }
 
-void send(INPUT& input) { ::SendInput(1, &input, sizeof(INPUT)); }
-
 }  // namespace
+
+bool SendInputOutput::dispatch(const INPUT& input) {
+    // One INPUT at a time, so success is exactly one accepted event. Taking a
+    // copy because SendInput's parameter is non-const.
+    INPUT copy = input;
+    return ::SendInput(1, &copy, sizeof(INPUT)) == 1;
+}
 
 SendInputOutput::SendInputOutput() : heldKeys_(kKeyIdSpace, false) {}
 
@@ -30,7 +37,9 @@ void SendInputOutput::moveCursorBy(int dx, int dy) {
     input.mi.dx = dx;
     input.mi.dy = dy;
     input.mi.dwFlags = MOUSEEVENTF_MOVE;
-    send(input);
+    // Motion carries no obligation: a lost pointer step is a stutter, not a
+    // stranded button, so there is nothing to record either way.
+    dispatch(input);
 }
 
 void SendInputOutput::moveCursorTo(int x, int y) {
@@ -53,7 +62,7 @@ void SendInputOutput::moveCursorTo(int x, int y) {
         (static_cast<std::int64_t>(x - left) * 65535) / (width - 1));
     input.mi.dy = static_cast<LONG>(
         (static_cast<std::int64_t>(y - top) * 65535) / (height - 1));
-    send(input);
+    dispatch(input);
 }
 
 Point SendInputOutput::cursorPosition() {
@@ -67,8 +76,18 @@ void SendInputOutput::button(MouseButton button, bool down) {
     INPUT input{};
     input.type = INPUT_MOUSE;
     input.mi.dwFlags = buttonFlag(button, down);
-    send(input);
-    heldButtons_[index] = down;
+    if (dispatch(input)) {
+        heldButtons_[index] = down;
+        return;
+    }
+    // A press the OS refused is not held, and a release it refused has NOT
+    // released anything -- so the record stays, and releaseAll() keeps a
+    // button it can still try to lift.
+    if (down) {
+        ++failedPresses_;
+    } else {
+        ++failedReleases_;
+    }
 }
 
 void SendInputOutput::scroll(int dx, int dy) {
@@ -77,14 +96,14 @@ void SendInputOutput::scroll(int dx, int dy) {
         input.type = INPUT_MOUSE;
         input.mi.dwFlags = MOUSEEVENTF_WHEEL;
         input.mi.mouseData = static_cast<DWORD>(dy * WHEEL_DELTA);
-        send(input);
+        dispatch(input);
     }
     if (dx != 0) {
         INPUT input{};
         input.type = INPUT_MOUSE;
         input.mi.dwFlags = MOUSEEVENTF_HWHEEL;
         input.mi.mouseData = static_cast<DWORD>(dx * WHEEL_DELTA);
-        send(input);
+        dispatch(input);
     }
 }
 
@@ -101,8 +120,15 @@ void SendInputOutput::sendKey(KeyCode code, bool down) {
     input.ki.dwFlags = KEYEVENTF_SCANCODE |
                        (extended ? KEYEVENTF_EXTENDEDKEY : 0u) |
                        (down ? 0u : KEYEVENTF_KEYUP);
-    send(input);
-    heldKeys_[code.id()] = down;
+    if (dispatch(input)) {
+        heldKeys_[code.id()] = down;
+        return;
+    }
+    if (down) {
+        ++failedPresses_;
+    } else {
+        ++failedReleases_;
+    }
 }
 
 void SendInputOutput::releaseAll() {
@@ -120,6 +146,28 @@ void SendInputOutput::releaseAll() {
 
 std::chrono::milliseconds SendInputOutput::doubleClickInterval() const {
     return std::chrono::milliseconds(static_cast<int>(::GetDoubleClickTime()));
+}
+
+void SendInputOutput::drainDiagnostics(Diagnostics& out) {
+    // P6: a synthesis the OS refused is reported, not swallowed. A refused
+    // RELEASE is the serious one -- the key or button is still down and this
+    // backend is the only thing that can still lift it.
+    if (failedReleases_ != 0) {
+        out.emplace_back(DiagLevel::Error, "output.send_failed",
+                         std::to_string(failedReleases_) +
+                             " synthetic release(s) were refused by the OS; "
+                             "a key or button may still be held, and will be "
+                             "retried on the next release_all");
+        failedReleases_ = 0;
+    }
+    if (failedPresses_ != 0) {
+        out.emplace_back(DiagLevel::Warn, "output.send_failed",
+                         std::to_string(failedPresses_) +
+                             " synthetic press(es) were refused by the OS, "
+                             "most likely by a higher-integrity foreground "
+                             "window; they were not recorded as held");
+        failedPresses_ = 0;
+    }
 }
 
 Capabilities SendInputOutput::capabilities() const {
