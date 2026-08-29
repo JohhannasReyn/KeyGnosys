@@ -1934,6 +1934,7 @@ Every diagnostic carries a stable machine-readable `code`.
 | `ipc.bad_message` | warn | A malformed line, a message that is not a command, or a line past the size limit |
 | `input.queue_overflow` | error | The input thread could not hand work to the core loop; interception degraded and `release_all` issued |
 | `input.publication_dropped` | info | Key-event publication fell behind; overlay feedback may have missed a key |
+| `output.send_failed` | error/warn | The OS refused a synthetic key or button. A refused RELEASE is an error: something may still be held, and is retried on the next `release_all` |
 
 **The governing rule (P6):** one bad file never prevents the rest from loading,
 and a missing capability is always reported and disabled — never emulated with

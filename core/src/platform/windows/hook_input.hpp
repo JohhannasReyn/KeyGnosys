@@ -33,6 +33,7 @@
 #include "kgn/backends.hpp"
 #include "kgn/hookchannel.hpp"
 #include "kgn/layer_engine.hpp"
+#include "kgn/physical.hpp"
 #include "scancode_keymap.hpp"
 
 namespace kgn::win {
@@ -55,6 +56,27 @@ public:
     [[nodiscard]] std::unique_ptr<EngineOwner> engineOwner(
         WorkRing& work, PublicationRing& publication, StatePublisher& published,
         const EngineConfig& config) override;
+
+    // TEST-ONLY seams. Installing a real low-level hook inside a test would
+    // need a desktop and a human, so these let the control path and the
+    // physical bitmap be driven directly. Nothing in production calls them.
+    // Mirrors what onHook does with a physical event, minus the engine: the
+    // bitmap is updated and the state republished, in that order.
+    KeyState observeForTests(KeyCode code, bool up) {
+        const KeyState state = physical_.observe(code, up);
+        republish();
+        return state;
+    }
+    [[nodiscard]] bool physicallyDownForTests(KeyCode code) const {
+        return physical_.down(code);
+    }
+    void applyControlForTests(const Control& control) {
+        control_.push(control);
+        drainControl();
+    }
+    [[nodiscard]] PublishedState publishedForTests() const {
+        return published_ != nullptr ? published_->state() : PublishedState{};
+    }
 
     // Counters the core turns into diagnostics. Read from the core thread;
     // written from the hook thread. Exchanged rather than merely read, so an
@@ -85,10 +107,10 @@ private:
     EngineConfig config_;
     LayerEngine engine_;
     DecisionBuffer decisions_;
-    // One bit per key id. KBDLLHOOKSTRUCT carries no repeat count, so this is
-    // the only way to tell an autorepeat from a fresh press -- and getting it
-    // wrong costs every held key its native passthrough.
-    std::vector<bool> physicallyDown_;
+    // What the HARDWARE is doing, as distinct from what the engine owes. No
+    // control operation may clear it: release_all discharges obligations, it
+    // does not lift the user's finger off a key.
+    PhysicalKeyState physical_;
     bool enabled_ = true;
 
     // Shared with the core.

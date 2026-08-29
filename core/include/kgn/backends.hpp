@@ -136,6 +136,11 @@ public:
     // know it, and the dispatcher must not block waiting for it.
     [[nodiscard]] virtual std::chrono::milliseconds doubleClickInterval() const = 0;
 
+    // Conditions the backend noticed and could not report where it noticed
+    // them. Synthesis that the OS refused belongs here: silence would leave a
+    // key held with nothing saying so (P6).
+    virtual void drainDiagnostics(Diagnostics&) {}
+
     [[nodiscard]] virtual Capabilities capabilities() const = 0;
     [[nodiscard]] virtual std::string_view name() const = 0;
 };
