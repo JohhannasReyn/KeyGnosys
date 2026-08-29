@@ -986,15 +986,20 @@ events.
 | `monitors` | `{monitors:[{index, x, y, w, h, primary, name}]}` | Monitor topology changes |
 | `pointer` | `{x, y, monitor}` | Only while cursor layer is engaged, ≤20 Hz |
 | `drag_lock` | `{button, active}` | Drag lock engaged/released |
+| `overlay_toggle` | `{}` | The `overlay.toggle` action fired; the overlay shows or hides itself |
 | `config_changed` | `{kinds:["bindings","layouts",…]}` | Core reloaded config |
-| `diagnostic` | `{level:"info"\|"warn"\|"error", code, message, file?}` | §10 |
+| `diagnostic` | `{level:"info"\|"warn"\|"error", code, message, file?}` | §11 |
 | `shutdown` | `{reason}` | Core is exiting |
+
+`mode` and `modifiers` **MAY** be coalesced within one core tick: two rapid
+transitions inside a single tick produce one event carrying the final state. The
+overlay draws current state, so a superseded intermediate value has no reader.
 
 `key` events are emitted for **all** keys including suppressed ones — this is what
 makes visual feedback work in the cursor layer, where no character reaches the OS.
 
 The core **MUST NOT** include character/text content in `key` events. Only
-positional codes are transmitted. See §11.
+positional codes are transmitted. See §12.
 
 ### 5.4 Commands (overlay → core)
 
@@ -1008,6 +1013,13 @@ positional codes are transmitted. See §11.
 | `set_setting` | `{path, value}` | `{}` — dotted path into §4.5 `behavior` |
 | `release_all` | `{}` | `{}` — panic button: release every held key, button and drag lock |
 | `ping` | `{}` | `{pong:true, uptime_ms}` |
+
+A reply means **applied**, not merely accepted, for every command that mutates
+engine state: `set_activation_mode`, `set_enabled`, `set_bindings`,
+`reload_config`, `release_all`, and `set_setting` for the `behavior.*` paths.
+Where the engine's owner cannot confirm the change within the core's bounded
+wait, the core replies `ok: false` with `input.queue_overflow` rather than
+reporting a success the engine never saw (P6).
 
 ### 5.5 Versioning
 
@@ -1050,6 +1062,14 @@ public:
   virtual bool start(Handler) = 0;
   virtual void stop() = 0;
   virtual Capabilities capabilities() const = 0;
+  virtual std::string_view name() const = 0;
+  // Conditions noticed on the backend's own thread, drained by the core loop.
+  virtual void drainDiagnostics(Diagnostics&) {}
+  // Non-null when this backend owns the layer engine; see §8.2.
+  virtual std::unique_ptr<EngineOwner> engineOwner(
+      WorkRing&, PublicationRing&, StatePublisher&, const EngineConfig&) {
+    return nullptr;
+  }
 };
 
 class OutputBackend {
@@ -1061,6 +1081,9 @@ public:
   virtual void scroll(int dx, int dy) = 0;
   virtual void sendKey(KeyCode, bool down) = 0;
   virtual void releaseAll() = 0;             // P7
+  virtual std::chrono::milliseconds doubleClickInterval() const = 0;
+  virtual Capabilities capabilities() const = 0;
+  virtual std::string_view name() const = 0;
 };
 
 class WindowBackend {
@@ -1070,8 +1093,21 @@ public:
   virtual bool focus(WindowId) = 0;
   virtual std::vector<MonitorInfo> monitors() = 0;
   virtual bool moveWindowToMonitor(WindowId, int monitorIndex) = 0;
+  virtual Capabilities capabilities() const = 0;
+  virtual std::string_view name() const = 0;
 };
 ```
+
+**Each interface reports its own capabilities.** `canSuppress` belongs to the
+input backend, `canWarpAbsolute` to the output backend and `canMoveWindows` to
+the window backend. Reading one off another lets a build announce a capability
+nothing in it implements, which is precisely what P6 forbids.
+
+**The factory lives at the composition boundary**, in `kgn/platform.hpp`, not
+alongside these interfaces. Only the executable calls `createBackends()`; the
+core is handed its `Backends` and never constructs one. That is what keeps the
+dependency direction honest and lets a test build a core out of doubles without
+linking a platform library at all.
 
 The engine depends only on these. Adding a backend **MUST NOT** require editing
 any file outside `src/platform/<os>/` plus one line in the factory.
@@ -1307,6 +1343,12 @@ motion, not per key, so changing direction mid-travel does not reset to a crawl.
 
 Scroll uses the same structure with its own settings and its own accumulator.
 
+**The 60 Hz tick is the motion cadence, not the engine's.** The layer engine's
+only timed work is expiring buffered presses, so it is driven by a deadline —
+the earliest pending press plus `grace_ms` — rather than polled. An idle
+keyboard therefore produces no engine wakeups at all, and the grace window
+resolves at its deadline instead of up to one motion tick late.
+
 ### 6.5 Window slots
 
 `windows` slot ordering **MUST** be stable across emissions, or the number-key
@@ -1343,6 +1385,12 @@ between bindings files, the dispatcher, and the overlay's legend renderer.
 | `button.click` | `button`: `left`\|`right`\|`middle` | `Click` / `R-Click` / `M-Click` | Press on key-down, release on key-up (so click-and-hold works naturally) |
 | `button.double_click` | `button` | `Dbl Click` | Two press/release pairs, separated by the OS double-click interval |
 | `button.drag_lock` | `button` | `Drag` | Toggle. First press holds the button down; second releases. Emits `drag_lock`. **MUST** auto-release on layer exit (P7) |
+
+`button.double_click` is scheduled on the core loop and **MUST NOT** block it:
+the interval is tens of milliseconds and the pointer has to keep moving while it
+elapses. Only the platform backend can know the interval, so it supplies it. If
+the layer is released before the second pair, that pair is **cancelled** and the
+button is guaranteed up — P7 outranks fidelity to the gesture.
 
 ### 7.3 Scroll
 
@@ -1450,6 +1498,34 @@ pump. Returning non-zero from the hook proc suppresses the event.
   This is not a bug and **MUST NOT** be presented as one.
 - Injected events (`LLKHF_INJECTED`) **MUST** be ignored, or the core's own
   `SendInput` output feeds back into its hook.
+
+**Engine ownership.** The suppression verdict is a function of mode, latch,
+grace and per-key state that only the layer engine holds, and Windows will not
+wait for another thread to supply it. The hook-owning thread is therefore the
+**sole mutating owner** of the layer engine, and the core never calls a
+mutating engine method: it submits control messages and reads results.
+
+Consequently:
+
+- The **only** synchronous product of the hook procedure is the suppression
+  verdict. Every decision the engine emits is delivered to the core loop
+  asynchronously, over a bounded preallocated queue whose capacity makes
+  overflow on a release path structurally impossible.
+- A physical event passes through natively **iff** the engine emitted exactly
+  one decision and it is `Forward` for that same code and state. Anything else
+  is suppressed and re-synthesised, so that ordering is the core's to control.
+- The **grace-window tap replay is re-synthesised, not passed through.** The
+  physical event is the release, but a synthetic press must reach the OS first;
+  passing the release through natively would deliver up-then-down and leave the
+  key held forever.
+- Native passthrough is preserved for ordinary typing deliberately. Re-injecting
+  every keystroke would mark it `LLKHF_INJECTED`, add latency, risk IME
+  breakage, and forfeit the property that a natively forwarded press is
+  discharged by the user's own physical release if the process dies.
+- `KBDLLHOOKSTRUCT` carries no repeat count, so the backend **MUST** track
+  physical key state itself and derive `KeyState::Repeat`. Without it every
+  autorepeat is a second `Down`, and ordinary held-key repetition loses its
+  native passthrough.
 
 **Driver seam.** `InputBackend` is deliberately narrow so an
 `InterceptionInputBackend` can be added later. It **MUST NOT** be a build-time
@@ -1855,6 +1931,10 @@ Every diagnostic carries a stable machine-readable `code`.
 | `ipc.version_mismatch` | error | Client and core protocol majors differ |
 | `ipc.endpoint_unsafe` | error | A component of the endpoint's path failed a type, ownership or permission check (§5.1.2); the core refused to bind |
 | `ipc.endpoint_in_use` | error | Another core holds the startup lock, or the endpoint is live or not provably stale (§5.1.3); the core refused to start |
+| `ipc.bad_message` | warn | A malformed line, a message that is not a command, or a line past the size limit |
+| `input.queue_overflow` | error | The input thread could not hand work to the core loop; interception degraded and `release_all` issued |
+| `input.publication_dropped` | info | Key-event publication fell behind; overlay feedback may have missed a key |
+| `output.send_failed` | error/warn | The OS refused a synthetic key or button. A refused RELEASE is an error: something may still be held, and is retried on the next `release_all` |
 
 **The governing rule (P6):** one bad file never prevents the rest from loading,
 and a missing capability is always reported and disabled — never emulated with

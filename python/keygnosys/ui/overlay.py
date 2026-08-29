@@ -156,6 +156,7 @@ class Overlay:
         self.client.modeChanged.connect(self._on_mode)
         self.client.focusChanged.connect(self._on_focus)
         self.client.windowsChanged.connect(self._on_windows)
+        self.client.overlayToggleRequested.connect(self._on_hide)
         self.client.connected.connect(self._on_connected)
         self.client.disconnected.connect(self._on_disconnected)
 

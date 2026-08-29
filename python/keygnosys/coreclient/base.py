@@ -38,6 +38,9 @@ class CoreClient(QObject):
     windowsChanged = Signal(list)
     #: (payload with level / code / message / file)
     diagnostic = Signal(dict)
+    #: The `overlay.toggle` action fired. Carries no payload: only the overlay
+    #: knows whether it is currently visible, so the core asks rather than tells.
+    overlayToggleRequested = Signal()
 
     #: Human-readable name shown in the UI so it is never ambiguous which
     #: backend is live -- a mock that looks like the real thing is a trap.

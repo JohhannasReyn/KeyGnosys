@@ -27,8 +27,10 @@
 #include "kgn/config.hpp"
 #include "kgn/diagnostics.hpp"
 #include "kgn/endpoint.hpp"
+#include "kgn/hookchannel.hpp"
 #include "kgn/ipc.hpp"
 #include "kgn/layer_engine.hpp"
+#include "kgn/slots.hpp"
 
 namespace kgn {
 
@@ -50,6 +52,11 @@ struct CoreOptions {
     std::string configDir;
     // Empty means a search from the executable's own location.
     std::string dataDir;
+    // How long the core will wait for the engine's owner to report a
+    // configuration change applied before answering the client that it was
+    // not. Bounded so a wedged input thread cannot hang the loop; the wait is
+    // safe because it stalls the core, never a hook callback.
+    std::chrono::milliseconds controlTimeout{250};
 };
 
 // Where the core looked for a bindings document, in order, so a failure to
@@ -61,7 +68,11 @@ std::vector<std::string> bindingsSearchPaths(const CoreOptions& options);
 
 class Core {
 public:
-    explicit Core(CoreOptions options);
+    // Backends are INJECTED rather than constructed here. The core knows how
+    // to compose one; only the executable knows what platform this is. A
+    // default-constructed Backends is a build with none, which is exactly what
+    // `hello` then reports.
+    explicit Core(CoreOptions options, Backends backends = {});
     ~Core();
 
     Core(const Core&) = delete;
@@ -86,6 +97,19 @@ public:
 
     // Unwind everything and close. Idempotent, and called on every exit path.
     void stop(const std::string& reason);
+
+    // TEST-ONLY seams. They exist so the core's consumption of the two input
+    // streams can be driven without an input thread, and so the shutdown
+    // fallback can be exercised against an owner that never answers. Nothing
+    // in production calls them.
+    void publishPhysicalForTests(const PhysicalRecord& record);
+    void pushWorkForTests(const WorkItem& item);
+    void setEngineOwnerForTests(std::unique_ptr<EngineOwner> owner);
+    void setWindowsForTests(const std::vector<WindowInfo>& windows);
+    void applyWarpForTests(const Action& action);
+    void applyWindowForTests(const Action& action);
+    void doubleClickForTests(MouseButton button);
+    void releaseAllForTests();
 
     [[nodiscard]] Server* server();
     [[nodiscard]] const Diagnostics& diagnostics() const;

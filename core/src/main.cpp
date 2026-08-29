@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "kgn/core.hpp"
+#include "kgn/platform.hpp"
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -117,7 +118,9 @@ int main(int argc, char** argv) {
         }
     }
 
-    kgn::Core core(std::move(options));
+    // The composition root: the one place that knows what platform this build
+    // targets (SPEC section 6.2). Everything below it is handed its backends.
+    kgn::Core core(std::move(options), kgn::createBackends());
     g_core = &core;
 
 #if defined(_WIN32)
