@@ -1947,6 +1947,13 @@ false and no `PhysicalRecord` is emitted.
 (SPEC §8.2: "MUST detect having been unhooked and re-install automatically") and emits
 `input.hook_lost` through a flag the core reads — never a log call on this thread.
 
+> **Corrected 2026-09-02.** The SPEC requirement quoted here was withdrawn: it is
+> not implementable. A hook Windows silently removes still leaves our handle
+> looking valid, and Microsoft documents that an application cannot find out.
+> The retry survives only for an install that never succeeded, and
+> `input.hook_lost` was removed rather than kept as a claim we cannot honour.
+> See SPEC §8.2 and `docs/manual-test-logs/`.
+
 `capabilities()` returns `canSuppress = true` and these limitations verbatim:
 
 ```cpp
@@ -2317,8 +2324,9 @@ does not exist.
 One row per behaviour that cannot be automated without real hardware and a real display,
 each with exact steps and the expected result. At minimum:
 
-- The hook survives `LowLevelHooksTimeout` under load; `input.hook_lost` appears and the
-  hook re-installs.
+- The hook survives `LowLevelHooksTimeout` under load. *(Corrected 2026-09-02:
+  the second half of this criterion — "`input.hook_lost` appears and the hook
+  re-installs" — was withdrawn as unobservable. See SPEC §8.2.)*
 - Interception is inert while an elevated window has focus, and the UI says so.
 - `Ctrl+Alt+Del` is never intercepted, and this is documented as correct.
 - Ordinary typing is unaffected while the layer is off, including autorepeat and IME.

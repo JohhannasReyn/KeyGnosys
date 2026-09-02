@@ -18,6 +18,16 @@ changed before a merge.
 Record results in a copy, not in this file — this file is the matrix, not the
 log.
 
+> **Validate an observer before believing a negative from it.** A zero-event
+> result proves the system under test is inactive only if the observer is known
+> to be working. During M3 validation a capture client received its first line
+> and then went deaf while its process stayed alive, and it produced five
+> convincing false negatives before anyone doubted the instrument rather than
+> the product. Trigger a signal you know should appear, confirm the observer
+> reports it, and only then trust a zero. `kgn_hook_smoke` is the preferred
+> pre-check for the input path: it answers "is the hook receiving anything at
+> all?" in twelve seconds, against the real backend.
+
 ### Setup
 
 ```sh
@@ -171,13 +181,30 @@ primary-only normalisation cannot express at all.
 | 8.4 | Press `Fn` on a laptop keyboard. | Nothing is reported and nothing is bindable. The overlay draws it but never highlights it. |
 | 8.5 | Read `hello.limitations` from a connected client. | Both the elevated-window and the Ctrl+Alt+Del limitations are listed verbatim. |
 
-## 9. Hook loss and recovery
+## 9. Hook overrun behaviour, and a platform limitation
+
+The earlier version of this section required the core to notice being unhooked
+and re-install itself. That is not implementable: Microsoft documents that a
+hook overrunning `LowLevelHooksTimeout` "is silently removed without being
+called" and that "there is no way for the application to know whether the hook
+is removed". A row cannot demand a branch the platform makes unobservable, so
+what is testable is separated from what is only recordable.
 
 | # | Procedure | Expected |
 |---|---|---|
-| 9.1 | Load the machine heavily (a full build, a large export) and keep typing with the layer engaged. | Either the hook survives, or it is removed and **re-installed automatically** with an `input.hook_lost` diagnostic. The layer works again without a restart. |
-| 9.2 | Lower `LowLevelHooksTimeout` in the registry to a small value, restart Windows, and repeat 9.1. | Same. Restore the original value afterwards. |
-| 9.3 | ⚠ During a hook loss, check that no key is stuck. | No stranded key or button. |
+| 9.1 | Load the machine heavily (a full build, a large export) and keep typing with the layer engaged for a minute. | The process stays alive and the desktop stays usable. **If interception continues**, record PASS for survival on this build. **If interception stops**, record it as the observed limitation and stop — do not record a failure of automatic recovery, because no automatic recovery is claimed. |
+| 9.2 | Not an executable row: **record the platform limitation.** Confirm `hello.limitations` carries the entry stating that Windows may silently remove an overlong low-level hook and offers no supported liveness query. | The limitation is present and worded as a platform constraint, not as a defect. |
+| 9.3 | ⚠ If interception ever does stop mid-session, check immediately that no key or mouse button is stuck. | Nothing stranded. A hook that stops being called cannot strand anything by itself — the OS never saw a suppressed press — but this is the row that would catch it if it did. |
+
+> **On deliberately inducing the condition.** A controlled attempt on Windows 11
+> build 26200 did not reproduce silent removal: deliberate callback overruns of
+> 2500 ms and 6500 ms both left the hook receiving every event that a
+> never-blocking control hook in the same process received, and
+> `UnhookWindowsHookEx` afterwards succeeded normally. That is an observation
+> about one build and environment, not a general claim about Windows. Lowering
+> `LowLevelHooksTimeout` is a deeper probe that needs a sign-out or restart and
+> the original value restored afterwards; it is deliberately not part of the
+> routine matrix.
 
 ## 10. Shutdown, disable and reload safety ⚠
 

@@ -1480,7 +1480,8 @@ pump. Returning non-zero from the hook proc suppresses the event.
 **Hard constraints, to be surfaced in `hello.limitations` and in the UI:**
 
 - The hook proc **MUST** return within the `LowLevelHooksTimeout` window
-  (default 300 ms) or Windows silently unhooks it. Therefore the hook proc
+  (`HKCU\Control Panel\Desktop\LowLevelHooksTimeout`) or Windows may silently
+  unhook it. Therefore the hook proc
   **MUST** do nothing but decide suppression and enqueue; all dispatch, IPC and
   logging happen on other threads.
 - **The event path performs no dynamic allocation.** The layer engine runs
@@ -1498,7 +1499,20 @@ pump. Returning non-zero from the hook proc suppresses the event.
 
   Allocating convenience overloads exist for tests and for callers that are not
   on the hook path. They are not used by the hook.
-- The core **MUST** detect having been unhooked and re-install automatically.
+- **The core cannot detect having been unhooked, and MUST NOT claim to.**
+  Microsoft documents that a hook whose procedure overruns the timeout "is
+  silently removed without being called" and that "there is no way for the
+  application to know whether the hook is removed". No supported API reports
+  hook liveness, and `UnhookWindowsHookEx` is destructive, so it cannot serve as
+  a probe. The core therefore **MUST** state this in `hello.limitations` rather
+  than implement a heuristic that pretends to detect it (P6). It **MUST** still
+  retry an install that has never succeeded — a different condition, and an
+  observable one.
+
+  *(This requirement previously read "the core MUST detect having been unhooked
+  and re-install automatically". That was not implementable. Corrected
+  2026-09-02 after a controlled attempt to reproduce silent removal; see
+  `docs/manual-test-logs/`.)*
 - Keys cannot be intercepted while an **elevated** window has focus unless the
   core itself runs elevated. Running unelevated is the default; the UI states
   plainly when the layer is inert for this reason.
@@ -1932,7 +1946,6 @@ Every diagnostic carries a stable machine-readable `code`.
 | `profile.invalid` | warn | Profile skipped |
 | `config.clamped` | info | A setting was outside its range |
 | `input.permission_denied` | error | Cannot open the input device / install the hook |
-| `input.hook_lost` | warn | Windows unhooked us; re-installing |
 | `input.elevated_window` | info | Interception inert; an elevated window has focus |
 | `window.unsupported` | warn | A window operation is unavailable on this backend |
 | `ipc.client_overflow` | warn | A client's queue overflowed; events dropped |
