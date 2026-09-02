@@ -23,16 +23,48 @@ log.
 ```sh
 cmake --preset default
 cmake --build --preset default
-./build/default/core/keygnosys-core.exe
+PATH=/c/msys64/ucrt64/bin:$PATH ./build/default/core/keygnosys-core.exe
 ```
 
-Run **unelevated** unless a row says otherwise. Keep a second terminal open with
-a way to kill the process (`taskkill /IM keygnosys-core.exe /F`), because a row
-that goes wrong may leave a modifier held.
+> **The `PATH=` prefix is not optional under MSYS2/Git Bash.** `keygnosys-core`
+> is linked against UCRT64. If another MinGW `bin` directory (typically
+> `/mingw64/bin`) precedes the UCRT64 one, the process loads that toolchain's
+> msvcrt-based `libstdc++-6` / `libgcc_s_seh-1` / `libwinpthread-1` and crashes
+> on startup before printing its banner. The optimized build dies reliably; the
+> `debug` build survives the mismatch, which makes the failure look like a
+> product defect rather than a DLL-resolution one. Launching from PowerShell or
+> Explorer is unaffected.
 
-> **Safety.** Rows marked ⚠ can leave a key or a mouse button held down if the
-> code under test is broken — that is what they exist to detect. Have the kill
-> command ready, and know that logging out clears any stuck modifier.
+Run **unelevated** unless a row says otherwise.
+
+> **Safety — the emergency exit must not require typing.**
+>
+> While the cursor layer is engaged the core swallows every unbound
+> non-modifier key, so **you cannot type `taskkill`, and `Ctrl+C` does not
+> reach a console** — `Ctrl` is forwarded as a modifier but the letter is not.
+> Any recovery route that depends on typing is unusable in exactly the state
+> that needs it. Before running any row past section 1, have these ready, in
+> this order:
+>
+> 1. **`Ctrl+Alt+Del` → Task Manager → End task.** Windows guarantees the
+>    Secure Attention Sequence cannot be intercepted (row 8.3 documents this as
+>    a limitation; here it is the safety net). Mouse-only, and it depends on
+>    nothing in this codebase.
+> 2. **A pre-made desktop shortcut** that runs, without typing: kill
+>    `keygnosys-core`, then force-release every modifier — both sides — and all
+>    three mouse buttons via `keybd_event`/`mouse_event`. Killing the process
+>    removes the hook so physical keys work again, but it does **not** undo a
+>    `SendInput` key-down that never received its up; only the second step does.
+> 3. **`release_all` over IPC** from an already-connected client. SPEC §5.4
+>    makes its reply mean *applied*, not merely accepted.
+>
+> `Escape` (bound to `layer.release`) is the *normal* in-layer exit, not an
+> emergency one — it depends on the engine being healthy, which is the thing
+> under test.
+>
+> Rows marked ⚠ can leave a key or a mouse button held down if the code under
+> test is broken — that is what they exist to detect. Logging out clears any
+> stuck modifier.
 
 ---
 
@@ -59,7 +91,7 @@ that goes wrong may leave a modifier held.
 | 2.5 | `set_activation_mode` to `hold`. Tap `CapsLock`. | The layer engages on press and drops on release; a tap leaves it off. |
 | 2.6 | Hold `Shift`, press `CapsLock`, release both. | **Real CapsLock** — the LED changes and subsequent letters are capitals. The layer is not engaged. |
 | 2.7 | ⚠ Engage the layer, hold a movement key, and press `CapsLock` to leave. | The pointer stops. No key or button remains held. |
-| 2.8 | Press `CapsLock` twice very rapidly (under 30 ms apart). | The layer toggles once, not twice. |
+| 2.8 | Press `CapsLock` twice in quick succession. | The layer toggles **twice** — once per press. There is no debounce, by design. |
 
 ## 3. The grace window
 
@@ -70,6 +102,7 @@ that goes wrong may leave a modifier held.
 | 3.3 | Press `J`, wait 200 ms, then press `CapsLock`. | `j` is typed, then the layer engages. |
 | 3.4 | Press `J` and hold it for a second without touching `CapsLock`. | `j` autorepeats normally after the grace window lapses. |
 | 3.5 | Press three action-bound keys in quick succession, then `CapsLock`. | Their actions start in press order, not in some other order. |
+| 3.6 | **Measure the grace timing.** Press `J` alone and time how long until `j` appears (a screen recording, or any input-latency tool). Repeat five times and record the observed delays in the log. | Never **shorter** than the configured `grace_ms` (default 50 ms) — an early expiry would resolve the race wrongly. Late by up to about one system tick (~15.6 ms) is expected and acceptable: the deadline is served by a thread timer, not a high-resolution one. Record the numbers; do not just tick the row. If the median exceeds roughly `grace_ms + 20 ms`, stop and report before anyone reaches for a helper thread or a high-resolution timer. |
 
 ## 4. Pointer motion
 
@@ -184,3 +217,16 @@ Every row here is a P7 test. A failure leaves a key or a button held.
 | 12.2 | Engage the layer. | Legends change to the cursor layer. |
 | 12.3 | Trigger the `overlay.toggle` action. | The overlay shows or hides. |
 | 12.4 | Move a window between monitors and watch the overlay. | The slot list updates within about 250 ms, and not more often than that. |
+
+---
+
+## Rows deliberately absent
+
+**CapsLock debounce.** An earlier revision of row 2.8 required a sub-30 ms
+CapsLock double-press to be swallowed. Neither the implementation nor the SPEC
+contains any such debounce — §6.3 does not mention one, and 30 ms appears
+nowhere in the repository. The row tested an invented requirement, and it is not
+reliably performable by hand. It has been rewritten to assert what the code
+actually specifies. Adding a debounce to satisfy the old row would have been
+implementing a feature to make a test pass; if debouncing is wanted, it needs a
+SPEC change first.
