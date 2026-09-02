@@ -121,6 +121,14 @@ Capabilities HookInput::capabilities() const {
     capabilities.limitations.emplace_back(
         "Ctrl+Alt+Del and the Secure Attention Sequence are never "
         "interceptable. This is by design in Windows, not a defect.");
+    // Stated because it is unobservable, not because it has been seen. P6 asks
+    // for an unavailable capability to be reported rather than faked, and
+    // "we would notice and recover" is the capability we do not have.
+    capabilities.limitations.emplace_back(
+        "Windows may silently remove a low-level keyboard hook whose callback "
+        "overruns LowLevelHooksTimeout, and provides no supported way to ask "
+        "whether a hook is still active. If interception stops for that reason, "
+        "the core cannot detect it and restarting is the remedy.");
     return capabilities;
 }
 
@@ -128,13 +136,12 @@ void HookInput::drainDiagnostics(Diagnostics& out) {
     // Counted on the hook thread, reported here. One diagnostic per episode
     // rather than per event: a condition that repeats every keystroke would
     // otherwise flood the very channel meant to explain it.
-    const std::uint64_t losses = hookLosses_.exchange(0);
-    if (losses != 0) {
-        out.emplace_back(DiagLevel::Warn, "input.hook_lost",
-                         "Windows removed the keyboard hook " +
-                             std::to_string(losses) +
-                             " time(s); it has been re-installed");
-    }
+    // There is deliberately no "hook lost" diagnostic. Windows may silently
+    // remove a hook whose procedure overran its timeout, and documents that an
+    // application cannot find out that it happened; emitting a diagnostic for a
+    // condition we cannot observe would be a claim we cannot keep (P6). A hook
+    // that is not installed is reported below, which is something we do know.
+    installRetries_.exchange(0);
     const std::uint64_t refused = admissionRefusals_.exchange(0);
     if (refused != 0) {
         out.emplace_back(DiagLevel::Error, "input.queue_overflow",
@@ -154,7 +161,6 @@ std::uint64_t HookInput::takeAdmissionRefusals() {
     return admissionRefusals_.exchange(0);
 }
 
-std::uint64_t HookInput::takeHookLosses() { return hookLosses_.exchange(0); }
 
 // ---------------------------------------------------------------------------
 // The hook
@@ -328,11 +334,15 @@ void HookInput::run() {
         if (stopping_.load()) break;
         syncGraceTimer();
 
-        // Windows removes a hook whose procedure overran its timeout, and does
-        // it silently. Re-installing is the difference between a transient
-        // stall and a layer that is dead until the next restart.
+        // Retry an install that has never succeeded -- for example when the
+        // desktop was not ready at startup. This is the ONLY case it can reach:
+        // installed_ is cleared only by our own uninstall(), so a hook that
+        // Windows removed after a successful install still reads as installed
+        // here and is not retried. That is not an oversight; Microsoft
+        // documents that an application cannot detect such a removal, so there
+        // is nothing to branch on (SPEC section 8.2).
         if (!installed_.load() && !stopping_.load()) {
-            hookLosses_.fetch_add(1, std::memory_order_relaxed);
+            installRetries_.fetch_add(1, std::memory_order_relaxed);
             install();
         }
     }

@@ -83,7 +83,16 @@ public:
     // written from the hook thread. Exchanged rather than merely read, so an
     // episode is reported once.
     [[nodiscard]] std::uint64_t takeAdmissionRefusals();
-    [[nodiscard]] std::uint64_t takeHookLosses();
+
+    // NARROW MEANING, and it matters: this is true iff we called
+    // SetWindowsHookExW successfully and have not ourselves uninstalled it.
+    //
+    // It is NOT evidence that Windows is still dispatching callbacks. Windows
+    // may silently remove a hook whose procedure overran LowLevelHooksTimeout,
+    // and Microsoft documents that "there is no way for the application to know
+    // whether the hook is removed". Nothing here can tell the difference
+    // between a live hook and a removed one, so no code may treat this as
+    // liveness.
     [[nodiscard]] bool installed() const { return installed_.load(); }
 
 private:
@@ -149,7 +158,9 @@ private:
     std::atomic<bool> installed_{false};
     std::atomic<bool> ready_{false};
     std::atomic<std::uint64_t> admissionRefusals_{0};
-    std::atomic<std::uint64_t> hookLosses_{0};
+    // Retries of an install that never succeeded -- NOT recoveries of a hook
+    // Windows took away. See the comment on installed().
+    std::atomic<std::uint64_t> installRetries_{0};
 
     // WH_KEYBOARD_LL gives the callback no user pointer, so the instance has
     // to be reachable from a static. Exactly one core owns the endpoint, so
