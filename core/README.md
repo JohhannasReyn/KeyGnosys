@@ -5,11 +5,20 @@ management, and the JSON Lines IPC server the overlay connects to.
 
 ## Status
 
-**Milestone M3 is complete on Windows.** `keygnosys-core` intercepts keys,
-drives the pointer, and enumerates windows and monitors. On Linux it builds and
-serves the protocol but has no backends until M4, and it says so — in `hello`,
-in a diagnostic and on stderr — rather than running as something that merely
-looks like it is working.
+**Milestone M3: implementation complete; live Windows validation in progress.**
+
+The Windows backend and the automated M3 suite are implemented and passing.
+Initial live-desktop validation exposed a defect in the hook thread's idle
+message-pump strategy that prevented `WH_KEYBOARD_LL` callbacks from being
+dispatched at all — the hook installed, held a valid handle, reported itself
+healthy, and intercepted nothing. The pump is repaired; **M3 is not considered
+end-to-end verified until the Windows manual matrix passes.** See
+[`docs/manual-tests.md`](../docs/manual-tests.md) and the run log in
+`docs/manual-test-logs/`.
+
+On Linux it builds and serves the protocol but has no backends until M4, and it
+says so — in `hello`, in a diagnostic and on stderr — rather than running as
+something that merely looks like it is working.
 
 | | |
 |---|---|
@@ -25,7 +34,7 @@ looks like it is working.
 | ✅ | `keygnosys-core` — the executable |
 | ✅ | `src/hookchannel.cpp` — the two streams between the input thread and the core loop, and the capacity argument behind them |
 | ✅ | `src/slots.cpp` — stable window slot indices |
-| ✅ | `src/platform/windows/` — the low-level hook, `SendInput`, Win32 windows and monitors (**M3**) |
+| 🚧 | `src/platform/windows/` — the low-level hook, `SendInput`, Win32 windows and monitors (**M3**; implemented, awaiting manual re-verification) |
 | 🚧 | Linux/X11 backend: evdev, uinput, EWMH, XRandR (**M4**) |
 
 The overlay connects to a running core automatically on Windows. It still runs

@@ -57,10 +57,14 @@ happens.
 
 ## Status
 
-**Milestone M2.** The on-screen keyboard works today, and the native core now
-builds, runs and serves its IPC protocol. What it does not have yet is a
-platform backend, so the layer draws and teaches but does not yet drive the
-pointer — and the core says so rather than pretending otherwise.
+**Milestone M3: implementation complete; live Windows validation in progress.**
+The on-screen keyboard works today, and the native core builds, runs and serves
+its IPC protocol. The Windows backend — hook, `SendInput`, Win32 windows and
+monitors — is implemented and its automated suite passes, but live-desktop
+validation found a defect in the hook thread's message pump that stopped
+`WH_KEYBOARD_LL` callbacks being dispatched. That is repaired, and the Windows
+manual matrix has to pass before the layer is called working end to end. Linux
+has no backend until M4, and the core says so rather than pretending otherwise.
 
 | | |
 |---|---|
