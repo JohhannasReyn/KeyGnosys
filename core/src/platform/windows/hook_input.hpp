@@ -32,6 +32,7 @@
 
 #include "kgn/backends.hpp"
 #include "kgn/hookchannel.hpp"
+#include "kgn/hookpump.hpp"
 #include "kgn/layer_engine.hpp"
 #include "kgn/physical.hpp"
 #include "scancode_keymap.hpp"
@@ -99,7 +100,17 @@ private:
     void expireGrace();
     void republish();
     void publishPhysical(KeyCode code, KeyState state, bool suppressed);
-    [[nodiscard]] DWORD waitTimeout() const;
+
+    // Wake the hook thread's message loop. Coalesced through doorbell_, so a
+    // burst of controls costs one thread message, not one per control.
+    void requestWake();
+    // Post a bare wake so the loop re-evaluates the grace timer. Called from
+    // the hook callback -- which runs on the hook thread, inside GetMessageW,
+    // so the loop cannot otherwise notice that a deadline just appeared.
+    void requestGraceSync();
+    // Arm, leave or kill the thread timer to match the engine's next deadline.
+    void syncGraceTimer();
+    void killGraceTimer();
 
     // Only ever touched on the hook thread.
     ScancodeKeymap keymap_;
@@ -121,8 +132,18 @@ private:
 
     HHOOK hook_ = nullptr;
     std::thread thread_;
-    HANDLE wake_ = nullptr;
+    // No wake event any more. GetMessageW is the blocking primitive, because
+    // only a message-RETRIEVAL call dispatches WH_KEYBOARD_LL callbacks; the
+    // loop is woken by posted thread messages instead.
     HANDLE applied_ = nullptr;
+    // Published before ready_, so a producer that sees a thread id knows the
+    // queue behind it exists and can accept a post.
+    std::atomic<DWORD> threadId_{0};
+    Doorbell doorbell_;
+
+    // Hook thread only.
+    UINT_PTR graceTimer_ = 0;
+    bool graceTimerArmed_ = false;
     std::atomic<std::uint32_t> appliedSeq_{0};
     std::atomic<bool> stopping_{false};
     std::atomic<bool> installed_{false};

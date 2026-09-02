@@ -5,6 +5,13 @@
 
 namespace kgn::win {
 
+namespace {
+// Doorbells, not payload. The control ring stays authoritative for both the
+// data and its ordering; these only wake the loop.
+constexpr UINT kMsgControl   = WM_APP + 1;   // drain the control ring
+constexpr UINT kMsgGraceSync = WM_APP + 2;   // re-evaluate the grace timer
+}  // namespace
+
 HookInput* HookInput::instance_ = nullptr;
 
 // ---------------------------------------------------------------------------
@@ -20,8 +27,10 @@ public:
     explicit Owner(HookInput& hook) : hook_(hook) {}
 
     bool submit(const Control& control) override {
+        // Push first: the push must be visible to a consumer that is woken by
+        // the post below. See the ordering proof on kgn::Doorbell.
         if (!hook_.control_.push(control)) return false;
-        ::SetEvent(hook_.wake_);
+        hook_.requestWake();
         return true;
     }
 
@@ -50,13 +59,11 @@ private:
 // ---------------------------------------------------------------------------
 
 HookInput::HookInput() : engine_(config_) {
-    wake_ = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);      // auto-reset
     applied_ = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
 }
 
 HookInput::~HookInput() {
     stop();
-    if (wake_ != nullptr) ::CloseHandle(wake_);
     if (applied_ != nullptr) ::CloseHandle(applied_);
 }
 
@@ -78,7 +85,7 @@ bool HookInput::start(Handler) {
     // itself. The seam stays in the interface for a backend that does not.
     if (work_ == nullptr) return false;      // engineOwner() was never called
     if (thread_.joinable()) return true;
-    if (wake_ == nullptr || applied_ == nullptr) return false;
+    if (applied_ == nullptr) return false;
 
     instance_ = this;
     stopping_.store(false);
@@ -93,8 +100,12 @@ bool HookInput::start(Handler) {
 void HookInput::stop() {
     if (!thread_.joinable()) return;
     stopping_.store(true);
-    ::SetEvent(wake_);
+    // Unconditional, not doorbell-coalesced: shutdown must not depend on
+    // whether a wake happened to be outstanding already.
+    const DWORD tid = threadId_.load(std::memory_order_acquire);
+    if (tid != 0) ::PostThreadMessageW(tid, kMsgControl, 0, 0);
     thread_.join();
+    threadId_.store(0, std::memory_order_release);
     instance_ = nullptr;
 }
 
@@ -210,6 +221,15 @@ LRESULT HookInput::onHook(int code, WPARAM wParam, LPARAM lParam) {
     republish();
     publishPhysical(key, state, !native);
 
+    // A buffered press is the engine's only timed work. The loop is blocked in
+    // GetMessageW around this callback and cannot see the new deadline by
+    // itself, so nudge it -- but only on the transition, so ordinary typing
+    // adds no syscall. nextDeadline() is pure; the post is one bounded,
+    // non-blocking call, which is all the hook path is allowed.
+    if (!graceTimerArmed_ && engine_.nextDeadline().has_value()) {
+        requestGraceSync();
+    }
+
     if (native) return ::CallNextHookEx(nullptr, code, wParam, lParam);
     return 1;
 }
@@ -243,28 +263,70 @@ void HookInput::republish() {
 // The thread
 
 void HookInput::run() {
-    // Force the message queue into existence before anything can post to it,
-    // and before the hook is installed.
+    // Force the message queue into existence before anything can post to it.
+    // PeekMessage on an empty range is the documented way to do that, and it
+    // must happen before threadId_ becomes visible: a producer that reads a
+    // thread id is entitled to assume a queue is behind it.
     MSG message;
     ::PeekMessageW(&message, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+    threadId_.store(::GetCurrentThreadId(), std::memory_order_release);
     install();
-    ready_.store(true);
+    ready_.store(true, std::memory_order_release);
+
+    // Anything submitted before the thread id was published got no post, on
+    // purpose -- the producer had nowhere to send it. It is still in the ring,
+    // so drain once here. Disarm first, as always.
+    doorbell_.disarm();
+    drainControl();
+    syncGraceTimer();
 
     while (!stopping_.load()) {
-        // One wait serves both jobs: the event carries control messages, and
-        // the timeout IS the grace-window deadline. QS_ALLINPUT is what lets
-        // the system call the hook while we are here.
-        ::MsgWaitForMultipleObjectsEx(1, &wake_, waitTimeout(), QS_ALLINPUT,
-                                      MWMO_INPUTAVAILABLE);
+        // GetMessageW, not MsgWaitForMultipleObjectsEx.
+        //
+        // WH_KEYBOARD_LL callbacks are delivered to the installing thread and
+        // dispatched only while that thread is inside a message-RETRIEVAL
+        // call. A wait is not a retrieval call. The previous design blocked in
+        // MsgWaitForMultipleObjectsEx with the grace deadline as its timeout,
+        // which meant that with no deadline pending it blocked forever and the
+        // PeekMessageW below it was never reached -- the hook installed, said
+        // it was healthy, and received nothing. Live validation on 2026-09-01
+        // measured 0 callbacks against 529 seen by an independent hook over
+        // the same keystrokes.
+        //
+        // GetMessageW blocks with zero wakeups when idle AND dispatches the
+        // callback, which is why the timeout is no longer needed for anything.
+        const BOOL got = ::GetMessageW(&message, nullptr, 0, 0);
+        if (got == 0 || got == -1) break;      // WM_QUIT, or a queue error
 
-        // Retrieving messages is what dispatches the hook.
-        while (::PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE) != 0) {
-            ::TranslateMessage(&message);
-            ::DispatchMessageW(&message);
+        switch (message.message) {
+            case kMsgControl:
+                // Disarm BEFORE draining. The reverse order loses a control
+                // pushed between "ring looks empty" and "flag cleared"; see
+                // the proof on kgn::Doorbell and test_hookpump.
+                doorbell_.disarm();
+                drainControl();
+                break;
+
+            case kMsgGraceSync:
+                break;   // the sync below is the whole point of this message
+
+            case WM_TIMER:
+                // Kill first, so the engine is consulted with armed == false
+                // and a stale or coalesced WM_TIMER cannot re-arm itself into
+                // a poll. expireGrace re-reads the clock and does nothing
+                // unless a deadline has genuinely passed.
+                killGraceTimer();
+                expireGrace();
+                break;
+
+            default:
+                ::TranslateMessage(&message);
+                ::DispatchMessageW(&message);
+                break;
         }
 
-        drainControl();
-        expireGrace();
+        if (stopping_.load()) break;
+        syncGraceTimer();
 
         // Windows removes a hook whose procedure overran its timeout, and does
         // it silently. Re-installing is the difference between a transient
@@ -274,6 +336,8 @@ void HookInput::run() {
             install();
         }
     }
+
+    killGraceTimer();
     uninstall();
     // Only here, and only because the hook is now gone: from this point the
     // bitmap describes a keyboard nobody is observing, so keeping it would be
@@ -281,14 +345,48 @@ void HookInput::run() {
     physical_.forgetAll();
 }
 
-DWORD HookInput::waitTimeout() const {
-    const std::optional<TimePoint> deadline = engine_.nextDeadline();
-    if (!deadline.has_value()) return INFINITE;
-    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-                               *deadline - Clock::now())
-                               .count();
-    if (remaining <= 0) return 0;
-    return static_cast<DWORD>(std::min<std::int64_t>(remaining, 1000));
+void HookInput::requestWake() {
+    // One post per un-consumed episode. A thousand controls in a burst still
+    // cost a single thread message, which is what keeps this clear of the
+    // Windows 10 000-message queue limit.
+    if (!doorbell_.arm()) return;
+    const DWORD tid = threadId_.load(std::memory_order_acquire);
+    // A zero id means the thread has not published itself yet, so it has not
+    // reached its startup drain either -- and that drain runs after the id is
+    // stored, so it is guaranteed to observe whatever was just pushed.
+    if (tid != 0) ::PostThreadMessageW(tid, kMsgControl, 0, 0);
+}
+
+void HookInput::requestGraceSync() {
+    // Called from the hook callback, which runs on this same thread while the
+    // loop is blocked inside GetMessageW. Without this the loop would not
+    // learn that a buffered press just created a deadline until some other
+    // message happened along.
+    const DWORD tid = threadId_.load(std::memory_order_relaxed);
+    if (tid != 0) ::PostThreadMessageW(tid, kMsgGraceSync, 0, 0);
+}
+
+void HookInput::syncGraceTimer() {
+    const GraceTimerPlan::Decision decision = GraceTimerPlan::decide(
+        graceTimerArmed_, engine_.nextDeadline(), Clock::now());
+    switch (decision.action) {
+        case GraceTimerPlan::Action::Arm:
+            graceTimer_ = ::SetTimer(nullptr, 0, decision.delayMs, nullptr);
+            graceTimerArmed_ = graceTimer_ != 0;
+            break;
+        case GraceTimerPlan::Action::Kill:
+            killGraceTimer();
+            break;
+        case GraceTimerPlan::Action::None:
+            break;
+    }
+}
+
+void HookInput::killGraceTimer() {
+    if (!graceTimerArmed_) return;
+    ::KillTimer(nullptr, graceTimer_);
+    graceTimer_ = 0;
+    graceTimerArmed_ = false;
 }
 
 void HookInput::install() {
@@ -311,7 +409,7 @@ void HookInput::drainControl() {
         // keeps the message and retries on the next wake.
         if (work_->free() < kWorkAdmissionGate &&
             control.kind != Control::Kind::Stop) {
-            ::SetEvent(wake_);   // come back to it
+            requestWake();   // come back to it
             return;
         }
 
