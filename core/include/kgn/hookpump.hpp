@@ -143,7 +143,24 @@ public:
         return Decision{Action::Arm, static_cast<std::uint32_t>(clamped)};
     }
 
-    static constexpr std::int64_t kMinDelayMs = 10;
+    // Is an expiry that was armed for `armed` still worth acting on, given the
+    // deadline generation now current?
+    //
+    // This is defence, not the guarantee. The guarantee is that the expiry path
+    // re-reads the clock and does nothing unless a deadline has genuinely
+    // passed, so even an accepted stale wake cannot expire a window early. The
+    // generation check exists so an obsolete wake is discarded cheaply and so
+    // the intent is legible: a timer armed for a window that has since been
+    // replaced has no business being consulted about the new one.
+    static constexpr bool acceptExpiry(std::uint32_t armed, std::uint32_t current) {
+        return armed == current;
+    }
+
+    // Was 10 ms, because USER_TIMER_MINIMUM clamped SetTimer and asking for
+    // less was asking for a lie. The deadline is now served by a
+    // high-resolution waitable timer, so the floor exists only to keep a
+    // past-due deadline from arming a zero-delay timer, which would be a spin.
+    static constexpr std::int64_t kMinDelayMs = 1;
     // A ceiling so a nonsensical deadline cannot arm a timer years out; the
     // loop re-evaluates on every wake regardless.
     static constexpr std::int64_t kMaxDelayMs = 1000;

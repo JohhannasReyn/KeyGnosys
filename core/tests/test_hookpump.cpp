@@ -183,9 +183,41 @@ KGN_TEST(a_past_deadline_arms_at_the_floor_rather_than_spinning) {
     KGN_CHECK_EQ(d.delayMs, static_cast<std::uint32_t>(GraceTimerPlan::kMinDelayMs));
 }
 
-KGN_TEST(a_short_deadline_is_floored_to_what_windows_will_honour) {
+KGN_TEST(a_short_deadline_is_honoured_rather_than_rounded_up) {
+    // The floor was 10 ms while SetTimer served the deadline, because
+    // USER_TIMER_MINIMUM clamped anything smaller. A high-resolution waitable
+    // timer can honour a few milliseconds, and rounding up here would put back
+    // the very latency the timer change removed.
     const auto d = GraceTimerPlan::decide(false, at(3), at(0));
-    KGN_CHECK_EQ(d.delayMs, static_cast<std::uint32_t>(GraceTimerPlan::kMinDelayMs));
+    KGN_CHECK(d.action == Action::Arm);
+    KGN_CHECK_EQ(d.delayMs, 3u);
+    KGN_CHECK(GraceTimerPlan::kMinDelayMs == 1);
+}
+
+// ---------------------------------------------------------------------------
+// Generation
+
+KGN_TEST(an_expiry_for_the_current_generation_is_accepted) {
+    KGN_CHECK(GraceTimerPlan::acceptExpiry(7, 7));
+}
+
+KGN_TEST(an_expiry_for_a_replaced_generation_is_ignored) {
+    // Arm for window N, replace it with N+1, then N's timer fires late.
+    KGN_CHECK(!GraceTimerPlan::acceptExpiry(7, 8));
+}
+
+KGN_TEST(a_generation_from_the_future_is_also_ignored) {
+    // Cannot happen through the intended path, but the rule is equality rather
+    // than "not older", so a corrupted or reordered wake is discarded too.
+    KGN_CHECK(!GraceTimerPlan::acceptExpiry(9, 8));
+}
+
+KGN_TEST(generation_survives_wraparound) {
+    // The counter is 32-bit and only ever incremented; equality does not care
+    // where it wrapped.
+    const std::uint32_t top = 0xFFFFFFFFu;
+    KGN_CHECK(GraceTimerPlan::acceptExpiry(top, top));
+    KGN_CHECK(!GraceTimerPlan::acceptExpiry(top, 0));
 }
 
 KGN_TEST(an_absurd_deadline_is_capped) {

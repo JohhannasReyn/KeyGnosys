@@ -1350,8 +1350,8 @@ keyboard therefore produces no engine wakeups at all, and the grace window
 resolves at its deadline instead of up to one motion tick late.
 
 The deadline is a floor, not a promise of exactness. On Windows it is served by
-a thread timer whose granularity is the system tick (~15.6 ms), so the expiry
-**MUST NOT** fire early and **MAY** fire late by up to about one tick. Code
+a high-resolution waitable timer, so the expiry **MUST NOT** fire early and
+**MAY** fire late by a small margin. Code
 **MUST** re-read the clock when the timer wakes and act only if the deadline has
 genuinely passed, so that a late, early or coalesced timer message is harmless.
 Observed timing is recorded by the Windows manual matrix rather than asserted

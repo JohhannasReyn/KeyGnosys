@@ -326,13 +326,49 @@ producer that reads a non-zero thread id therefore knows a queue is behind it. A
 producer that reads zero has not been stranded either: the id is stored *before*
 the thread's startup drain, so that drain observes anything already pushed.
 
-**Grace deadlines use a one-shot thread timer.** `SetTimer` arms it from
-`nextDeadline()`; the loop kills it when it fires, *before* consulting the engine,
-then re-arms only if a deadline remains. Killing first is what makes a stale or
-coalesced `WM_TIMER` harmless — the expiry re-reads the clock and does nothing
-unless something is genuinely due — and it is what stops a periodic timer from
-degenerating into a poll. The arm/kill decision is `kgn::GraceTimerPlan`, which is
-platform-free and tested.
+**Grace deadlines use a one-shot high-resolution waitable timer, owned by a
+helper thread.** The arm/kill decision is `kgn::GraceTimerPlan`, which is
+platform-free and tested; `kgn::win::GraceTimer` executes it.
+
+The timer cannot be the hook thread's wait primitive — that thread must stay
+inside `GetMessageW` — so a helper thread waits on
+`CreateWaitableTimerExW(..., CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, ...)` plus a
+rearm event and a stop event, and converts an expiry into
+`PostThreadMessageW(hookThread, WM_APP+3, generation, 0)`. **The helper owns no
+engine state.** It is a wake source; every decision still happens on the hook
+thread.
+
+*Why not `SetTimer`, which this design used first.* Live measurement on 2026-09-03
+found `WM_TIMER` cost a roughly **fixed ~21 ms median** on the tested machine —
+more than a system tick, because `WM_TIMER` is both clamped to the tick and
+generated only when the queue is otherwise empty. Against a 50 ms grace window the
+user felt ~71 ms, so most of the measured latency was the timer rather than the
+window. This figure is one machine and one build; it is not claimed as universal.
+Replacing the mechanism took the median overshoot to ~13 ms at 50 ms and ~9 ms at
+25 ms, with a best case of 1.8 ms, and **no early expiry in 22 samples**.
+
+`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` is documented for Windows 10 1803 and
+later. Creation falls back to `dwFlags = 0` if the flag is rejected: an ordinary
+waitable timer is still better than `WM_TIMER`, and a coarse deadline beats none.
+
+*Generation, and what actually guarantees correctness.* Every arm or cancel bumps
+a counter; the helper posts the generation it armed with, and the hook thread
+ignores an expiry whose generation is not current. That is **defence, not the
+guarantee** — the guarantee is that `expireGrace()` re-reads the clock and does
+nothing unless a deadline has genuinely passed, so no stale wake can expire a
+window early even if the generation check were wrong. The generation makes an
+obsolete wake cheap to discard and the intent legible.
+
+*Shutdown.* The helper is joined before any handle it waits on is closed, and it
+re-checks the stop event after the timer fires but before posting, so a timer
+expiring in the same instant as shutdown cannot post to a thread on its way out.
+
+*What the timer fix did NOT remove.* A residual ~9–13 ms median remains, and it is
+not the timer: the best case of 1.8 ms shows the timer is precise. A grace expiry
+enqueues a `WorkItem`, and the work ring is drained by the **core thread at
+60 Hz**, which adds 0–16.7 ms (mean ~8.3 ms). That is architectural rather than a
+defect, and removing it would mean waking the core loop when work is enqueued
+rather than waiting for its next tick. Recorded, not fixed.
 
 Because `pending_` is in press order and the grace window is uniform, the head
 deadline only ever moves *later*, so an armed timer never needs replacing with an
