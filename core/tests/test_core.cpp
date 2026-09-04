@@ -886,6 +886,9 @@ KGN_TEST(a_double_click_is_two_pairs_separated_in_time_and_never_blocks) {
     Fixture fixture("dblclick", std::move(backends));
     KGN_CHECK(fixture.core.start().ok());
 
+    const auto interval = recorded->doubleClickInterval();
+    const auto delay = kgn::doubleClickDelay(interval);
+
     fixture.core.doubleClickForTests(kgn::MouseButton::Left);
     // The first pair is immediate; the second must NOT be, or the loop slept.
     KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{2});
@@ -893,11 +896,49 @@ KGN_TEST(a_double_click_is_two_pairs_separated_in_time_and_never_blocks) {
     fixture.core.step(kgn::Clock::now());
     KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{2});
 
-    fixture.core.step(kgn::Clock::now() + std::chrono::milliseconds(100));
+    // The version of this test that let row 5.3 ship stepped 100 ms ahead of a
+    // 50 ms interval and asserted only "two pairs eventually". That proves the
+    // loop does not block; it says nothing about whether the OS will read the
+    // pairs as one double click. The assertion that matters is that the second
+    // pair lands INSIDE the interval even if the loop is a whole tick late.
+    fixture.core.step(kgn::Clock::now() + delay +
+                      std::chrono::duration_cast<std::chrono::milliseconds>(
+                          kgn::kTickInterval));
     KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{4});
     for (std::size_t i = 0; i < recorded->buttons.size(); ++i) {
         KGN_CHECK(recorded->buttons[i].second == (i % 2 == 0));
     }
+
+    // And the delay it was scheduled with genuinely fits, jitter included.
+    KGN_CHECK(delay + std::chrono::duration_cast<std::chrono::milliseconds>(
+                          kgn::kTickInterval) < interval);
+}
+
+KGN_TEST(a_second_double_click_press_does_not_stack_extra_pairs) {
+    // Row 5.3 also reported occasional TRIPLE clicks. The mechanism was a user
+    // pressing again after a missed attempt, so two delayed second-pairs landed
+    // around one new first-pair. Nothing in the core should turn one action into
+    // more than one pair, however often it is invoked.
+    auto output = std::make_unique<RecordingOutput>();
+    RecordingOutput* recorded = output.get();
+    kgn::Backends backends;
+    backends.output = std::move(output);
+
+    Fixture fixture("dblstack", std::move(backends));
+    KGN_CHECK(fixture.core.start().ok());
+
+    const auto delay = kgn::doubleClickDelay(recorded->doubleClickInterval());
+
+    fixture.core.doubleClickForTests(kgn::MouseButton::Left);
+    KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{2});
+    fixture.core.step(kgn::Clock::now() + delay +
+                      std::chrono::duration_cast<std::chrono::milliseconds>(
+                          kgn::kTickInterval));
+    KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{4});   // exactly one pair
+
+    // Draining again must not resurrect a spent schedule.
+    fixture.core.step(kgn::Clock::now() + std::chrono::milliseconds(500));
+    KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{4});
 }
 
 KGN_TEST(releasing_the_layer_cancels_a_pending_double_click_with_the_button_up) {
