@@ -26,7 +26,9 @@ log.
 > the product. Trigger a signal you know should appear, confirm the observer
 > reports it, and only then trust a zero. `kgn_hook_smoke` is the preferred
 > pre-check for the input path: it answers "is the hook receiving anything at
-> all?" in twelve seconds, against the real backend.
+> all?" in twelve seconds, against the real backend. The instruments themselves
+> live in [`tools/manual/`](../tools/manual/), with the method rules that
+> produced them.
 
 ### Setup
 
@@ -60,11 +62,13 @@ Run **unelevated** unless a row says otherwise.
 >    Secure Attention Sequence cannot be intercepted (row 8.3 documents this as
 >    a limitation; here it is the safety net). Mouse-only, and it depends on
 >    nothing in this codebase.
-> 2. **A pre-made desktop shortcut** that runs, without typing: kill
->    `keygnosys-core`, then force-release every modifier — both sides — and all
->    three mouse buttons via `keybd_event`/`mouse_event`. Killing the process
->    removes the hook so physical keys work again, but it does **not** undo a
->    `SendInput` key-down that never received its up; only the second step does.
+> 2. **[`tools/manual/panic.ps1`](../tools/manual/panic.ps1), as a desktop
+>    shortcut** so it runs without typing: it kills `keygnosys-core`, then
+>    force-releases every modifier — both sides — and all three mouse buttons.
+>    Killing the process removes the hook so physical keys work again, but it
+>    does **not** undo a `SendInput` key-down that never received its up; only
+>    the second step does. Create the shortcut with the command in
+>    [`tools/manual/README.md`](../tools/manual/README.md).
 > 3. **`release_all` over IPC** from an already-connected client. SPEC §5.4
 >    makes its reply mean *applied*, not merely accepted.
 >
