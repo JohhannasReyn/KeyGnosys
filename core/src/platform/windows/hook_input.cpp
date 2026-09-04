@@ -10,6 +10,7 @@ namespace {
 // data and its ordering; these only wake the loop.
 constexpr UINT kMsgControl   = WM_APP + 1;   // drain the control ring
 constexpr UINT kMsgGraceSync = WM_APP + 2;   // re-evaluate the grace timer
+constexpr UINT kMsgGraceExpired = WM_APP + 3;   // a deadline came due
 }  // namespace
 
 HookInput* HookInput::instance_ = nullptr;
@@ -276,6 +277,9 @@ void HookInput::run() {
     MSG message;
     ::PeekMessageW(&message, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
     threadId_.store(::GetCurrentThreadId(), std::memory_order_release);
+    // Started here, after the queue exists and the thread id is known, so the
+    // helper can never post to a thread that cannot receive.
+    graceTimer_.start(::GetCurrentThreadId(), kMsgGraceExpired);
     install();
     ready_.store(true, std::memory_order_release);
 
@@ -316,13 +320,8 @@ void HookInput::run() {
             case kMsgGraceSync:
                 break;   // the sync below is the whole point of this message
 
-            case WM_TIMER:
-                // Kill first, so the engine is consulted with armed == false
-                // and a stale or coalesced WM_TIMER cannot re-arm itself into
-                // a poll. expireGrace re-reads the clock and does nothing
-                // unless a deadline has genuinely passed.
-                killGraceTimer();
-                expireGrace();
+            case kMsgGraceExpired:
+                onGraceExpiry(static_cast<std::uint32_t>(message.wParam));
                 break;
 
             default:
@@ -348,6 +347,9 @@ void HookInput::run() {
     }
 
     killGraceTimer();
+    // Joins the helper before any handle it waits on is closed, so shutdown
+    // cannot race an expiry into posting to a thread that is on its way out.
+    graceTimer_.stop();
     uninstall();
     // Only here, and only because the hook is now gone: from this point the
     // bitmap describes a keyboard nobody is observing, so keeping it would be
@@ -377,12 +379,16 @@ void HookInput::requestGraceSync() {
 }
 
 void HookInput::syncGraceTimer() {
-    const GraceTimerPlan::Decision decision = GraceTimerPlan::decide(
-        graceTimerArmed_, engine_.nextDeadline(), Clock::now());
+    const std::optional<TimePoint> deadline = engine_.nextDeadline();
+    const GraceTimerPlan::Decision decision =
+        GraceTimerPlan::decide(graceTimerArmed_, deadline, Clock::now());
     switch (decision.action) {
         case GraceTimerPlan::Action::Arm:
-            graceTimer_ = ::SetTimer(nullptr, 0, decision.delayMs, nullptr);
-            graceTimerArmed_ = graceTimer_ != 0;
+            // The generation moves first, so any expiry already in flight for
+            // the previous window is stale by the time this one is armed.
+            ++graceGeneration_;
+            graceTimer_.arm(*deadline, graceGeneration_);
+            graceTimerArmed_ = true;
             break;
         case GraceTimerPlan::Action::Kill:
             killGraceTimer();
@@ -394,9 +400,26 @@ void HookInput::syncGraceTimer() {
 
 void HookInput::killGraceTimer() {
     if (!graceTimerArmed_) return;
-    ::KillTimer(nullptr, graceTimer_);
-    graceTimer_ = 0;
+    ++graceGeneration_;
+    graceTimer_.cancel(graceGeneration_);
     graceTimerArmed_ = false;
+}
+
+void HookInput::onGraceExpiry(std::uint32_t generation) {
+    // Two independent guards, and the second is the one that actually holds.
+    //
+    // The generation discards an expiry armed for a window we have since
+    // replaced -- cheap, and it keeps the intent legible. But even if it were
+    // wrong, expireGrace() re-reads the clock and does nothing unless a
+    // deadline has genuinely passed, so no stale wake can expire a window
+    // early. That is the guarantee; this is the optimisation.
+    if (!GraceTimerPlan::acceptExpiry(generation, graceGeneration_)) return;
+
+    // Consider the timer spent before consulting the engine, so the decision
+    // below re-arms from whatever deadline remains rather than assuming the
+    // old one is still live.
+    graceTimerArmed_ = false;
+    expireGrace();
 }
 
 void HookInput::install() {

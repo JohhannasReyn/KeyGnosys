@@ -100,6 +100,7 @@ if(WIN32)
     set(KGN_PLATFORM_NAME "windows")
     set(KGN_PLATFORM_SOURCES
         src/platform/windows/scancode_keymap.cpp
+        src/platform/windows/grace_timer.cpp
         src/platform/windows/hook_input.cpp
         src/platform/windows/sendinput_output.cpp
         src/platform/windows/win32_window.cpp
@@ -185,6 +186,7 @@ if(KGN_BUILD_TESTS)
         # into src/platform/windows for the header rather than exporting it:
         # nothing outside that directory may hold a key translation (P2).
         kgn_add_test_with(test_scancode_keymap kgn_platform)
+        kgn_add_test_with(test_grace_timer kgn_platform)
         kgn_add_test_with(test_hook_input kgn_platform)
         kgn_add_test_with(test_sendinput_output kgn_platform)
 
