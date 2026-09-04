@@ -1727,6 +1727,53 @@ only while the overlay has focus, it cannot suppress anything, and it has no
 window or monitor information. It is a development tool, not a degraded mode of
 the product.
 
+### 9.7 The layer indicator — specified, deferred to M5
+
+**The problem.** The cursor layer swallows every unbound key. If the overlay is
+hidden — and it is designed to be hidden once the layer is muscle memory, and it
+can be running from autostart — an engaged layer is indistinguishable from a
+broken keyboard. A user who has forgotten the software is installed has no way to
+tell the difference, and the natural conclusion is that the machine is faulty.
+
+That is a P6 failure in an unusual direction: nothing is being faked, but a state
+with drastic consequences is invisible.
+
+**The requirement.** When the cursor layer is engaged and the keyboard window is
+not visible, the overlay **MUST** show a small indicator saying so. It:
+
+- is always-on-top, click-through, and visually minimal — a badge, not a window;
+- appears only while the layer is engaged, and disappears with it;
+- states the mode and how to leave it, because the user reading it is by
+  definition the user who does not know;
+- is positionable and **MAY** be disabled by a user who does not want it, since
+  an expert who knows the layer is on does not need telling;
+- is drawn by the overlay from the `mode` event it already receives. **No new
+  core behaviour, no new IPC, and no OS state.**
+
+**Why not the CapsLock LED.** The obvious idea — light the CapsLock LED while the
+layer is engaged — is rejected:
+
+- Windows offers no supported way to light the LED without changing CapsLock
+  *state*. `IOCTL_KEYBOARD_SET_INDICATORS` is a driver-level interface, not an
+  application API, and behaves inconsistently across laptop keyboards.
+- Driving CapsLock state creates a new stranded resource. A core that dies while
+  engaged would leave the user in CapsLock, which is the P7 failure class applied
+  to global OS state rather than to a key.
+- It collides with the real-CapsLock escape gesture (§6.3). The layer would be
+  overwriting the very state that gesture exists to give back, and any
+  save/restore of the user's genuine CapsLock state fails exactly when the
+  process does.
+
+ScrollLock avoids the second and third objections — toggling it changes almost no
+application behaviour — but many laptop keyboards have no ScrollLock LED, so it
+cannot be the mechanism the guarantee rests on. It **MAY** be offered later as an
+opt-in extra on hardware that has one.
+
+**Deferred to M5** with the settings UI, because it is overlay behaviour with a
+preference attached and nothing in the core changes. The requirement is written
+now because the failure it prevents is a safety-shaped one, and because it is the
+kind of thing that gets discovered by a confused user rather than by a test.
+
 ---
 
 ## 10. Editors
@@ -2034,7 +2081,7 @@ logic inherited from the prototype can be tested at all.
 | **M2** | Core skeleton + IPC | Engine, motion integrator, action dispatcher, IPC server, unit tests. No OS backends — driven by a synthetic input backend |
 | **M3** | Windows backend | Hook, `SendInput`, Win32 windows/monitors. End-to-end on Windows |
 | **M4** | Linux/X11 backend | evdev, uinput, EWMH/XRandR, udev rule, all-keyboard grab. End-to-end on Linux |
-| **M5** | Configuration UI | Settings dialog, binding editor with silent reassignment and the unassigned-commands list, profile editor |
+| **M5** | Configuration UI | Settings dialog, binding editor with silent reassignment and the unassigned-commands list, profile editor, **the layer indicator (§9.7)** |
 | **M6** | **Visual layout editor** | Canvas, key palette, move/resize/align/distribute/snap, segment-edit mode, validation panel, import/export, reset-to-template |
 | **M7** | Packaging | Windows installer, Linux packages, first release |
 

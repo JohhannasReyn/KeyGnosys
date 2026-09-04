@@ -169,6 +169,15 @@ window on either platform. So there are two, docked and moved together:
 
 Turning click-through off simply restores the keyboard window's input region.
 
+**A third, tiny window arrives with the settings UI: the layer indicator.** The
+cursor layer swallows keys, and the overlay is meant to be hidden once the layer
+is learned — so an engaged layer with the map hidden looks exactly like a broken
+keyboard. A small always-on-top badge says which mode is live and how to leave
+it. Specified in SPEC §9.7, built in M5. The alternative of lighting the CapsLock
+LED was rejected: it cannot be done without owning CapsLock state, which would
+strand that state on a crash and fight the escape gesture that gives real
+CapsLock back.
+
 ### 5.2 Legend layers
 
 The same physical key shows different text depending on state. This is the feature
