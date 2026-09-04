@@ -1309,6 +1309,11 @@ malformed or duplicate physical events — including malformed CapsLock
 specifically, since it is dispatched before the general per-key logic — and
 invalid key codes.
 
+**`grace_ms` is a property of the user, not of the machine.** It is the human
+ambiguity window; implementation and scheduling latency **MUST NOT** be
+compensated for by narrowing it. See §15.10, which records why — and the M3
+measurement that nearly caused exactly that mistake.
+
 **Only bound keys are ever delayed.** Buffering adds up to `grace_ms` of latency,
 and it applies **only** to keys bound to an action in the cursor layer, and
 **only** while the layer is off. Three categories are never buffered and never
@@ -2081,7 +2086,7 @@ logic inherited from the prototype can be tested at all.
 | **M2** | Core skeleton + IPC | Engine, motion integrator, action dispatcher, IPC server, unit tests. No OS backends — driven by a synthetic input backend |
 | **M3** | Windows backend | Hook, `SendInput`, Win32 windows/monitors. End-to-end on Windows |
 | **M4** | Linux/X11 backend | evdev, uinput, EWMH/XRandR, udev rule, all-keyboard grab. End-to-end on Linux |
-| **M5** | Configuration UI | Settings dialog, binding editor with silent reassignment and the unassigned-commands list, profile editor, **the layer indicator (§9.7)** |
+| **M5** | Configuration UI | Settings dialog, binding editor with silent reassignment and the unassigned-commands list, profile editor, **the layer indicator (§9.7)**, **Caps timing calibration (§15.10)** |
 | **M6** | **Visual layout editor** | Canvas, key palette, move/resize/align/distribute/snap, segment-edit mode, validation panel, import/export, reset-to-template |
 | **M7** | Packaging | Windows installer, Linux packages, first release |
 
@@ -2273,3 +2278,76 @@ the fork is never touched, so the UI surfaces the divergence and offers a review
 rather than pretending it does not exist.
 
 → §3.4
+
+### 15.10 `grace_ms` measures the user's hands, not the machine
+
+**`grace_ms` is the human ambiguity window and nothing else.** It answers one
+question: *how far apart can this user's two hands land and still mean a chord?*
+It **MUST NOT** be tuned to compensate for implementation or machine latency.
+
+This distinction was learned the hard way during M3 validation. A 50 ms window
+measured 70.6 ms end to end, and the obvious response — halve the window — would
+have bought ~22 ms by spending half the race-detection margin. The latency turned
+out to be a `WM_TIMER` artifact worth ~21 ms, and replacing the timer recovered
+almost the same amount at no cost to margin. Had the window been shrunk first,
+the product would have been permanently worse at the job the window exists for,
+in exchange for something a better timer gave away free.
+
+Three quantities are therefore kept conceptually distinct, and only the first is
+a function of the user:
+
+| Quantity | Means | Tuned by |
+|---|---|---|
+| `grace_ms` | How long the user's chord may take | The user's hands |
+| deadline overshoot | Timer, scheduling and message-pump cost | Implementation |
+| action delivery latency | Expiry to output reaching the OS | Implementation |
+
+**A slower machine MUST NOT be read as a user who needs a wider window**, and a
+faster one must not be read as a user who needs a narrower one.
+
+#### Calibration — specified, deferred to M5
+
+The default has to work on first launch, so calibration is **never mandatory**:
+KeyGnosys ships a conservative default and behaves correctly for a user who never
+opens the settings dialog.
+
+The settings UI (M5) **MAY** offer a *Calibrate Caps timing* action: the user
+performs 20–30 natural CapsLock-plus-bound-key gestures, and for each intended
+chord the tool records
+
+```text
+delta_t = bound_key_down - CapsLock_down
+```
+
+building a **distribution** rather than trusting one sample. It then reports a
+recommendation derived from a high percentile of that distribution plus a safety
+margin, clamped to a supported range — for example:
+
+```text
+Your Caps chord timing is usually within 18 ms.
+Recommended grace window: 30 ms
+Current grace window:     50 ms
+```
+
+The percentile, margin, sample count, clamp range and presentation are **future
+design decisions and are deliberately not fixed here**. What is fixed is the
+shape: it is a **recommendation the user explicitly accepts**, never a silent
+change to a setting that governs whether their keystrokes become letters or
+actions.
+
+#### Passive calibration — a later enhancement, not M5
+
+Once the settings infrastructure exists, KeyGnosys **MAY** maintain a small local
+rolling model of observed chord timing and offer a recommendation when the
+configured window is substantially wider — or narrower — than the user's
+demonstrated behaviour. The narrower case matters as much as the wider one: a
+user whose natural chords keep brushing the boundary should be offered a *wider*
+window rather than left with intermittent literal-key leakage.
+
+It **MUST NOT** adapt silently while the user is working, and it inherits the
+project's privacy rules without exception: local only, no telemetry, no network
+transmission, no persisted keystroke content, nothing from which typed text could
+be reconstructed, and no more than the timing statistics calibration requires.
+
+Deliberately placed after M5 so that the explicit, user-initiated version ships
+first and the passive one is judged against something that already works.
