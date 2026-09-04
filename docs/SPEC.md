@@ -1396,14 +1396,30 @@ between bindings files, the dispatcher, and the overlay's legend renderer.
 | Action | Params | Default legend | Behaviour |
 |--------|--------|----------------|-----------|
 | `button.click` | `button`: `left`\|`right`\|`middle` | `Click` / `R-Click` / `M-Click` | Press on key-down, release on key-up (so click-and-hold works naturally) |
-| `button.double_click` | `button` | `Dbl Click` | Two press/release pairs, separated by the OS double-click interval |
+| `button.double_click` | `button` | `Dbl Click` | Two press/release pairs, the second **within** the OS double-click interval |
 | `button.drag_lock` | `button` | `Drag` | Toggle. First press holds the button down; second releases. Emits `drag_lock`. **MUST** auto-release on layer exit (P7) |
 
 `button.double_click` is scheduled on the core loop and **MUST NOT** block it:
-the interval is tens of milliseconds and the pointer has to keep moving while it
-elapses. Only the platform backend can know the interval, so it supplies it. If
-the layer is released before the second pair, that pair is **cancelled** and the
-button is guaranteed up — P7 outranks fidelity to the gesture.
+the interval runs to hundreds of milliseconds — Windows reports 500 ms by
+default and allows roughly 200–900 ms — and the pointer has to keep moving while
+it elapses. Only the platform backend can know the interval, so it supplies it.
+
+**The interval is a ceiling, not the delay.** It is the largest gap the OS will
+still accept as one double click, so the second pair **MUST** be scheduled
+strictly *inside* it, with enough headroom that a late service tick cannot push
+delivery past it. The core waits `min(interval / 4, 80 ms)`, reduced further if
+that would not leave a tick of margin: proportional to the user's own setting,
+capped so a generous setting does not make the gesture feel sluggish.
+
+*Corrected 2026-09-03.* This section previously said the pairs were "separated
+by the OS double-click interval" and called the interval "tens of milliseconds".
+Both were wrong, and the implementation followed them faithfully: scheduling at
+exactly the interval put the second pair on the threshold, the 60 Hz loop added
+up to another tick, and the OS saw two single clicks. Manual matrix row 5.3
+found it as intermittent missed and tripled clicks.
+
+If the layer is released before the second pair, that pair is **cancelled** and
+the button is guaranteed up — P7 outranks fidelity to the gesture.
 
 ### 7.3 Scroll
 

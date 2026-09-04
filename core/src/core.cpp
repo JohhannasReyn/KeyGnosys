@@ -250,8 +250,8 @@ struct Core::Impl {
     Point lastPointer{};
 
     // Scheduled second halves of a double click. Serviced from the loop rather
-    // than slept through: the OS interval is tens of milliseconds and the loop
-    // must keep moving the pointer while it elapses.
+    // than slept through: the OS interval runs to hundreds of milliseconds and
+    // the loop must keep moving the pointer while it elapses.
     struct PendingClick {
         MouseButton button = MouseButton::Left;
         TimePoint dueAt{};
@@ -602,15 +602,17 @@ struct Core::Impl {
 
     // -- double click ------------------------------------------------------
 
-    // The first pair goes out now; the second is scheduled. SPEC 7.2 wants the
-    // OS interval between them, and only the backend knows it -- but the loop
-    // must not sleep through it, or the pointer stops moving mid-gesture.
+    // The first pair goes out now; the second is scheduled WITHIN the OS
+    // interval, not at it. Only the backend knows the interval, and the loop
+    // must not sleep through the gap or the pointer stops moving mid-gesture.
+    // doubleClickDelay() explains why the interval itself is the wrong delay.
     void scheduleDoubleClick(MouseButton button) {
         if (!backends.output) return;
         backends.output->button(button, true);
         backends.output->button(button, false);
-        pendingDoubleClicks.push_back(
-            PendingClick{button, Clock::now() + backends.output->doubleClickInterval()});
+        pendingDoubleClicks.push_back(PendingClick{
+            button,
+            Clock::now() + doubleClickDelay(backends.output->doubleClickInterval())});
     }
 
     void serviceDoubleClicks(TimePoint now) {
