@@ -364,6 +364,17 @@ struct Core::Impl {
                     applyEffects(Clock::now());
                     break;
                 }
+                case WorkItem::Kind::ReleaseToggles:
+                    // The layer ended. Only the toggles are stranded by that:
+                    // the held actions arrived as ReleaseAction items just
+                    // above, in the same drain and in unwind order. Not
+                    // releaseAll() -- an exit is not a panic, and resetting
+                    // the integrators here would throw away a sub-pixel
+                    // remainder the user never asked to lose.
+                    effects.clear();
+                    dispatcher.releaseDragLocks(effects);
+                    applyEffects(Clock::now());
+                    break;
             }
         }
     }

@@ -466,6 +466,31 @@ TickResult Dispatcher::tick(TimePoint now) {
     return result;
 }
 
+void Dispatcher::releaseDragLocks(EffectBuffer& out) {
+    // Drag locks are not held actions -- they are toggles that outlive the key
+    // that set them -- so they need releasing explicitly. This is the P7 clause
+    // in SPEC section 7.2: a drag lock MUST auto-release on layer exit.
+    //
+    // One copy, called from both the exit path and the panic path. The version
+    // that lived only inside releaseAll() was the whole defect: layer exit
+    // never reached it, so the button stayed down until some later key
+    // happened to toggle the lock back off.
+    for (std::size_t i = 0; i < kButtonCount; ++i) {
+        if (!dragLock_[i]) continue;
+        const auto button = static_cast<MouseButton>(i);
+        dragLock_[i] = false;
+        Effect effect;
+        effect.kind = Effect::Kind::DragLock;
+        effect.button = button;
+        effect.down = false;
+        out.push(effect);
+        // Same order as setting the lock: the state change is reported first,
+        // then the button follows it. A click still holding this button keeps
+        // it down, and syncButton is what knows that.
+        syncButton(button, out);
+    }
+}
+
 void Dispatcher::releaseAll(EffectBuffer& out) {
     // Held actions first, in press order, so the unwind is reproducible.
     for (std::size_t i = 0; i < heldCount_; ++i) {
@@ -473,18 +498,7 @@ void Dispatcher::releaseAll(EffectBuffer& out) {
     }
     heldCount_ = 0;
 
-    // Drag locks are not held actions -- they are toggles that outlive the key
-    // that set them -- so they need releasing explicitly. This is the P7 clause
-    // in SPEC section 7.2: a drag lock MUST auto-release on layer exit.
-    for (std::size_t i = 0; i < kButtonCount; ++i) {
-        if (!dragLock_[i]) continue;
-        dragLock_[i] = false;
-        Effect effect;
-        effect.kind = Effect::Kind::DragLock;
-        effect.button = static_cast<MouseButton>(i);
-        effect.down = false;
-        out.push(effect);
-    }
+    releaseDragLocks(out);
 
     // Anything still counted as holding a button is stale by definition now.
     for (std::size_t i = 0; i < kButtonCount; ++i) {

@@ -537,6 +537,58 @@ KGN_TEST(release_all_lifts_every_obligation) {
     KGN_CHECK(dispatcher.tick(at(100)).zero());
 }
 
+KGN_TEST(leaving_the_layer_lifts_the_drag_lock_but_not_the_integrators) {
+    // The narrow release the layer-exit path uses. Leaving the layer is not
+    // the panic path: the held actions come back as ReleaseAction decisions of
+    // their own, and reset()ing the integrators here would discard a sub-pixel
+    // remainder the user never asked to lose. Only the toggle is stranded by
+    // an exit, because only the toggle outlives the key that set it.
+    Dispatcher dispatcher;
+    dispatcher.setPointerSettings(flat(10.0));
+    EffectBuffer effects;
+    dispatcher.setBindings({{key("KeyL"), move(Direction::Right)},
+                            {key("KeyG"), dragLock(MouseButton::Left)}},
+                           effects);
+
+    dispatcher.onDecision(run(key("KeyL")), t0(), effects);
+    dispatcher.onDecision(run(key("KeyG")), t0(), effects);
+    KGN_CHECK(dispatcher.buttonDown(MouseButton::Left));
+
+    effects.clear();
+    dispatcher.releaseDragLocks(effects);
+
+    bool down = true;
+    KGN_CHECK_EQ(buttonEdges(effects, MouseButton::Left, down), 1);
+    KGN_CHECK(!down);
+    KGN_CHECK(!dispatcher.dragLockActive(MouseButton::Left));
+    KGN_CHECK(!dispatcher.buttonDown(MouseButton::Left));
+    // Untouched: the engine, not this, owns the held action's release.
+    KGN_CHECK_EQ(dispatcher.heldCount(), std::size_t{1});
+    KGN_CHECK(dispatcher.pointer().moving());
+}
+
+KGN_TEST(a_click_still_holding_a_button_survives_the_layer_exit) {
+    // The refcount rule, on the exit path. Clearing the lock must not lift a
+    // button a click is still holding down -- that would be a release with no
+    // press behind it, P7's mirror.
+    Dispatcher dispatcher;
+    EffectBuffer effects;
+    dispatcher.setBindings({{key("KeyD"), click(MouseButton::Left)},
+                            {key("KeyG"), dragLock(MouseButton::Left)}},
+                           effects);
+
+    dispatcher.onDecision(run(key("KeyD")), t0(), effects);
+    dispatcher.onDecision(run(key("KeyG")), t0(), effects);
+
+    effects.clear();
+    dispatcher.releaseDragLocks(effects);
+
+    bool down = true;
+    KGN_CHECK_EQ(buttonEdges(effects, MouseButton::Left, down), 0);
+    KGN_CHECK(dispatcher.buttonDown(MouseButton::Left));
+    KGN_CHECK(!dispatcher.dragLockActive(MouseButton::Left));
+}
+
 KGN_TEST(release_all_is_idempotent) {
     Dispatcher dispatcher;
     EffectBuffer effects;

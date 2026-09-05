@@ -23,6 +23,10 @@ Decision bufferPress(KeyCode code) {
     return {Decision::Kind::Buffer, code, KeyState::Down};
 }
 
+Decision layerExited() {
+    return {Decision::Kind::LayerExited, KeyCode{}, KeyState::Up};
+}
+
 std::chrono::milliseconds since(TimePoint then, TimePoint now) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(now - then);
 }
@@ -549,6 +553,8 @@ void LayerEngine::tick(TimePoint now, DecisionBuffer& out) {
 // ---------------------------------------------------------------------------
 
 void LayerEngine::leaveCursorMode(DecisionBuffer& out) {
+    const bool wasEngaged = mode_ == Mode::Cursor;
+
     for (std::size_t i = 0; i < heldCount_; ++i) {
         const KeyCode code = heldOrder_[i];
         slot(code).clear(Slot::kHeldAction);
@@ -557,6 +563,16 @@ void LayerEngine::leaveCursorMode(DecisionBuffer& out) {
     heldCount_ = 0;
     mode_ = Mode::Normal;
     latched_ = false;
+
+    // After the unwind, never before it, so the order a downstream consumer
+    // sees is the order the obligations were taken on -- held actions first,
+    // then the toggles that outlived their keys.
+    //
+    // Only when the layer was actually engaged. A no-op call must stay free:
+    // releaseAll() runs this on every panic path and the hold-mode release of
+    // a CapsLock that never engaged runs it too, and an item per stray key is
+    // ring capacity spent discharging nothing.
+    if (wasEngaged) out.push(layerExited());
 }
 
 void LayerEngine::releaseAll(DecisionBuffer& out) {
