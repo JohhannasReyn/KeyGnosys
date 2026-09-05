@@ -1288,7 +1288,10 @@ KGN_TEST(held_actions_are_released_in_press_order) {
     KGN_CHECK_EQ(f.last.size(), std::size_t{4});
     KGN_CHECK(f.last[1].code == J);
     KGN_CHECK(f.last[2].code == H);
-    KGN_CHECK(f.last[3].kind == Decision::Kind::LayerExited);
+    // back(), not [3]: a build that emits no exit would index past the end and
+    // abort the whole binary, hiding every test after this one -- which is
+    // exactly the run a reviewer makes when checking these can fail.
+    KGN_CHECK(f.last.back().kind == Decision::Kind::LayerExited);
 }
 
 KGN_TEST(leaving_the_layer_is_announced_even_with_nothing_held) {
@@ -1303,27 +1306,86 @@ KGN_TEST(leaving_the_layer_is_announced_even_with_nothing_held) {
     f.release(CAPS, 300);
 
     KGN_CHECK_EQ(f.last.size(), std::size_t{2});   // suppress + the exit
-    KGN_CHECK(f.last[1].kind == Decision::Kind::LayerExited);
+    KGN_CHECK(f.last.back().kind == Decision::Kind::LayerExited);
     KGN_CHECK(f.engine.mode() == Mode::Normal);
 }
 
-KGN_TEST(a_capslock_that_never_engaged_the_layer_announces_no_exit) {
-    // A no-op unwind must stay free. leaveCursorMode() runs on paths where the
-    // layer was never entered -- every releaseAll(), and a hold-mode CapsLock
-    // release after a reset -- and an item per stray key is reserved ring
-    // capacity spent discharging nothing, which is what the work ring's
-    // capacity proof forbids.
+KGN_TEST(an_unwind_announces_the_exit_only_when_the_layer_was_engaged) {
+    // A no-op unwind must stay free, or the work ring's capacity proof is
+    // false: it reserves ONE layer-exit item for the whole release drain, and
+    // an item emitted while discharging nothing would spend that reserve
+    // without dropping any obligation.
+    //
+    // releaseAll() is the reachable no-op. It runs leaveCursorMode() on every
+    // panic path -- shutdown, reload, `release_all`, `set_enabled(false)` --
+    // whether or not the layer was ever entered, and it is idempotent, so it
+    // is the call that can genuinely arrive with mode_ already Normal. The
+    // CapsLock release path cannot: it returns at the orphan guard when the
+    // key was never seen down, and every path that does reach the unwind from
+    // a key event had just engaged the layer.
     Fixture f(ActivationMode::Hold);
-    auto out = f.engine.releaseAll();
-    for (const auto& decision : out) {
+    for (const auto& decision : f.engine.releaseAll()) {
         KGN_CHECK(decision.kind != Decision::Kind::LayerExited);
     }
 
-    // And an orphan CapsLock release, which reaches the same unwind.
-    f.release(CAPS, 10);
+    // Engaged, then unwound: this one MUST announce, exactly once. Both halves
+    // together are what make the guard a guard rather than a suppression --
+    // a `return;` at the top of leaveCursorMode would pass the first half
+    // alone.
+    f.press(CAPS, 0);
+    KGN_CHECK(f.engine.mode() == Mode::Cursor);
+    std::size_t exits = 0;
+    for (const auto& decision : f.engine.releaseAll()) {
+        if (decision.kind == Decision::Kind::LayerExited) ++exits;
+    }
+    KGN_CHECK_EQ(exits, std::size_t{1});
+
+    // And unwinding again, with the layer already gone, announces nothing.
+    // This is the recurrence the reserve could not survive: releaseAll() is
+    // callable without limit and from any exit path.
+    for (const auto& decision : f.engine.releaseAll()) {
+        KGN_CHECK(decision.kind != Decision::Kind::LayerExited);
+    }
+}
+
+KGN_TEST(the_hybrid_default_announces_the_exit_on_both_of_its_ways_out) {
+    // Hybrid is what ships (EngineConfig's default) and it is the only
+    // activation with TWO ways out: a momentary hold that ends on release, and
+    // a tap that unlatches. Hold and Toggle are covered above, and the whole
+    // lesson of this defect is that "the same function runs, so it must be
+    // fine" is how a wiring gap ships. This is the mode users actually run.
+    Fixture f;   // hybrid
+
+    // 1. Momentary hold: engaged on press, left on a release past the tap
+    //    threshold.
+    f.press(CAPS, 0);
+    KGN_CHECK(f.engine.mode() == Mode::Cursor);
+    f.release(CAPS, 500);
+    KGN_CHECK_EQ(f.last.size(), std::size_t{2});   // suppress + the exit
+    KGN_CHECK(f.last.back().kind == Decision::Kind::LayerExited);
+    KGN_CHECK(f.engine.mode() == Mode::Normal);
+
+    // 2. A tap latches the layer ON, which is not an exit and must announce
+    //    nothing -- a stale exit here would lift a drag lock the user is
+    //    still holding.
+    f.press(CAPS, 1000);
+    f.release(CAPS, 1050);
+    KGN_CHECK(f.engine.latched());
+    KGN_CHECK(f.engine.mode() == Mode::Cursor);
     for (const auto& decision : f.last) {
         KGN_CHECK(decision.kind != Decision::Kind::LayerExited);
     }
+
+    // 3. The tap that latches it back off IS an exit, and this is the one a
+    //    user reaches most: latch on, drag, tap to finish.
+    f.press(CAPS, 2000);
+    f.release(CAPS, 2050);
+    KGN_CHECK(f.engine.mode() == Mode::Normal);
+    std::size_t exits = 0;
+    for (const auto& decision : f.last) {
+        if (decision.kind == Decision::Kind::LayerExited) ++exits;
+    }
+    KGN_CHECK_EQ(exits, std::size_t{1});
 }
 
 KGN_TEST(the_layer_is_announced_left_exactly_once_per_entry) {

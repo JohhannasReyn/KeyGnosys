@@ -385,10 +385,15 @@ KGN_TEST(a_capslock_release_alone_can_emit_a_work_item_per_held_action) {
     engine.onKey(caps, KeyState::Up, at(2), buffer);
     translateDecisions(buffer, caps, KeyState::Up, ring);
 
-    // One item per held action, plus the single layer-exit signal. That extra
-    // item is the whole reason kMaxReleaseWork reserves kMaxLayerExitWork.
-    KGN_CHECK_EQ(ring.size(), actionKeys.size() + kMaxLayerExitWork);
-    KGN_CHECK(actionKeys.size() + kMaxLayerExitWork <= kMaxReleaseWork);
+    // One item per held action, plus the single layer-exit signal. The count
+    // is a literal, not kMaxLayerExitWork: what the code EMITS and what the
+    // ring RESERVES are two different claims, and asserting the first against
+    // the second would turn any future padding of the reserve into a spurious
+    // failure that reads like a regression.
+    KGN_CHECK_EQ(ring.size(), actionKeys.size() + 1);
+    // The reserve, separately: whatever was emitted has to fit inside it.
+    KGN_CHECK(ring.size() <= kMaxReleaseWork);
+    KGN_CHECK(kMaxLayerExitWork >= 1);   // the reserve covers that extra item
 }
 
 KGN_TEST(an_up_for_a_key_with_no_obligation_costs_no_capacity) {

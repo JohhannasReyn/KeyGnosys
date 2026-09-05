@@ -116,7 +116,10 @@ inline constexpr std::size_t kMaxHeld = 256;
 
 // Decisions from one call. Derived from the true worst case rather than
 // guessed: releaseAll() unwinding every held action and every forwarded press
-// at once, plus a full pending sweep, plus slack.
+// at once, plus the single LayerExited that unwind emits when the layer was
+// engaged, plus a full pending sweep, plus slack. The exit costs one decision
+// however many toggles are set, so it fits inside the slack rather than
+// needing a term of its own -- 2 * 256 + 1 = 513 against a bound of 584.
 inline constexpr std::size_t kDecisionCapacity = 2 * kMaxHeld + kMaxPending + 8;
 
 // A fixed-capacity decision sink.

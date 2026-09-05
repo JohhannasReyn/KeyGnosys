@@ -997,9 +997,10 @@ KGN_TEST(leaving_the_layer_lifts_a_drag_lock_without_another_key_press) {
     // own work ring. Everything between the engine and the output backend is
     // therefore the shipping code, which is the whole point -- a test that
     // called the dispatcher directly would pass with the defect still in.
-    kgn::EngineConfig engineConfig;
-    engineConfig.activation = kgn::ActivationMode::Hold;
-    kgn::LayerEngine engine(engineConfig);
+    // Hybrid activation, left by holding CapsLock past its tap threshold:
+    // EngineConfig's defaults are what ships, and this test is worth nothing
+    // if it proves the path for a mode the user is not in.
+    kgn::LayerEngine engine;
     kgn::BindingMap layerBindings;
     layerBindings[kgn::KeyCode::fromString("KeyG")] = kgn::BindingKind::Action;
     engine.setBindings(layerBindings);
@@ -1026,8 +1027,10 @@ KGN_TEST(leaving_the_layer_lifts_a_drag_lock_without_another_key_press) {
     KGN_CHECK(recorded->buttons.back().second);   // the lock put it down
 
     // Leaving the layer, and nothing else. No further key is pressed, because
-    // needing one is exactly the defect.
-    feed("CapsLock", kgn::KeyState::Up, 30);
+    // needing one is exactly the defect. 500 ms is past the 200 ms hybrid tap
+    // threshold, so this release is a momentary hold ending rather than a tap
+    // latching the layer on.
+    feed("CapsLock", kgn::KeyState::Up, 500);
     core.step(kgn::Clock::now());
 
     KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{2});
