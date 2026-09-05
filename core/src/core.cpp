@@ -393,7 +393,14 @@ struct Core::Impl {
                     if (backends.output) {
                         backends.output->button(effect.button, effect.down);
                     } else {
-                        reportNoOutput("button.click");
+                        // Prose, not an action id, because this effect has no
+                        // single action behind it: `button.click`,
+                        // `button.drag_lock` and the layer-exit release all
+                        // produce it, and the refcount edge that emits it can
+                        // belong to a key other than the one just pressed.
+                        // Naming one of them would be a diagnostic that lies
+                        // about what the user did (P6).
+                        reportNoOutput("a mouse button state change");
                     }
                     break;
                 case Effect::Kind::DoubleClick:
