@@ -537,6 +537,58 @@ KGN_TEST(release_all_lifts_every_obligation) {
     KGN_CHECK(dispatcher.tick(at(100)).zero());
 }
 
+KGN_TEST(leaving_the_layer_lifts_the_drag_lock_but_not_the_integrators) {
+    // The narrow release the layer-exit path uses. Leaving the layer is not
+    // the panic path: the held actions come back as ReleaseAction decisions of
+    // their own, and reset()ing the integrators here would discard a sub-pixel
+    // remainder the user never asked to lose. Only the toggle is stranded by
+    // an exit, because only the toggle outlives the key that set it.
+    Dispatcher dispatcher;
+    dispatcher.setPointerSettings(flat(10.0));
+    EffectBuffer effects;
+    dispatcher.setBindings({{key("KeyL"), move(Direction::Right)},
+                            {key("KeyG"), dragLock(MouseButton::Left)}},
+                           effects);
+
+    dispatcher.onDecision(run(key("KeyL")), t0(), effects);
+    dispatcher.onDecision(run(key("KeyG")), t0(), effects);
+    KGN_CHECK(dispatcher.buttonDown(MouseButton::Left));
+
+    effects.clear();
+    dispatcher.releaseDragLocks(effects);
+
+    bool down = true;
+    KGN_CHECK_EQ(buttonEdges(effects, MouseButton::Left, down), 1);
+    KGN_CHECK(!down);
+    KGN_CHECK(!dispatcher.dragLockActive(MouseButton::Left));
+    KGN_CHECK(!dispatcher.buttonDown(MouseButton::Left));
+    // Untouched: the engine, not this, owns the held action's release.
+    KGN_CHECK_EQ(dispatcher.heldCount(), std::size_t{1});
+    KGN_CHECK(dispatcher.pointer().moving());
+}
+
+KGN_TEST(a_click_still_holding_a_button_survives_the_layer_exit) {
+    // The refcount rule, on the exit path. Clearing the lock must not lift a
+    // button a click is still holding down -- that would be a release with no
+    // press behind it, P7's mirror.
+    Dispatcher dispatcher;
+    EffectBuffer effects;
+    dispatcher.setBindings({{key("KeyD"), click(MouseButton::Left)},
+                            {key("KeyG"), dragLock(MouseButton::Left)}},
+                           effects);
+
+    dispatcher.onDecision(run(key("KeyD")), t0(), effects);
+    dispatcher.onDecision(run(key("KeyG")), t0(), effects);
+
+    effects.clear();
+    dispatcher.releaseDragLocks(effects);
+
+    bool down = true;
+    KGN_CHECK_EQ(buttonEdges(effects, MouseButton::Left, down), 0);
+    KGN_CHECK(dispatcher.buttonDown(MouseButton::Left));
+    KGN_CHECK(!dispatcher.dragLockActive(MouseButton::Left));
+}
+
 KGN_TEST(release_all_is_idempotent) {
     Dispatcher dispatcher;
     EffectBuffer effects;
@@ -630,6 +682,85 @@ KGN_TEST(a_decision_that_is_not_a_dispatch_is_ignored) {
     KGN_CHECK(effects.empty());
     KGN_CHECK(!dispatcher.buttonDown(MouseButton::Left));
     KGN_CHECK_EQ(dispatcher.unknownActions(), std::uint64_t{0});
+}
+
+// ---------------------------------------------------------------------------
+// button.double_click scheduling
+//
+// Manual matrix row 5.3 failed because the second pair was scheduled at exactly
+// the OS interval. That value is the largest gap the OS accepts, and the 60 Hz
+// service loop then added up to a tick on top, so the pair landed outside the
+// window and Windows saw two single clicks. The rule these tests enforce is the
+// one the old code broke: delay + one tick of jitter must stay strictly inside
+// the interval.
+
+namespace {
+
+constexpr std::chrono::milliseconds jitter() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(kgn::kTickInterval)
+           + std::chrono::milliseconds{1};
+}
+
+}  // namespace
+
+KGN_TEST(a_double_click_is_scheduled_inside_the_os_interval_not_at_it) {
+    // The exact value measured on the machine where row 5.3 failed.
+    const auto interval = std::chrono::milliseconds{410};
+    const auto delay = kgn::doubleClickDelay(interval);
+    KGN_CHECK(delay < interval);
+    KGN_CHECK(delay + jitter() < interval);   // survives a late loop tick
+}
+
+KGN_TEST(the_windows_default_interval_leaves_ample_headroom) {
+    const auto interval = std::chrono::milliseconds{500};
+    const auto delay = kgn::doubleClickDelay(interval);
+    KGN_CHECK(delay + jitter() < interval);
+    KGN_CHECK(delay == kgn::kDoubleClickDelayCap);   // capped, not a quarter
+}
+
+KGN_TEST(the_delay_stays_inside_the_window_across_every_plausible_setting) {
+    // Windows exposes roughly 200..900 ms through the mouse control panel.
+    for (int ms = 100; ms <= 1200; ++ms) {
+        const auto interval = std::chrono::milliseconds{ms};
+        const auto delay = kgn::doubleClickDelay(interval);
+        KGN_CHECK(delay + jitter() < interval);
+        KGN_CHECK(delay > std::chrono::milliseconds{0});
+    }
+}
+
+KGN_TEST(a_generous_interval_does_not_make_the_gesture_sluggish) {
+    // A quarter of 900 ms would be 225 ms, which is a long time to wait for a
+    // click the user already made. The cap exists for this.
+    const auto delay = kgn::doubleClickDelay(std::chrono::milliseconds{900});
+    KGN_CHECK(delay <= kgn::kDoubleClickDelayCap);
+}
+
+KGN_TEST(a_tight_interval_scales_down_rather_than_clamping_to_the_cap) {
+    const auto delay = kgn::doubleClickDelay(std::chrono::milliseconds{200});
+    KGN_CHECK(delay == std::chrono::milliseconds{50});   // a quarter, under the cap
+}
+
+KGN_TEST(an_interval_below_one_tick_still_returns_something_usable) {
+    // Nothing can both wait and land inside a sub-tick window on a 60 Hz loop.
+    // Degrading to half the interval is honest; returning the interval itself
+    // would be the original bug in miniature.
+    const auto interval = std::chrono::milliseconds{10};
+    const auto delay = kgn::doubleClickDelay(interval);
+    KGN_CHECK(delay < interval);
+    KGN_CHECK(delay > std::chrono::milliseconds{0});
+}
+
+KGN_TEST(a_backend_that_reports_no_interval_does_not_schedule_at_zero) {
+    const auto delay = kgn::doubleClickDelay(std::chrono::milliseconds{0});
+    KGN_CHECK(delay > std::chrono::milliseconds{0});
+}
+
+KGN_TEST(the_delay_is_never_the_interval_itself) {
+    // The regression, stated directly: this is what the code used to do.
+    for (int ms : {100, 200, 410, 500, 900}) {
+        const auto interval = std::chrono::milliseconds{ms};
+        KGN_CHECK(kgn::doubleClickDelay(interval) != interval);
+    }
 }
 
 int main() { return kgn::test::runAll(); }

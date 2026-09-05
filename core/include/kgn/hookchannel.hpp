@@ -44,11 +44,12 @@ struct WorkItem {
         SendKey,        // OutputBackend::sendKey(code, down)
         RunAction,      // Dispatcher: start the binding on `code`
         ReleaseAction,  // Dispatcher: stop the binding on `code`
+        ReleaseToggles, // Dispatcher: the layer ended; lift its drag locks
     };
 
     Kind kind = Kind::SendKey;
     bool down = false;          // SendKey only
-    std::uint16_t code = 0;
+    std::uint16_t code = 0;     // unset for ReleaseToggles; it names no key
 };
 
 // ---------------------------------------------------------------------------
@@ -68,13 +69,21 @@ struct PhysicalRecord {
 //
 // Let U := heldActions + 2 * pendingPresses. Every Up path emits at most -dU
 // work items -- releasing a held action costs 1 item and drops U by 1;
-// resolving a buffered press costs at most 2 and drops U by 2; a CapsLock
-// release that leaves the layer costs H items and drops U by H. Every path
-// that emits NO work item consumes no capacity either, because Suppress and
-// Buffer decisions never become work items.
+// resolving a buffered press costs at most 2 and drops U by 2 -- with ONE
+// exception: a CapsLock release that leaves the layer costs H + 1 items while
+// dropping U by only H. Every path that emits NO work item consumes no
+// capacity either, because Suppress and Buffer decisions never become work
+// items.
+//
+// That extra item is the layer-exit signal (ReleaseToggles), and there is at
+// most one of it in any drain. It is emitted only when the layer was actually
+// engaged, and the layer can only be engaged again by a CapsLock DOWN -- an
+// obligation-creating operation, so it is admission-gated and outside the
+// drain by construction. Hence the reserve carries exactly one, not one per
+// exit attempt.
 //
 // So once no new obligation is admitted, ALL remaining Up events together emit
-// at most U <= kMaxReleaseWork items.
+// at most U + kMaxLayerExitWork <= kMaxReleaseWork items.
 //
 // Admit an obligation-creating operation (a Down, a Repeat, tick(), any
 // control) only while free >= kWorkAdmissionGate. It then emits at most
@@ -88,9 +97,16 @@ struct PhysicalRecord {
 // nothing, and a user can produce those without limit. The bound would not
 // exist.
 
+// The layer-exit signal. ONE item covers the whole drain, per the argument
+// above: leaving the layer emits a single ReleaseToggles regardless of how
+// many toggles are set, because expanding it into per-button releases happens
+// on the core's side of the ring, where no capacity is at stake.
+inline constexpr std::size_t kMaxLayerExitWork = 1;
+
 // The worst case for the whole release drain.
-inline constexpr std::size_t kMaxReleaseWork = kMaxHeld + 2 * kMaxPending;
-static_assert(kMaxReleaseWork == 384, "the capacity proof is stated for these bounds");
+inline constexpr std::size_t kMaxReleaseWork =
+    kMaxHeld + 2 * kMaxPending + kMaxLayerExitWork;
+static_assert(kMaxReleaseWork == 385, "the capacity proof is stated for these bounds");
 
 // Free slots required before an obligation-creating operation may run.
 inline constexpr std::size_t kWorkAdmissionGate = kDecisionCapacity + kMaxReleaseWork;

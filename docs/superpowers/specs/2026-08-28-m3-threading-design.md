@@ -283,21 +283,139 @@ struct Control {
 };
 ```
 
-**Wake mechanism:** auto-reset `Event` + `MsgWaitForMultipleObjectsEx(1, &wake, timeout,
-QS_ALLINPUT, MWMO_INPUTAVAILABLE)`, then drain messages with `PeekMessage`/`DispatchMessage`
-(this is what lets the system invoke the hook), then drain the control ring, then run
-`tick()` if the deadline has passed.
+> **Corrected 2026-09-01 after live validation.** What follows replaces the
+> original wake mechanism, which was wrong. The original text is summarised
+> under "What was wrong and how it was found" below rather than quietly
+> deleted — the reasoning that produced it looked sound on paper and would be
+> re-derived by the next person otherwise.
 
-Rejected alternatives and why:
+**Wake mechanism:** `GetMessageW` is the blocking primitive. The loop is woken by
+posted thread messages and by a thread timer:
 
-- **`PostThreadMessageW`** — payload confined to `WPARAM`/`LPARAM`; the queue is a system
-  resource with its own 10 000 cap and allocation behaviour; messages posted before the
-  thread's queue exists are silently lost.
-- **Message-only `HWND_MESSAGE` window** — closes the startup race but adds window-class and
-  `HWND` lifetime for no gain over an event, and still puts payloads in the system queue.
-- **Event + our own ring** — capacity, ordering and lifetime are ours and preallocated; the
-  event exists before the thread starts, so there is no startup race; and the wait's
-  `timeout` parameter *is* the grace-window deadline timer. One primitive, both jobs.
+```
+GetMessageW(&msg, nullptr, 0, 0)          // blocks; dispatches hook callbacks
+  ├─ WM_APP+1  doorbell → disarm, then drain the control ring
+  ├─ WM_APP+2  grace-sync → re-evaluate the timer
+  ├─ WM_TIMER  → kill the timer, then run the grace expiry
+  └─ otherwise → Translate/Dispatch
+then: re-arm or kill the grace timer from LayerEngine::nextDeadline()
+```
+
+**Why `GetMessageW` and not a wait.** `WH_KEYBOARD_LL` callbacks are delivered to
+the installing thread and are dispatched **only while that thread is inside a
+message-retrieval call**. `MsgWaitForMultipleObjectsEx` is a *wait*, not a
+retrieval call. `GetMessageW` blocks with zero wakeups when idle *and* retrieves,
+which is the property the design needs and the previous primitive did not have.
+
+**Control wakeups are doorbells, not payload.** The SPSC control ring above stays
+authoritative for payload and ordering; `PostThreadMessageW(tid, WM_APP+1, 0, 0)`
+carries nothing. This answers the original objection to `PostThreadMessageW`,
+which was about payload width and queue capacity, not about waking: a doorbell has
+no payload, and it is coalesced through a single atomic flag (`kgn::Doorbell`), so
+a burst of a thousand controls costs one thread message rather than a thousand.
+
+**The doorbell's ordering rule.** The consumer calls `disarm()` **before** draining,
+never after. Draining first and clearing second loses any control pushed between
+"ring looks empty" and "flag cleared": the producer sees the flag still set, posts
+nothing, and the item waits forever. `test_hookpump` drives both orderings and
+asserts the broken one strands work.
+
+**Startup.** `PeekMessageW` on an empty range forces the queue into existence; only
+then is the thread id published, then the hook installed, then `ready_` set. A
+producer that reads a non-zero thread id therefore knows a queue is behind it. A
+producer that reads zero has not been stranded either: the id is stored *before*
+the thread's startup drain, so that drain observes anything already pushed.
+
+**Grace deadlines use a one-shot high-resolution waitable timer, owned by a
+helper thread.** The arm/kill decision is `kgn::GraceTimerPlan`, which is
+platform-free and tested; `kgn::win::GraceTimer` executes it.
+
+The timer cannot be the hook thread's wait primitive — that thread must stay
+inside `GetMessageW` — so a helper thread waits on
+`CreateWaitableTimerExW(..., CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, ...)` plus a
+rearm event and a stop event, and converts an expiry into
+`PostThreadMessageW(hookThread, WM_APP+3, generation, 0)`. **The helper owns no
+engine state.** It is a wake source; every decision still happens on the hook
+thread.
+
+*Why not `SetTimer`, which this design used first.* Live measurement on 2026-09-03
+found `WM_TIMER` cost a roughly **fixed ~21 ms median** on the tested machine —
+more than a system tick, because `WM_TIMER` is both clamped to the tick and
+generated only when the queue is otherwise empty. Against a 50 ms grace window the
+user felt ~71 ms, so most of the measured latency was the timer rather than the
+window. This figure is one machine and one build; it is not claimed as universal.
+Replacing the mechanism took the median overshoot to ~13 ms at 50 ms and ~9 ms at
+25 ms, with a best case of 1.8 ms, and **no early expiry in 22 samples**.
+
+`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` is documented for Windows 10 1803 and
+later. Creation falls back to `dwFlags = 0` if the flag is rejected: an ordinary
+waitable timer is still better than `WM_TIMER`, and a coarse deadline beats none.
+
+*Generation, and what actually guarantees correctness.* Every arm or cancel bumps
+a counter; the helper posts the generation it armed with, and the hook thread
+ignores an expiry whose generation is not current. That is **defence, not the
+guarantee** — the guarantee is that `expireGrace()` re-reads the clock and does
+nothing unless a deadline has genuinely passed, so no stale wake can expire a
+window early even if the generation check were wrong. The generation makes an
+obsolete wake cheap to discard and the intent legible.
+
+*Shutdown.* The helper is joined before any handle it waits on is closed, and it
+re-checks the stop event after the timer fires but before posting, so a timer
+expiring in the same instant as shutdown cannot post to a thread on its way out.
+
+*What the timer fix did NOT remove.* A residual ~9–13 ms median remains, and it is
+not the timer: the best case of 1.8 ms shows the timer is precise. A grace expiry
+enqueues a `WorkItem`, and the work ring is drained by the **core thread at
+60 Hz**, which adds 0–16.7 ms (mean ~8.3 ms). That is architectural rather than a
+defect, and removing it would mean waking the core loop when work is enqueued
+rather than waiting for its next tick. Recorded, not fixed.
+
+Because `pending_` is in press order and the grace window is uniform, the head
+deadline only ever moves *later*, so an armed timer never needs replacing with an
+earlier one; it merely fires early once, which the not-yet-due path absorbs.
+
+**The hook callback posts at most one message, and only on a transition.** The loop
+is blocked inside `GetMessageW` while the callback runs, so it cannot notice that a
+buffered press just created a deadline. The callback therefore posts `WM_APP+2` —
+but only when `!graceTimerArmed_ && nextDeadline().has_value()`, so ordinary typing
+adds no syscall at all.
+
+**Zero idle wakeups is preserved.** With no keyboard activity, no control traffic and
+no pending grace deadline, nothing is armed and `GetMessageW` blocks indefinitely.
+Measured after the repair: the hook thread consumed **0.000 s of CPU over 10 idle
+seconds**, while the core's own 60 Hz motion loop consumed 0.234 s.
+
+### What was wrong, and how it was found
+
+The original design chose an auto-reset `Event` plus
+`MsgWaitForMultipleObjectsEx(1, &wake, timeout, QS_ALLINPUT, MWMO_INPUTAVAILABLE)`
+specifically because the wait's `timeout` parameter could double as the
+grace-window deadline timer — "one primitive, both jobs". It rejected
+`PostThreadMessageW` (payload width, the system queue's 10 000 cap, a startup
+race) and a message-only `HWND_MESSAGE` window (class and handle lifetime for no
+gain).
+
+**That premise was empirically falsified.** `QS_ALLINPUT` does not cause a blocked
+`MsgWaitForMultipleObjectsEx` to dispatch a low-level hook callback. With no
+control traffic and no pending deadline the timeout was `INFINITE`, so the thread
+parked forever and the `PeekMessageW` on the following line — the call that
+actually dispatches the hook — was never reached.
+
+The failure mode was quiet in the worst way: the hook installed, returned a valid
+`HHOOK`, never registered a loss, reported itself healthy, and intercepted
+nothing. Ordinary typing was unaffected, so the first matrix row *passed*.
+
+It was caught by live validation on 2026-09-01 (`docs/manual-test-logs/`), by
+running an independent `WH_KEYBOARD_LL` hook in a separate process over the same
+keystrokes: **529 callbacks to the independent hook, 0 to ours**. Capping the idle
+wait at 50 ms — changing nothing else — produced 1816 callbacks, which isolated
+the pump as the sole variable.
+
+The automated suite was green throughout, because nothing in it depended on the
+hook thread retrieving messages. That gap is now covered from both sides:
+`test_hookpump` pins the doorbell and timer logic, and `kgn_hook_smoke` — built,
+deliberately not in ctest — installs the real hook and reports PASS only after a
+genuine keystroke reaches the publication ring.
 
 **The hook thread never waits on the core thread.** The event wait is a wait on a kernel
 object with a timeout, never a wait for the core to release anything, and the hook callback
