@@ -4,7 +4,7 @@
 
 **Goal:** Give KeyGnosys a working Windows input path — low-level keyboard hook, `SendInput` output, Win32 windows/monitors — with the layer engine owned solely by the hook thread and every obligation provably deliverable.
 
-**Architecture:** The hook thread becomes the sole mutating owner of `LayerEngine` and answers Windows' suppression question synchronously. Two preallocated SPSC rings cross to the 60 Hz core thread: an *obligation* ring of work items that can never overflow (proved in the spec §4), and a *publication* ring of physical key records that may coalesce. Core→hook control is a third ring woken by an auto-reset event whose wait timeout doubles as the grace-window deadline timer. Backend construction moves to the executable so tests keep linking `kgn_ipc` alone.
+**Architecture:** The hook thread becomes the sole mutating owner of `LayerEngine` and answers Windows' suppression question synchronously. Two preallocated SPSC rings cross to the 60 Hz core thread: an *obligation* ring of work items that can never overflow (proved in the spec §4), and a *publication* ring of physical key records that may coalesce. Core→hook control is a third ring woken by a coalesced thread-message doorbell, and the grace window is served by a one-shot thread timer. *(Corrected 2026-09-01: this was originally an auto-reset event whose wait timeout doubled as the deadline timer. Live validation showed a blocked `MsgWaitForMultipleObjectsEx` does not dispatch `WH_KEYBOARD_LL` callbacks, so the hook received nothing; `GetMessageW` is now the blocking primitive. See the spec’s §6 and `docs/manual-test-logs/2026-08-30-m3-windows.md`.)* Backend construction moves to the executable so tests keep linking `kgn_ipc` alone.
 
 **Tech Stack:** C++17, CMake 3.20+, Ninja; Win32 (`user32`, `dwmapi`, `shcore`); the in-repo `kgn_test.hpp` harness.
 
@@ -1947,6 +1947,13 @@ false and no `PhysicalRecord` is emitted.
 (SPEC §8.2: "MUST detect having been unhooked and re-install automatically") and emits
 `input.hook_lost` through a flag the core reads — never a log call on this thread.
 
+> **Corrected 2026-09-02.** The SPEC requirement quoted here was withdrawn: it is
+> not implementable. A hook Windows silently removes still leaves our handle
+> looking valid, and Microsoft documents that an application cannot find out.
+> The retry survives only for an install that never succeeded, and
+> `input.hook_lost` was removed rather than kept as a claim we cannot honour.
+> See SPEC §8.2 and `docs/manual-test-logs/`.
+
 `capabilities()` returns `canSuppress = true` and these limitations verbatim:
 
 ```cpp
@@ -2317,8 +2324,9 @@ does not exist.
 One row per behaviour that cannot be automated without real hardware and a real display,
 each with exact steps and the expected result. At minimum:
 
-- The hook survives `LowLevelHooksTimeout` under load; `input.hook_lost` appears and the
-  hook re-installs.
+- The hook survives `LowLevelHooksTimeout` under load. *(Corrected 2026-09-02:
+  the second half of this criterion — "`input.hook_lost` appears and the hook
+  re-installs" — was withdrawn as unobservable. See SPEC §8.2.)*
 - Interception is inert while an elevated window has focus, and the UI says so.
 - `Ctrl+Alt+Del` is never intercepted, and this is documented as correct.
 - Ordinary typing is unaffected while the layer is off, including autorepeat and IME.

@@ -35,6 +35,48 @@
 namespace kgn {
 
 // ---------------------------------------------------------------------------
+// How long after the first press/release pair `button.double_click` sends the
+// second one.
+//
+// The backend reports the OS double-click interval, and that value is the
+// LARGEST gap the system will still accept -- not the gap to use. Scheduling at
+// exactly the interval lands on the threshold, and because the second pair is
+// delivered by the 60 Hz core loop the gap actually delivered is
+// `interval + 0..kTickInterval`, which is over the limit. The OS then sees two
+// independent single clicks.
+//
+// Manual matrix row 5.3 found this as "sometimes no click, sometimes a triple":
+// the triple is a user pressing again after an attempt appeared to do nothing,
+// so two delayed second-clicks land around the new first click.
+//
+// So aim well inside the window. A quarter of the interval keeps the gesture
+// proportional to the user's own setting; the cap stops a generous setting
+// (Windows allows up to ~900 ms) from making the click feel sluggish; and the
+// budget subtracts a tick so loop jitter cannot push delivery past the limit.
+inline constexpr std::chrono::milliseconds kDoubleClickDelayCap{80};
+
+inline constexpr std::chrono::milliseconds doubleClickDelay(
+    std::chrono::milliseconds interval) {
+    using ms = std::chrono::milliseconds;
+    // Round the tick up: the loop can be a whole tick late, never less.
+    constexpr ms kJitter =
+        std::chrono::duration_cast<ms>(kTickInterval) + ms{1};
+
+    if (interval <= ms{0}) return kJitter;   // a backend that cannot say
+    if (interval <= kJitter) {
+        // Below one tick there is no delay that both waits and lands inside the
+        // window on a 60 Hz loop. Half the interval is the best available, and
+        // an OS configured this tightly is already beyond human gestures.
+        return interval / 2;
+    }
+    ms delay = interval / 4;
+    if (delay > kDoubleClickDelayCap) delay = kDoubleClickDelayCap;
+    const ms budget = interval - kJitter;
+    if (delay > budget) delay = budget;
+    return delay;
+}
+
+// ---------------------------------------------------------------------------
 // Catalog
 
 enum class ActionId : std::uint8_t {
@@ -211,6 +253,14 @@ public:
     // Release every obligation this dispatcher holds: buttons down, drag
     // locks, held directions, precision. Called on every exit path (P7).
     void releaseAll(EffectBuffer& out);
+
+    // Lift the drag locks, and nothing else. This is leaving the cursor layer
+    // (SPEC 7.2), which is not the panic path: the held actions the layer had
+    // are unwound by the engine as ReleaseAction decisions, and the pointer
+    // and scroll integrators keep the sub-pixel remainders that releaseAll()
+    // would deliberately discard. Only the toggles are stranded by an exit,
+    // because only they outlive the key that set them.
+    void releaseDragLocks(EffectBuffer& out);
 
     [[nodiscard]] bool dragLockActive(MouseButton button) const;
     [[nodiscard]] bool buttonDown(MouseButton button) const;

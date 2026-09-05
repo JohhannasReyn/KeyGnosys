@@ -32,8 +32,10 @@
 
 #include "kgn/backends.hpp"
 #include "kgn/hookchannel.hpp"
+#include "kgn/hookpump.hpp"
 #include "kgn/layer_engine.hpp"
 #include "kgn/physical.hpp"
+#include "grace_timer.hpp"
 #include "scancode_keymap.hpp"
 
 namespace kgn::win {
@@ -82,7 +84,16 @@ public:
     // written from the hook thread. Exchanged rather than merely read, so an
     // episode is reported once.
     [[nodiscard]] std::uint64_t takeAdmissionRefusals();
-    [[nodiscard]] std::uint64_t takeHookLosses();
+
+    // NARROW MEANING, and it matters: this is true iff we called
+    // SetWindowsHookExW successfully and have not ourselves uninstalled it.
+    //
+    // It is NOT evidence that Windows is still dispatching callbacks. Windows
+    // may silently remove a hook whose procedure overran LowLevelHooksTimeout,
+    // and Microsoft documents that "there is no way for the application to know
+    // whether the hook is removed". Nothing here can tell the difference
+    // between a live hook and a removed one, so no code may treat this as
+    // liveness.
     [[nodiscard]] bool installed() const { return installed_.load(); }
 
 private:
@@ -99,7 +110,18 @@ private:
     void expireGrace();
     void republish();
     void publishPhysical(KeyCode code, KeyState state, bool suppressed);
-    [[nodiscard]] DWORD waitTimeout() const;
+
+    // Wake the hook thread's message loop. Coalesced through doorbell_, so a
+    // burst of controls costs one thread message, not one per control.
+    void requestWake();
+    // Post a bare wake so the loop re-evaluates the grace timer. Called from
+    // the hook callback -- which runs on the hook thread, inside GetMessageW,
+    // so the loop cannot otherwise notice that a deadline just appeared.
+    void requestGraceSync();
+    // Arm, leave or kill the thread timer to match the engine's next deadline.
+    void syncGraceTimer();
+    void killGraceTimer();
+    void onGraceExpiry(std::uint32_t generation);
 
     // Only ever touched on the hook thread.
     ScancodeKeymap keymap_;
@@ -121,14 +143,30 @@ private:
 
     HHOOK hook_ = nullptr;
     std::thread thread_;
-    HANDLE wake_ = nullptr;
+    // No wake event any more. GetMessageW is the blocking primitive, because
+    // only a message-RETRIEVAL call dispatches WH_KEYBOARD_LL callbacks; the
+    // loop is woken by posted thread messages instead.
     HANDLE applied_ = nullptr;
+    // Published before ready_, so a producer that sees a thread id knows the
+    // queue behind it exists and can accept a post.
+    std::atomic<DWORD> threadId_{0};
+    Doorbell doorbell_;
+
+    // Hook thread only. The timer is a wake source; every decision about the
+    // grace window still happens here.
+    GraceTimer graceTimer_;
+    bool graceTimerArmed_ = false;
+    // Bumped on every arm or cancel, so an expiry belonging to a window that
+    // has since been replaced can be discarded.
+    std::uint32_t graceGeneration_ = 0;
     std::atomic<std::uint32_t> appliedSeq_{0};
     std::atomic<bool> stopping_{false};
     std::atomic<bool> installed_{false};
     std::atomic<bool> ready_{false};
     std::atomic<std::uint64_t> admissionRefusals_{0};
-    std::atomic<std::uint64_t> hookLosses_{0};
+    // Retries of an install that never succeeded -- NOT recoveries of a hook
+    // Windows took away. See the comment on installed().
+    std::atomic<std::uint64_t> installRetries_{0};
 
     // WH_KEYBOARD_LL gives the callback no user pointer, so the instance has
     // to be reachable from a static. Exactly one core owns the endpoint, so

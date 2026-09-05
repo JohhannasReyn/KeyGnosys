@@ -67,6 +67,12 @@ bool translateDecisions(const DecisionBuffer& decisions, KeyCode code,
     // the engine saying the OS should see a repeat rather than the second
     // press it was handed, and passing the press through would deliver the
     // wrong thing.
+    //
+    // A layer exit can never be swallowed here. The kind must be Forward, and
+    // LayerExited is not one; and the CapsLock event that leaves the layer
+    // always emits its own Suppress first, so the buffer is never of size one
+    // on that path. Both facts are load-bearing: taking the fast path would
+    // drop the exit signal and strand a drag lock.
     const bool native = code.valid()
                         && decisions.size() == 1
                         && decisions[0].kind == Decision::Kind::Forward
@@ -88,6 +94,9 @@ bool translateDecisions(const DecisionBuffer& decisions, KeyCode code,
             case Decision::Kind::ReleaseAction:
                 out.push(WorkItem{WorkItem::Kind::ReleaseAction, false,
                                   decision.code.id()});
+                break;
+            case Decision::Kind::LayerExited:
+                out.push(WorkItem{WorkItem::Kind::ReleaseToggles, false, 0});
                 break;
             case Decision::Kind::Suppress:
             case Decision::Kind::Buffer:

@@ -100,6 +100,7 @@ if(WIN32)
     set(KGN_PLATFORM_NAME "windows")
     set(KGN_PLATFORM_SOURCES
         src/platform/windows/scancode_keymap.cpp
+        src/platform/windows/grace_timer.cpp
         src/platform/windows/hook_input.cpp
         src/platform/windows/sendinput_output.cpp
         src/platform/windows/win32_window.cpp
@@ -178,14 +179,26 @@ if(KGN_BUILD_TESTS)
     kgn_add_test(test_config)
     kgn_add_test(test_ipc)
     kgn_add_test(test_hookchannel)
+    kgn_add_test(test_hookpump)
     kgn_add_test(test_slots)
     if(WIN32)
         # The scancode table is Windows-only, and so is its test. It reaches
         # into src/platform/windows for the header rather than exporting it:
         # nothing outside that directory may hold a key translation (P2).
         kgn_add_test_with(test_scancode_keymap kgn_platform)
+        kgn_add_test_with(test_grace_timer kgn_platform)
         kgn_add_test_with(test_hook_input kgn_platform)
         kgn_add_test_with(test_sendinput_output kgn_platform)
+
+        # Built, deliberately NOT registered with ctest. It installs a real
+        # low-level hook and waits for a real keystroke, so a CI run that
+        # depended on it would either hang or lie. Run it by hand before the
+        # manual matrix: it answers "is the hook receiving anything at all?" in
+        # twelve seconds, which is the question the suite could not answer when
+        # the pump defect shipped.
+        add_executable(kgn_hook_smoke tests/manual_hook_smoke.cpp)
+        target_link_libraries(kgn_hook_smoke
+            PRIVATE kgn_engine kgn_test_main kgn_warnings kgn_platform)
     endif()
     kgn_add_test_with(test_endpoint kgn_ipc)
     kgn_add_test_with(test_core kgn_ipc)

@@ -1309,6 +1309,11 @@ malformed or duplicate physical events — including malformed CapsLock
 specifically, since it is dispatched before the general per-key logic — and
 invalid key codes.
 
+**`grace_ms` is a property of the user, not of the machine.** It is the human
+ambiguity window; implementation and scheduling latency **MUST NOT** be
+compensated for by narrowing it. See §15.10, which records why — and the M3
+measurement that nearly caused exactly that mistake.
+
 **Only bound keys are ever delayed.** Buffering adds up to `grace_ms` of latency,
 and it applies **only** to keys bound to an action in the cursor layer, and
 **only** while the layer is off. Three categories are never buffered and never
@@ -1349,6 +1354,14 @@ the earliest pending press plus `grace_ms` — rather than polled. An idle
 keyboard therefore produces no engine wakeups at all, and the grace window
 resolves at its deadline instead of up to one motion tick late.
 
+The deadline is a floor, not a promise of exactness. On Windows it is served by
+a high-resolution waitable timer, so the expiry **MUST NOT** fire early and
+**MAY** fire late by a small margin. Code
+**MUST** re-read the clock when the timer wakes and act only if the deadline has
+genuinely passed, so that a late, early or coalesced timer message is harmless.
+Observed timing is recorded by the Windows manual matrix rather than asserted
+here.
+
 ### 6.5 Window slots
 
 `windows` slot ordering **MUST** be stable across emissions, or the number-key
@@ -1383,14 +1396,30 @@ between bindings files, the dispatcher, and the overlay's legend renderer.
 | Action | Params | Default legend | Behaviour |
 |--------|--------|----------------|-----------|
 | `button.click` | `button`: `left`\|`right`\|`middle` | `Click` / `R-Click` / `M-Click` | Press on key-down, release on key-up (so click-and-hold works naturally) |
-| `button.double_click` | `button` | `Dbl Click` | Two press/release pairs, separated by the OS double-click interval |
+| `button.double_click` | `button` | `Dbl Click` | Two press/release pairs, the second **within** the OS double-click interval |
 | `button.drag_lock` | `button` | `Drag` | Toggle. First press holds the button down; second releases. Emits `drag_lock`. **MUST** auto-release on layer exit (P7) |
 
 `button.double_click` is scheduled on the core loop and **MUST NOT** block it:
-the interval is tens of milliseconds and the pointer has to keep moving while it
-elapses. Only the platform backend can know the interval, so it supplies it. If
-the layer is released before the second pair, that pair is **cancelled** and the
-button is guaranteed up — P7 outranks fidelity to the gesture.
+the interval runs to hundreds of milliseconds — Windows reports 500 ms by
+default and allows roughly 200–900 ms — and the pointer has to keep moving while
+it elapses. Only the platform backend can know the interval, so it supplies it.
+
+**The interval is a ceiling, not the delay.** It is the largest gap the OS will
+still accept as one double click, so the second pair **MUST** be scheduled
+strictly *inside* it, with enough headroom that a late service tick cannot push
+delivery past it. The core waits `min(interval / 4, 80 ms)`, reduced further if
+that would not leave a tick of margin: proportional to the user's own setting,
+capped so a generous setting does not make the gesture feel sluggish.
+
+*Corrected 2026-09-03.* This section previously said the pairs were "separated
+by the OS double-click interval" and called the interval "tens of milliseconds".
+Both were wrong, and the implementation followed them faithfully: scheduling at
+exactly the interval put the second pair on the threshold, the 60 Hz loop added
+up to another tick, and the OS saw two single clicks. Manual matrix row 5.3
+found it as intermittent missed and tripled clicks.
+
+If the layer is released before the second pair, that pair is **cancelled** and
+the button is guaranteed up — P7 outranks fidelity to the gesture.
 
 ### 7.3 Scroll
 
@@ -1472,7 +1501,8 @@ pump. Returning non-zero from the hook proc suppresses the event.
 **Hard constraints, to be surfaced in `hello.limitations` and in the UI:**
 
 - The hook proc **MUST** return within the `LowLevelHooksTimeout` window
-  (default 300 ms) or Windows silently unhooks it. Therefore the hook proc
+  (`HKCU\Control Panel\Desktop\LowLevelHooksTimeout`) or Windows may silently
+  unhook it. Therefore the hook proc
   **MUST** do nothing but decide suppression and enqueue; all dispatch, IPC and
   logging happen on other threads.
 - **The event path performs no dynamic allocation.** The layer engine runs
@@ -1490,7 +1520,20 @@ pump. Returning non-zero from the hook proc suppresses the event.
 
   Allocating convenience overloads exist for tests and for callers that are not
   on the hook path. They are not used by the hook.
-- The core **MUST** detect having been unhooked and re-install automatically.
+- **The core cannot detect having been unhooked, and MUST NOT claim to.**
+  Microsoft documents that a hook whose procedure overruns the timeout "is
+  silently removed without being called" and that "there is no way for the
+  application to know whether the hook is removed". No supported API reports
+  hook liveness, and `UnhookWindowsHookEx` is destructive, so it cannot serve as
+  a probe. The core therefore **MUST** state this in `hello.limitations` rather
+  than implement a heuristic that pretends to detect it (P6). It **MUST** still
+  retry an install that has never succeeded — a different condition, and an
+  observable one.
+
+  *(This requirement previously read "the core MUST detect having been unhooked
+  and re-install automatically". That was not implementable. Corrected
+  2026-09-02 after a controlled attempt to reproduce silent removal; see
+  `docs/manual-test-logs/`.)*
 - Keys cannot be intercepted while an **elevated** window has focus unless the
   core itself runs elevated. Running unelevated is the default; the UI states
   plainly when the layer is inert for this reason.
@@ -1704,6 +1747,53 @@ Its limits are inherent and **MUST** be stated in the UI when active: it sees ke
 only while the overlay has focus, it cannot suppress anything, and it has no
 window or monitor information. It is a development tool, not a degraded mode of
 the product.
+
+### 9.7 The layer indicator — specified, deferred to M5
+
+**The problem.** The cursor layer swallows every unbound key. If the overlay is
+hidden — and it is designed to be hidden once the layer is muscle memory, and it
+can be running from autostart — an engaged layer is indistinguishable from a
+broken keyboard. A user who has forgotten the software is installed has no way to
+tell the difference, and the natural conclusion is that the machine is faulty.
+
+That is a P6 failure in an unusual direction: nothing is being faked, but a state
+with drastic consequences is invisible.
+
+**The requirement.** When the cursor layer is engaged and the keyboard window is
+not visible, the overlay **MUST** show a small indicator saying so. It:
+
+- is always-on-top, click-through, and visually minimal — a badge, not a window;
+- appears only while the layer is engaged, and disappears with it;
+- states the mode and how to leave it, because the user reading it is by
+  definition the user who does not know;
+- is positionable and **MAY** be disabled by a user who does not want it, since
+  an expert who knows the layer is on does not need telling;
+- is drawn by the overlay from the `mode` event it already receives. **No new
+  core behaviour, no new IPC, and no OS state.**
+
+**Why not the CapsLock LED.** The obvious idea — light the CapsLock LED while the
+layer is engaged — is rejected:
+
+- Windows offers no supported way to light the LED without changing CapsLock
+  *state*. `IOCTL_KEYBOARD_SET_INDICATORS` is a driver-level interface, not an
+  application API, and behaves inconsistently across laptop keyboards.
+- Driving CapsLock state creates a new stranded resource. A core that dies while
+  engaged would leave the user in CapsLock, which is the P7 failure class applied
+  to global OS state rather than to a key.
+- It collides with the real-CapsLock escape gesture (§6.3). The layer would be
+  overwriting the very state that gesture exists to give back, and any
+  save/restore of the user's genuine CapsLock state fails exactly when the
+  process does.
+
+ScrollLock avoids the second and third objections — toggling it changes almost no
+application behaviour — but many laptop keyboards have no ScrollLock LED, so it
+cannot be the mechanism the guarantee rests on. It **MAY** be offered later as an
+opt-in extra on hardware that has one.
+
+**Deferred to M5** with the settings UI, because it is overlay behaviour with a
+preference attached and nothing in the core changes. The requirement is written
+now because the failure it prevents is a safety-shaped one, and because it is the
+kind of thing that gets discovered by a confused user rather than by a test.
 
 ---
 
@@ -1924,7 +2014,6 @@ Every diagnostic carries a stable machine-readable `code`.
 | `profile.invalid` | warn | Profile skipped |
 | `config.clamped` | info | A setting was outside its range |
 | `input.permission_denied` | error | Cannot open the input device / install the hook |
-| `input.hook_lost` | warn | Windows unhooked us; re-installing |
 | `input.elevated_window` | info | Interception inert; an elevated window has focus |
 | `window.unsupported` | warn | A window operation is unavailable on this backend |
 | `ipc.client_overflow` | warn | A client's queue overflowed; events dropped |
@@ -2013,7 +2102,7 @@ logic inherited from the prototype can be tested at all.
 | **M2** | Core skeleton + IPC | Engine, motion integrator, action dispatcher, IPC server, unit tests. No OS backends — driven by a synthetic input backend |
 | **M3** | Windows backend | Hook, `SendInput`, Win32 windows/monitors. End-to-end on Windows |
 | **M4** | Linux/X11 backend | evdev, uinput, EWMH/XRandR, udev rule, all-keyboard grab. End-to-end on Linux |
-| **M5** | Configuration UI | Settings dialog, binding editor with silent reassignment and the unassigned-commands list, profile editor |
+| **M5** | Configuration UI | Settings dialog, binding editor with silent reassignment and the unassigned-commands list, profile editor, **the layer indicator (§9.7)**, **Caps timing calibration (§15.10)** |
 | **M6** | **Visual layout editor** | Canvas, key palette, move/resize/align/distribute/snap, segment-edit mode, validation panel, import/export, reset-to-template |
 | **M7** | Packaging | Windows installer, Linux packages, first release |
 
@@ -2205,3 +2294,76 @@ the fork is never touched, so the UI surfaces the divergence and offers a review
 rather than pretending it does not exist.
 
 → §3.4
+
+### 15.10 `grace_ms` measures the user's hands, not the machine
+
+**`grace_ms` is the human ambiguity window and nothing else.** It answers one
+question: *how far apart can this user's two hands land and still mean a chord?*
+It **MUST NOT** be tuned to compensate for implementation or machine latency.
+
+This distinction was learned the hard way during M3 validation. A 50 ms window
+measured 70.6 ms end to end, and the obvious response — halve the window — would
+have bought ~22 ms by spending half the race-detection margin. The latency turned
+out to be a `WM_TIMER` artifact worth ~21 ms, and replacing the timer recovered
+almost the same amount at no cost to margin. Had the window been shrunk first,
+the product would have been permanently worse at the job the window exists for,
+in exchange for something a better timer gave away free.
+
+Three quantities are therefore kept conceptually distinct, and only the first is
+a function of the user:
+
+| Quantity | Means | Tuned by |
+|---|---|---|
+| `grace_ms` | How long the user's chord may take | The user's hands |
+| deadline overshoot | Timer, scheduling and message-pump cost | Implementation |
+| action delivery latency | Expiry to output reaching the OS | Implementation |
+
+**A slower machine MUST NOT be read as a user who needs a wider window**, and a
+faster one must not be read as a user who needs a narrower one.
+
+#### Calibration — specified, deferred to M5
+
+The default has to work on first launch, so calibration is **never mandatory**:
+KeyGnosys ships a conservative default and behaves correctly for a user who never
+opens the settings dialog.
+
+The settings UI (M5) **MAY** offer a *Calibrate Caps timing* action: the user
+performs 20–30 natural CapsLock-plus-bound-key gestures, and for each intended
+chord the tool records
+
+```text
+delta_t = bound_key_down - CapsLock_down
+```
+
+building a **distribution** rather than trusting one sample. It then reports a
+recommendation derived from a high percentile of that distribution plus a safety
+margin, clamped to a supported range — for example:
+
+```text
+Your Caps chord timing is usually within 18 ms.
+Recommended grace window: 30 ms
+Current grace window:     50 ms
+```
+
+The percentile, margin, sample count, clamp range and presentation are **future
+design decisions and are deliberately not fixed here**. What is fixed is the
+shape: it is a **recommendation the user explicitly accepts**, never a silent
+change to a setting that governs whether their keystrokes become letters or
+actions.
+
+#### Passive calibration — a later enhancement, not M5
+
+Once the settings infrastructure exists, KeyGnosys **MAY** maintain a small local
+rolling model of observed chord timing and offer a recommendation when the
+configured window is substantially wider — or narrower — than the user's
+demonstrated behaviour. The narrower case matters as much as the wider one: a
+user whose natural chords keep brushing the boundary should be offered a *wider*
+window rather than left with intermittent literal-key leakage.
+
+It **MUST NOT** adapt silently while the user is working, and it inherits the
+project's privacy rules without exception: local only, no telemetry, no network
+transmission, no persisted keystroke content, nothing from which typed text could
+be reconstructed, and no more than the timing statistics calibration requires.
+
+Deliberately placed after M5 so that the explicit, user-initiated version ships
+first and the passive one is judged against something that already works.

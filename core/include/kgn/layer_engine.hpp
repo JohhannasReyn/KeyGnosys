@@ -63,6 +63,13 @@ struct EngineConfig {
 
 // What the engine decided to do about an event. The caller performs these;
 // the engine performs nothing itself.
+//
+// Every kind but one names a key. LayerExited names no key because nothing
+// happened to one: it reports that the LAYER ended. That matters because a
+// toggle set inside the layer -- a drag lock -- deliberately outlives the key
+// that set it, so it is in no held list here and no per-key decision can ever
+// mention it. Without this the exit is invisible downstream and the toggle
+// survives the layer, which is a mouse button left physically down (P7).
 struct Decision {
     enum class Kind : std::uint8_t {
         Suppress,        // consume it; nothing reaches the OS
@@ -70,6 +77,7 @@ struct Decision {
         RunAction,       // it is bound in the cursor layer
         ReleaseAction,   // a held cursor-layer binding was released
         Buffer,          // ambiguous; held pending the grace window
+        LayerExited,     // the cursor layer was just left; toggles must lift
     };
 
     Kind kind = Kind::Forward;
@@ -108,7 +116,10 @@ inline constexpr std::size_t kMaxHeld = 256;
 
 // Decisions from one call. Derived from the true worst case rather than
 // guessed: releaseAll() unwinding every held action and every forwarded press
-// at once, plus a full pending sweep, plus slack.
+// at once, plus the single LayerExited that unwind emits when the layer was
+// engaged, plus a full pending sweep, plus slack. The exit costs one decision
+// however many toggles are set, so it fits inside the slack rather than
+// needing a term of its own -- 2 * 256 + 1 = 513 against a bound of 584.
 inline constexpr std::size_t kDecisionCapacity = 2 * kMaxHeld + kMaxPending + 8;
 
 // A fixed-capacity decision sink.

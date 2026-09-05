@@ -187,6 +187,41 @@ KGN_TEST(a_release_action_becomes_a_work_item) {
 // ---------------------------------------------------------------------------
 // The ring
 
+KGN_TEST(a_layer_exit_becomes_a_release_toggles_work_item) {
+    // The link between the engine's exit signal and the dispatcher. Without
+    // it the decision is emitted and then dropped on the floor, which is
+    // indistinguishable from never emitting it.
+    DecisionBuffer decisions;
+    decisions.push(suppressOf("CapsLock", KeyState::Up));
+    decisions.push({Decision::Kind::LayerExited, KeyCode{}, KeyState::Up});
+    WorkRing ring;
+
+    const bool native = translateDecisions(
+        decisions, KeyCode::fromString("CapsLock"), KeyState::Up, ring);
+
+    KGN_CHECK(!native);
+    KGN_CHECK_EQ(ring.size(), std::size_t{1});
+    WorkItem item{};
+    KGN_CHECK(ring.pop(item));
+    KGN_CHECK(item.kind == WorkItem::Kind::ReleaseToggles);
+}
+
+KGN_TEST(a_layer_exit_is_never_swallowed_by_the_native_fast_path) {
+    // The fast path returns true and pushes NOTHING. A layer exit taken for a
+    // native passthrough would strand the drag lock exactly as the defect did,
+    // so it must fail the test on kind alone -- even standing entirely on its
+    // own, and even when the physical event looks like a match.
+    DecisionBuffer decisions;
+    decisions.push({Decision::Kind::LayerExited, KeyCode{}, KeyState::Up});
+    WorkRing ring;
+
+    const bool native = translateDecisions(
+        decisions, KeyCode::fromString("CapsLock"), KeyState::Up, ring);
+
+    KGN_CHECK(!native);
+    KGN_CHECK_EQ(ring.size(), std::size_t{1});
+}
+
 KGN_TEST(the_ring_reports_its_free_capacity_and_refuses_when_full) {
     SpscRing<WorkItem, 4> ring;
     KGN_CHECK_EQ(ring.free(), std::size_t{3});
@@ -350,8 +385,15 @@ KGN_TEST(a_capslock_release_alone_can_emit_a_work_item_per_held_action) {
     engine.onKey(caps, KeyState::Up, at(2), buffer);
     translateDecisions(buffer, caps, KeyState::Up, ring);
 
-    KGN_CHECK_EQ(ring.size(), actionKeys.size());
-    KGN_CHECK(actionKeys.size() <= kMaxReleaseWork);
+    // One item per held action, plus the single layer-exit signal. The count
+    // is a literal, not kMaxLayerExitWork: what the code EMITS and what the
+    // ring RESERVES are two different claims, and asserting the first against
+    // the second would turn any future padding of the reserve into a spurious
+    // failure that reads like a regression.
+    KGN_CHECK_EQ(ring.size(), actionKeys.size() + 1);
+    // The reserve, separately: whatever was emitted has to fit inside it.
+    KGN_CHECK(ring.size() <= kMaxReleaseWork);
+    KGN_CHECK(kMaxLayerExitWork >= 1);   // the reserve covers that extra item
 }
 
 KGN_TEST(an_up_for_a_key_with_no_obligation_costs_no_capacity) {

@@ -250,8 +250,8 @@ struct Core::Impl {
     Point lastPointer{};
 
     // Scheduled second halves of a double click. Serviced from the loop rather
-    // than slept through: the OS interval is tens of milliseconds and the loop
-    // must keep moving the pointer while it elapses.
+    // than slept through: the OS interval runs to hundreds of milliseconds and
+    // the loop must keep moving the pointer while it elapses.
     struct PendingClick {
         MouseButton button = MouseButton::Left;
         TimePoint dueAt{};
@@ -364,6 +364,17 @@ struct Core::Impl {
                     applyEffects(Clock::now());
                     break;
                 }
+                case WorkItem::Kind::ReleaseToggles:
+                    // The layer ended. Only the toggles are stranded by that:
+                    // the held actions arrived as ReleaseAction items just
+                    // above, in the same drain and in unwind order. Not
+                    // releaseAll() -- an exit is not a panic, and resetting
+                    // the integrators here would throw away a sub-pixel
+                    // remainder the user never asked to lose.
+                    effects.clear();
+                    dispatcher.releaseDragLocks(effects);
+                    applyEffects(Clock::now());
+                    break;
             }
         }
     }
@@ -382,7 +393,14 @@ struct Core::Impl {
                     if (backends.output) {
                         backends.output->button(effect.button, effect.down);
                     } else {
-                        reportNoOutput("button.click");
+                        // Prose, not an action id, because this effect has no
+                        // single action behind it: `button.click`,
+                        // `button.drag_lock` and the layer-exit release all
+                        // produce it, and the refcount edge that emits it can
+                        // belong to a key other than the one just pressed.
+                        // Naming one of them would be a diagnostic that lies
+                        // about what the user did (P6).
+                        reportNoOutput("a mouse button state change");
                     }
                     break;
                 case Effect::Kind::DoubleClick:
@@ -602,15 +620,17 @@ struct Core::Impl {
 
     // -- double click ------------------------------------------------------
 
-    // The first pair goes out now; the second is scheduled. SPEC 7.2 wants the
-    // OS interval between them, and only the backend knows it -- but the loop
-    // must not sleep through it, or the pointer stops moving mid-gesture.
+    // The first pair goes out now; the second is scheduled WITHIN the OS
+    // interval, not at it. Only the backend knows the interval, and the loop
+    // must not sleep through the gap or the pointer stops moving mid-gesture.
+    // doubleClickDelay() explains why the interval itself is the wrong delay.
     void scheduleDoubleClick(MouseButton button) {
         if (!backends.output) return;
         backends.output->button(button, true);
         backends.output->button(button, false);
-        pendingDoubleClicks.push_back(
-            PendingClick{button, Clock::now() + backends.output->doubleClickInterval()});
+        pendingDoubleClicks.push_back(PendingClick{
+            button,
+            Clock::now() + doubleClickDelay(backends.output->doubleClickInterval())});
     }
 
     void serviceDoubleClicks(TimePoint now) {
