@@ -553,7 +553,7 @@ KGN_TEST(the_generator_actually_exercises_the_paths_it_claims) {
     // transitions would keep passing and prove nothing. Assert the event space
     // is not degenerate.
     std::size_t forwards = 0, suppressions = 0, actions = 0, releases = 0;
-    std::size_t buffers = 0, repeats = 0;
+    std::size_t buffers = 0, repeats = 0, exits = 0;
     for (unsigned seed = 0; seed < 200; ++seed) {
         for (const auto& d : randomSession(seed)) {
             switch (d.kind) {
@@ -568,6 +568,7 @@ KGN_TEST(the_generator_actually_exercises_the_paths_it_claims) {
                 case Decision::Kind::RunAction: ++actions; break;
                 case Decision::Kind::ReleaseAction: ++releases; break;
                 case Decision::Kind::Buffer: ++buffers; break;
+                case Decision::Kind::LayerExited: ++exits; break;
             }
         }
     }
@@ -577,6 +578,7 @@ KGN_TEST(the_generator_actually_exercises_the_paths_it_claims) {
     KGN_CHECK(releases > 100);
     KGN_CHECK(buffers > 100);
     KGN_CHECK(repeats > 100);
+    KGN_CHECK(exits > 100);
 }
 
 // ---------------------------------------------------------------------------
@@ -1281,9 +1283,71 @@ KGN_TEST(held_actions_are_released_in_press_order) {
     f.press(J, 10);
     f.press(H, 20);
     f.release(CAPS, 500);
-    KGN_CHECK_EQ(f.last.size(), std::size_t{3});   // suppress + two releases
+    // suppress + two releases + the layer exit, which comes LAST so the
+    // unwind order stays the order the obligations were taken on.
+    KGN_CHECK_EQ(f.last.size(), std::size_t{4});
     KGN_CHECK(f.last[1].code == J);
     KGN_CHECK(f.last[2].code == H);
+    KGN_CHECK(f.last[3].kind == Decision::Kind::LayerExited);
+}
+
+KGN_TEST(leaving_the_layer_is_announced_even_with_nothing_held) {
+    // The signal that carries SPEC 7.2's auto-release across the thread
+    // boundary. A drag lock set inside the layer is a TOGGLE: it outlives the
+    // key that set it, so that key is long gone from the held list and no
+    // per-key decision can ever mention it. If the exit itself is not
+    // announced, whoever holds the toggle is never told to lift it -- which is
+    // exactly how a mouse button survived leaving the layer for 9.2 s.
+    Fixture f(ActivationMode::Hold);
+    f.press(CAPS, 0);
+    f.release(CAPS, 300);
+
+    KGN_CHECK_EQ(f.last.size(), std::size_t{2});   // suppress + the exit
+    KGN_CHECK(f.last[1].kind == Decision::Kind::LayerExited);
+    KGN_CHECK(f.engine.mode() == Mode::Normal);
+}
+
+KGN_TEST(a_capslock_that_never_engaged_the_layer_announces_no_exit) {
+    // A no-op unwind must stay free. leaveCursorMode() runs on paths where the
+    // layer was never entered -- every releaseAll(), and a hold-mode CapsLock
+    // release after a reset -- and an item per stray key is reserved ring
+    // capacity spent discharging nothing, which is what the work ring's
+    // capacity proof forbids.
+    Fixture f(ActivationMode::Hold);
+    auto out = f.engine.releaseAll();
+    for (const auto& decision : out) {
+        KGN_CHECK(decision.kind != Decision::Kind::LayerExited);
+    }
+
+    // And an orphan CapsLock release, which reaches the same unwind.
+    f.release(CAPS, 10);
+    for (const auto& decision : f.last) {
+        KGN_CHECK(decision.kind != Decision::Kind::LayerExited);
+    }
+}
+
+KGN_TEST(the_layer_is_announced_left_exactly_once_per_entry) {
+    // Latched, then unlatched: one exit. Toggling CapsLock again with the
+    // layer already gone must not announce a second, or a drag lock set after
+    // the exit would be lifted by a stale signal.
+    Fixture f(ActivationMode::Toggle);
+    f.press(CAPS, 0);
+    f.release(CAPS, 10);
+    KGN_CHECK(f.engine.mode() == Mode::Cursor);
+
+    f.press(CAPS, 100);
+    std::size_t exits = 0;
+    for (const auto& decision : f.last) {
+        if (decision.kind == Decision::Kind::LayerExited) ++exits;
+    }
+    KGN_CHECK_EQ(exits, std::size_t{1});
+
+    // Releasing CapsLock in toggle mode means nothing, and the layer is
+    // already gone, so nothing further is announced.
+    f.release(CAPS, 110);
+    for (const auto& decision : f.last) {
+        KGN_CHECK(decision.kind != Decision::Kind::LayerExited);
+    }
 }
 
 KGN_TEST(release_all_unwinds_forwarded_presses_in_press_order) {

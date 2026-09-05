@@ -254,6 +254,14 @@ public:
     // locks, held directions, precision. Called on every exit path (P7).
     void releaseAll(EffectBuffer& out);
 
+    // Lift the drag locks, and nothing else. This is leaving the cursor layer
+    // (SPEC 7.2), which is not the panic path: the held actions the layer had
+    // are unwound by the engine as ReleaseAction decisions, and the pointer
+    // and scroll integrators keep the sub-pixel remainders that releaseAll()
+    // would deliberately discard. Only the toggles are stranded by an exit,
+    // because only they outlive the key that set them.
+    void releaseDragLocks(EffectBuffer& out);
+
     [[nodiscard]] bool dragLockActive(MouseButton button) const;
     [[nodiscard]] bool buttonDown(MouseButton button) const;
     [[nodiscard]] std::size_t heldCount() const { return heldCount_; }

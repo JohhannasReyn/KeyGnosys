@@ -63,6 +63,13 @@ struct EngineConfig {
 
 // What the engine decided to do about an event. The caller performs these;
 // the engine performs nothing itself.
+//
+// Every kind but one names a key. LayerExited names no key because nothing
+// happened to one: it reports that the LAYER ended. That matters because a
+// toggle set inside the layer -- a drag lock -- deliberately outlives the key
+// that set it, so it is in no held list here and no per-key decision can ever
+// mention it. Without this the exit is invisible downstream and the toggle
+// survives the layer, which is a mouse button left physically down (P7).
 struct Decision {
     enum class Kind : std::uint8_t {
         Suppress,        // consume it; nothing reaches the OS
@@ -70,6 +77,7 @@ struct Decision {
         RunAction,       // it is bound in the cursor layer
         ReleaseAction,   // a held cursor-layer binding was released
         Buffer,          // ambiguous; held pending the grace window
+        LayerExited,     // the cursor layer was just left; toggles must lift
     };
 
     Kind kind = Kind::Forward;

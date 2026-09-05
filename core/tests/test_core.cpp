@@ -7,6 +7,8 @@
 // describes what it cannot do rather than pretending.
 
 #include <chrono>
+#include <cstdio>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -961,6 +963,79 @@ KGN_TEST(releasing_the_layer_cancels_a_pending_double_click_with_the_button_up) 
     KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{2});   // no third press
     KGN_CHECK(!recorded->buttons.back().second);              // and it is up
     KGN_CHECK(recorded->releaseAllCalls >= 1);
+}
+
+KGN_TEST(leaving_the_layer_lifts_a_drag_lock_without_another_key_press) {
+    // The WIRING, not the mechanism. test_actions already proves that
+    // Dispatcher::releaseAll lifts a drag lock; what shipped broken is that
+    // leaving the layer never reached the dispatcher at all, so the button
+    // stayed physically down until some later key happened to toggle it --
+    // 9.215 s in the live Windows run that found this. SPEC 7.2 and P7 both
+    // require the release on the exit path itself.
+    const std::string bindingsPath = "kgn-test-draglock-bindings.json";
+    {
+        std::ofstream file(bindingsPath, std::ios::binary | std::ios::trunc);
+        KGN_CHECK(file.is_open());
+        file << R"({"schema":"keygnosys/bindings/2","id":"draglock",)"
+                R"("name":"Drag lock","bindings":{"KeyG":)"
+                R"({"action":"button.drag_lock","params":{"button":"left"}}}})";
+    }
+
+    auto output = std::make_unique<RecordingOutput>();
+    RecordingOutput* recorded = output.get();
+    kgn::Backends backends;
+    backends.output = std::move(output);
+
+    const std::string address = uniqueEndpoint("draglock");
+    kgn::CoreOptions opts = Fixture::options(address);
+    opts.bindingsFile = bindingsPath;
+    kgn::Core core(opts, std::move(backends));
+    KGN_CHECK(core.start().ok());
+
+    // This build has no input backend, so the test plays the hook thread's
+    // part: a real engine, translated through the real rule, into the core's
+    // own work ring. Everything between the engine and the output backend is
+    // therefore the shipping code, which is the whole point -- a test that
+    // called the dispatcher directly would pass with the defect still in.
+    kgn::EngineConfig engineConfig;
+    engineConfig.activation = kgn::ActivationMode::Hold;
+    kgn::LayerEngine engine(engineConfig);
+    kgn::BindingMap layerBindings;
+    layerBindings[kgn::KeyCode::fromString("KeyG")] = kgn::BindingKind::Action;
+    engine.setBindings(layerBindings);
+
+    kgn::WorkRing ring;
+    kgn::DecisionBuffer decisions;
+    auto feed = [&](const char* name, kgn::KeyState state, int ms) {
+        const kgn::KeyCode code = kgn::KeyCode::fromString(name);
+        decisions.clear();
+        engine.onKey(code, state,
+                     kgn::TimePoint{} + std::chrono::milliseconds(ms), decisions);
+        kgn::translateDecisions(decisions, code, state, ring);
+        kgn::WorkItem item{};
+        while (ring.pop(item)) core.pushWorkForTests(item);
+        core.step(kgn::Clock::now());
+    };
+
+    feed("CapsLock", kgn::KeyState::Down, 0);
+    feed("KeyG", kgn::KeyState::Down, 10);
+    feed("KeyG", kgn::KeyState::Up, 20);
+
+    KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{1});
+    KGN_CHECK(recorded->buttons.back().first == kgn::MouseButton::Left);
+    KGN_CHECK(recorded->buttons.back().second);   // the lock put it down
+
+    // Leaving the layer, and nothing else. No further key is pressed, because
+    // needing one is exactly the defect.
+    feed("CapsLock", kgn::KeyState::Up, 30);
+    core.step(kgn::Clock::now());
+
+    KGN_CHECK_EQ(recorded->buttons.size(), std::size_t{2});
+    KGN_CHECK(!recorded->buttons.back().second);   // and it came back up
+
+    core.stop("test finished");
+    removeEndpoint(address);
+    std::remove(bindingsPath.c_str());
 }
 
 KGN_TEST(a_search_path_that_does_not_exist_is_a_miss_not_an_empty_document) {
