@@ -219,11 +219,13 @@ Re-run the Step 4 command. **PASS requires exit status 0**, meaning all of:
 
 The net injected down count is printed and must be 0, but it is **not** sufficient: it was 0 on the real failure. Exit status 2 (INCONCLUSIVE) means fewer than two calibration pairs — re-run with the Step 3 cycle, do not guess.
 
-Also confirm the software state is clean:
+Also confirm the software state is clean — `mode: normal`, `latched: false`, every modifier false:
 
 ```sh
-.venv/Scripts/python.exe tools/manual/kgn.py send get_state | grep -o '"drag_lock[^,]*'
+.venv/Scripts/python.exe tools/manual/kgn.py send get_state | grep REPLY | grep -o '"mode": "[a-z]*", "latched": [a-z]*\|"modifiers": {[^}]*}'
 ```
+
+`get_state` carries **no** `drag_lock` field; an earlier version of this step grepped for one and printed nothing in every state. A held button is judged by the independent hook, never by this reply.
 
 - [ ] **Step 7: Record both rows in the log with the evidence**
 
