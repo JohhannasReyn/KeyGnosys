@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- **Branch:** `fix/m3-hook-message-pump`, 13 commits ahead of `main`. **Do not merge. Do not start M4. Do not rewrite existing commits.**
+- **Branch:** originally `fix/m3-hook-message-pump`, which merged into `main` as PR #7 (`c1e6794`, 2026-09-05); its no-merge constraint is discharged. Remaining work runs on a narrow branch from updated `main` (`fix/m3-manual-validation`). **Do not start M4. Do not rewrite existing commits.**
 - **P6 — degrade loudly.** An unavailable capability is reported and disabled, never emulated.
 - **P7 — never strand a key.** Every suppressed or synthesized press has a guaranteed matching release on every exit path.
 - **A row is PASS only when its expected result was actually observed.** Never infer a pass from an adjacent row, from automated tests, or from plausibility. `NOT RUN` with a reason is a valid, honest outcome; a speculative PASS is not.
@@ -170,42 +170,54 @@ The **operator** runs this from their own terminal on the machine under test, th
 
 Expected: `PASS: N physical record(s) observed.` Retry if the operator was not pressing keys; three consecutive failures with the operator actively typing means stop and investigate the pump before running any row.
 
-- [ ] **Step 2: Arm the mouse observer and the core**
+> **Corrected 2026-09-13 (finding F-1).** Steps 4 and 6 originally judged these rows by `net down count == 0`. That check **passed on the real 5.5 failure** — the button came up 9.215 s late, on an unrelated keypress. Both rows are now judged on timing by `tools/manual/analyse_drag.py`; balance survives only as a secondary check.
+
+- [ ] **Step 2: Arm the core, the recorder and the mouse observer**
+
+Captures go to an **absolute Windows path** (`CAP` below), never `/tmp`: the observer runs under PowerShell, where `/tmp` is `C:\tmp`, while Git Bash reads MSYS2's. Launched by the agent — nothing here has a short window.
 
 ```sh
-PATH=/c/msys64/ucrt64/bin:$PATH ./build/default/core/keygnosys-core.exe > /dev/null 2>&1 &
+CAP='C:/Projects/KeyGnosys/.superpowers/sdd/2026-09-04-m3-completion/captures'   # git-ignored
+mkdir -p "$CAP"
+PATH=/c/msys64/ucrt64/bin:$PATH ./build/default/core/keygnosys-core.exe > "$CAP/core.log" 2>&1 &
 sleep 3
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/manual/observe_mouse.ps1 -Seconds 28800 -Out /tmp/drag.csv > /dev/null 2>&1 &
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/manual/observe_mouse.ps1 -Seconds 28800 -Out "$CAP/drag.csv" > "$CAP/observer.out" 2>&1 &
+.venv/Scripts/python.exe tools/manual/record.py --out "$CAP/drag.jsonl" --timeout 28800 > "$CAP/record.out" 2>&1 &
 ```
 
-- [ ] **Step 3: Brief the operator on row 5.4, and on recovery**
+Then validate **both** instruments before believing anything (Method Rule 1):
+- `observer.out` reads `mouse probe: ok 0x…`; `record.out` reads `recording to …`, and `drag.jsonl.hb` advances.
+- Recorder known-positive: `kgn.py send set_activation_mode '{"mode":"hybrid"}'` must add a `mode` line to `drag.jsonl`.
+- Observer known-positive: the operator makes one **physical** left click; `drag.csv` must gain a `D`/`U` pair with `injected=0`.
 
-> Engage the layer with `CapsLock`. Press `G` — the left button locks **down**. Move the pointer with `H`/`J`/`K`/`L` across a file icon. Press `G` again — the button releases. Then leave the layer.
+- [ ] **Step 3: Brief the operator on row 5.4 and the calibration cycle, and on recovery**
+
+> Park the pointer over empty desktop. Engage the layer with `CapsLock`. Press `G` — the left button locks **down**. Move the pointer with `H`/`J`/`K`/`L` (across a file icon, for 5.4). Press `G` again — the button releases.
 >
 > If the button ever stays down: click once with the real mouse; if that does not clear it, double-click **KEYGNOSYS PANIC**. Killing the core alone does **not** release a `SendInput` button-down.
+
+This lock/unlock cycle is also the **clock calibration** for 5.5: it gives `analyse_drag.py` the aligned pairs it needs. Run it in the same session as 5.5, before it.
 
 - [ ] **Step 4: Verify 5.4 from the capture**
 
 ```sh
-.venv/Scripts/python.exe -c "
-import sys
-rows=[l.strip().split(',') for l in open('/tmp/drag.csv') if l.strip()]
-inj=[(float(t),d) for t,d,i in rows if i=='1']
-print('injected button events:', len(inj))
-for t,d in inj: print(f'  {t/1000:8.2f}s  {d}')
-bal=sum(1 if d=='D' else -1 for _,d in inj)
-print('net down count (MUST be 0):', bal)"
+.venv/Scripts/python.exe tools/manual/analyse_drag.py "$CAP/drag.jsonl" "$CAP/drag.csv"
 ```
 
-Expected: an injected `D`, a gap while the pointer moves, then an injected `U`. **`net down count` must be 0.** A non-zero value is a stranded button and a P7 failure — stop, record it, do not continue to 5.5.
+Expected for 5.4: the episode is reported as an in-layer toggle, released on the second `G`, with the core and observer sequences matching. The operator confirms the file moved. Any `FAIL` is a P7 failure — stop, record it, do not continue to 5.5.
 
 - [ ] **Step 5: Brief the operator on row 5.5 — the auto-release row**
 
-> Engage the layer. Press `G` to lock the button down. **Do not press `G` again.** Leave the layer with `CapsLock`.
+> Still in the layer, press `G` to lock the button down. Move a little with `H`/`J`/`K`/`L`. **Do not press `G` again.** Tap `CapsLock` to leave the layer. Then **stop** — press nothing else until told.
 
-- [ ] **Step 6: Verify 5.5**
+- [ ] **Step 6: Verify 5.5 — timing, not balance**
 
-Re-run the Step 4 command. Expected: a second injected `D`/`U` pair, with the `U` emitted at the moment the layer was left — SPEC §7.2 requires drag lock to auto-release on layer exit, and P7 outranks fidelity to the gesture. `net down count` must again be 0.
+Re-run the Step 4 command. **PASS requires exit status 0**, meaning all of:
+- in the core stream, **no key press** lies between the `mode` cursor→normal transition and `drag_lock {active:false}` — the release belongs to the exit, not to a later key;
+- the observer's injected `U` pairs one-to-one with that release, and its clock offset lies within the tolerance measured from the session's own calibration pairs (floored at the recorder's 1 ms resolution, nothing wider);
+- no lock is left open, and the sequences from both instruments agree.
+
+The net injected down count is printed and must be 0, but it is **not** sufficient: it was 0 on the real failure. Exit status 2 (INCONCLUSIVE) means fewer than two calibration pairs — re-run with the Step 3 cycle, do not guess.
 
 Also confirm the software state is clean:
 
@@ -215,7 +227,7 @@ Also confirm the software state is clean:
 
 - [ ] **Step 7: Record both rows in the log with the evidence**
 
-Append a `## Section 5 (continued)` block giving the injected event timeline and the net-down count for each row. If either failed, write the failure and its evidence — do not soften it.
+Append a block giving the full `analyse_drag.py` output for each row: the episode timeline, the transition-to-release delta, the calibration spread and each residual, and the net count as a secondary figure. If either failed, write the failure and its evidence — do not soften it. Then clean up: no core, observer or recorder left running (list command lines; a `-match 'observe_'` query matches itself), and `GetAsyncKeyState` clear on `0x01/0x02/0x04/0x10/0x11/0x12/0x5B`.
 
 - [ ] **Step 8: Commit**
 
