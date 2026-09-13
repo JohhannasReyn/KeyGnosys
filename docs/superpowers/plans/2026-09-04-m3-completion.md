@@ -44,7 +44,7 @@
 These cost roughly a day of this milestone. They are constraints, not advice.
 
 1. **Validate an instrument against a known-positive before believing a negative from it.** A capture client received its first line, went deaf, and stayed alive — producing five convincing false negatives and two wrong conclusions that had to be retracted. Trigger a signal you know should appear; confirm the tool reports it; only then trust a zero.
-2. **`kgn_hook_smoke` is the mandatory pre-check.** `PATH=/c/msys64/ucrt64/bin:$PATH ./build/default/core/kgn_hook_smoke.exe` — installs the real hook and reports PASS on the first genuine keystroke, in twelve seconds. Run it before any session of matrix rows. It exists because a dead hook was once discovered forty rows in.
+2. **`kgn_hook_smoke` is the mandatory pre-check.** `PATH=/c/msys64/ucrt64/bin:$PATH ./build/default/core/kgn_hook_smoke.exe` — installs the real hook and reports PASS on the first genuine keystroke, in twelve seconds. Run it before any session of matrix rows. It exists because a dead hook was once discovered forty rows in. **The operator launches it locally after the brief; an agent never launches it and relays "press a key now" through chat** — relay latency lands inside the twelve-second window, and on 2026-09-13 exactly that produced a no-stimulus `FAIL` that was not counted. A timeout with no key pressed is inconclusive: re-run, conclude nothing.
 3. **Injected events are invisible to the core's own `key` stream, by design** (`hook_input.cpp` skips `LLKHF_INJECTED`). Anything the core synthesizes — grace replays, `release_all` output — can only be seen by an *independent* hook observer. Never conclude "the core did nothing" from the absence of a synthetic event in its own stream.
 4. **The operator types their replies on the same keyboard.** Every capture is polluted with prose. Filter by keycode and pair one-to-one; never assume a capture contains only the requested gesture. A ±100 ms pairing window once let one `CapsLock` press partner several `J` presses and invented 21 attempts out of 10.
 5. **Never use a fixed short capture window.** The operator is a human with a life. Arm instruments for hours, flush incrementally, and expose a heartbeat so liveness is checkable *during* the run. A window that expires before the operator is ready writes an empty file, which reads exactly like a real negative.
@@ -165,6 +165,8 @@ The last two button rows, and the first that can leave a **mouse button physical
 ```sh
 PATH=/c/msys64/ucrt64/bin:$PATH ./build/default/core/kgn_hook_smoke.exe
 ```
+
+The **operator** runs this from their own terminal on the machine under test, then presses a letter key (Method Rule 2). The agent briefs, waits, and reads back the output the operator reports.
 
 Expected: `PASS: N physical record(s) observed.` Retry if the operator was not pressing keys; three consecutive failures with the operator actively typing means stop and investigate the pump before running any row.
 
@@ -642,7 +644,7 @@ List every row and its result. Count PASS, NOT RUN and FAIL. **Any FAIL blocks t
 
 - [ ] **Step 2: Run the full verification set one last time**
 
-All five commands from Global Constraints, plus `kgn_hook_smoke`. Record the numbers in the log.
+All five commands from Global Constraints, plus `kgn_hook_smoke` (operator-launched, Method Rule 2). Record the numbers in the log.
 
 - [ ] **Step 3: Replace the temporary status in `core/README.md`**
 

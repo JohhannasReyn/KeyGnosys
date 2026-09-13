@@ -33,6 +33,11 @@ It installs the real hook and reports PASS on the first genuine keystroke, in
 twelve seconds. It exists because a completely dead hook was once discovered
 forty rows into a matrix run.
 
+**The operator launches it, on the machine under test, after reading the brief**
+— never an assistant or a remote session relaying "it's running, press a key"
+(method rule 7). A timeout with no key pressed is **inconclusive**, not a FAIL:
+re-run it, and draw no conclusion about the product.
+
 ---
 
 ## Emergency exits, strongest first
@@ -131,3 +136,12 @@ scheduling quantum, suspect the instrument first.
 **6. A row is PASS only when its expected result was actually observed.**
 `NOT RUN`, with a reason, is honest. A pass inferred from an adjacent row, from
 green unit tests, or from plausibility is not.
+
+**7. Whoever applies a timed physical stimulus starts the timer.** A check that
+waits a fixed window for a human action — `kgn_hook_smoke` today — is launched by
+the operator, locally, after the brief. Launching it from an assistant session
+and announcing the start through chat puts relay and UI latency *inside* the
+window: on 2026-09-13 an assistant-launched smoke expired before the operator
+could act and printed `FAIL`. It was not counted. If such a check ever has to be
+started remotely, it must wait for an explicit ready/start signal, not a fixed
+window.
