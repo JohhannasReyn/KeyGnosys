@@ -75,6 +75,7 @@ $s.IconLocation='shell32.dll,131'; $s.Save()
 | Did the core *see* the key? | `record.py` — the core's own event stream |
 | Did the core *synthesize* output? | `observe_keys.ps1` — an independent hook; the core cannot see its own injected events |
 | Is a mouse button still held down? | `observe_mouse.ps1` — same reason, for buttons |
+| Was a drag lock released at the right *moment*? | `record.py` + `observe_mouse.ps1` + `analyse_drag.py` — balance alone cannot tell |
 | Did a chord resolve as a layer action or leak a letter? | `observe_keys.ps1` + `analyse_chords.py` |
 | What does the core think its state is? | `kgn.py send get_state` |
 | Is the hook alive at all? | `kgn_hook_smoke` (built by CMake, not here) |
@@ -95,7 +96,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/manual/observe_mouse.p
 
 # chord pairing, one-to-one, +/-80 ms window
 .venv/Scripts/python.exe tools/manual/analyse_chords.py /tmp/keys.csv 80
+
+# drag-lock release timing (rows 5.4, 5.5); exit 0 PASS, 1 FAIL, 2 INCONCLUSIVE
+.venv/Scripts/python.exe tools/manual/analyse_drag.py C:/kgn/drag.jsonl C:/kgn/drag.csv
 ```
+
+**Use absolute Windows paths for captures.** The observers run under PowerShell,
+where `/tmp` means `C:\tmp`; Git Bash reads `/tmp` as MSYS2's own directory. A
+writer and reader on different files produce an empty capture that reads exactly
+like a real negative. (The `/tmp` examples above are only safe when every
+command runs in the same shell.)
 
 `observe_keys.ps1` writes `elapsed_ms,vk,injected,D|U`.
 `observe_mouse.ps1` writes `elapsed_ms,D|U,injected`.
