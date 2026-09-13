@@ -26,7 +26,10 @@ log.
 > the product. Trigger a signal you know should appear, confirm the observer
 > reports it, and only then trust a zero. `kgn_hook_smoke` is the preferred
 > pre-check for the input path: it answers "is the hook receiving anything at
-> all?" in twelve seconds, against the real backend. The instruments themselves
+> all?" in twelve seconds, against the real backend. **The operator launches
+> it locally, after reading the brief**, never a remote or assistant session
+> relaying the start through chat; a timeout with no key pressed is
+> inconclusive, not a FAIL. The instruments themselves
 > live in [`tools/manual/`](../tools/manual/), with the method rules that
 > produced them.
 
