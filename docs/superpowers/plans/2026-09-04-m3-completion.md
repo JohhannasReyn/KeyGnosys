@@ -471,9 +471,9 @@ git commit -m "Record section 9: hook survives overrun on this build"
 | Did the command apply? | the reply `delayed.ps1` logs — `ok:true` means **applied** (SPEC §5.4) |
 | What did the core see? | `record.py`, one per core instance |
 
-**Stranded means positive.** For `observe_keys.ps1`, count injected `D` minus injected `U` per key. A **positive** count is a stranded synthetic key. A **negative** count is expected wherever the core unwinds a natively-forwarded press (e.g. a held `Shift` under `release_all`): it injects an up for a down the OS saw physically. The OS state in `samples.csv` and a final `GetAsyncKeyState` read are the ground truth.
+**Windows state decides, not observer counts** (operator ruling, 2026-09-13). An injected-down-minus-injected-up count from `observe_keys.ps1` is supporting evidence only: ordinary typing produces injected downs (grace replays) whose ups arrive physically, a natively-forwarded press unwound by `release_all` gives a negative count, and after the hook dies a physical up can discharge an injected down. The OS state in `samples.csv` and a probe-validated `GetAsyncKeyState` read are the final check.
 
-**The standard hold** (unless a row says otherwise): pointer parked on empty desktop, near the top. **Tap** `CapsLock` (layer latched), then hold `D` (left click — the button goes down) with the left hand and `J` (pointer moves down) with the right. Keep holding through `FIRE` and for about two seconds after, then release everything.
+**The standard hold** (unless a row says otherwise): pointer placed at the **right edge of the top monitor, halfway down**, confirmed by eye. **Tap** `CapsLock` first (layer latched), then hold `D` (left click) + `F` (precision) with the left hand and `H` (left) with the right, so the pointer is still drifting slowly at `FIRE`. With `J` alone the pointer crosses the screen in under a second and pins at an edge, which makes motion-stop unobservable (rows 10.1 and 10.3, first runs). Keep holding through `FIRE` for about three seconds, then release. If the pointer reaches an edge before `FIRE`, motion-stop is inconclusive — never inferred from position samples.
 
 - [ ] **Step 1: Prepare the capture directory and the 10.6 fixture**
 
