@@ -453,67 +453,98 @@ git commit -m "Record section 9: hook survives overrun on this build"
 
 # Task 7: Section 10 — shutdown, disable and reload safety (⚠ every row)
 
-**Every row here is a P7 test, and a failure leaves a key or a button held.** Read the emergency-exit rules before starting. Run `observe_mouse.ps1` and `observe_keys.ps1` together throughout: a stranded synthetic key or button is only visible to an independent hook.
+**Every row here is a P7 test, and a failure leaves a key or a button held.** Read the emergency-exit rules before starting.
+
+> **Revised 2026-09-13.** The original steps could not be executed as written: `Ctrl+C` cannot reach a console while the layer is engaged, the operator has no free hand to type or aim a mouse while holding the keys, commands "sent from a second terminal" put the agent's timing inside the hold, and the captures went to `/tmp`. Each row now fires through `tools/manual/delayed.ps1`, which the **operator** launches locally before taking up the hold (Method Rule 2 / README rule 7).
 
 **Files:**
 - Modify: `docs/manual-test-logs/2026-08-30-m3-windows.md`
-- Product files if a row fails — and a P7 failure is a stop-everything defect.
+- Product files only if a row fails — and a P7 failure is a stop-everything defect.
 
-- [ ] **Step 1: Arm both observers**
+**Instruments, and what each one proves:**
 
-```sh
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/manual/observe_keys.ps1  -Seconds 28800 -Out /tmp/s10k.csv > /dev/null 2>&1 &
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/manual/observe_mouse.ps1 -Seconds 28800 -Out /tmp/s10m.csv > /dev/null 2>&1 &
-```
+| Question | Instrument |
+|---|---|
+| Is the button / a modifier held **in the OS**, and when did it change relative to the fire? | `<log>.samples.csv` from `delayed.ps1` — `GetAsyncKeyState` and pointer position every ~10 ms, on the same QPC clock as the fire |
+| Was a change **injected** by the core, or physical? | `observe_mouse.ps1` (left button) and `observe_keys.ps1` |
+| Did the core exit cleanly or get terminated? | the core exit code `delayed.ps1` logs (0 = unwound; `0xC000013A` = ended by the console subsystem; 1 = `taskkill /F`) |
+| Did the command apply? | the reply `delayed.ps1` logs — `ok:true` means **applied** (SPEC §5.4) |
+| What did the core see? | `record.py`, one per core instance |
 
-- [ ] **Step 2: Row 10.1 — Ctrl+C with keys held**
+**Stranded means positive.** For `observe_keys.ps1`, count injected `D` minus injected `U` per key. A **positive** count is a stranded synthetic key. A **negative** count is expected wherever the core unwinds a natively-forwarded press (e.g. a held `Shift` under `release_all`): it injects an up for a down the OS saw physically. The OS state in `samples.csv` and a final `GetAsyncKeyState` read are the ground truth.
 
-The core must run in a console the operator can focus. Have them engage the layer, hold a movement key **and** a click key, then `Ctrl+C` the core. Expected: clean exit, pointer stops, button up, no modifier stuck.
+**The standard hold** (unless a row says otherwise): pointer parked on empty desktop, near the top. **Tap** `CapsLock` (layer latched), then hold `D` (left click — the button goes down) with the left hand and `J` (pointer moves down) with the right. Keep holding through `FIRE` and for about two seconds after, then release everything.
 
-Note: `Ctrl+C` only reaches the console if the layer is **not** latched at that moment — a latched layer swallows it. Brief the operator to release the layer first, or to use the console window's close button.
-
-- [ ] **Step 3: Row 10.2 — `taskkill /F` with keys held**
-
-Same setup, then kill the process hard. Expected: the physical keys are still physically held by the operator; releasing them behaves normally; nothing is stuck afterwards. This is the crash-safety property native passthrough provides.
-
-- [ ] **Step 4: Rows 10.3–10.7 — control-driven releases**
-
-For each, have the operator hold the relevant key while the command is sent from a second terminal:
+- [ ] **Step 1: Prepare the capture directory and the 10.6 fixture**
 
 ```sh
-.venv/Scripts/python.exe tools/manual/kgn.py send set_enabled '{"enabled":false}'    # 10.3
-.venv/Scripts/python.exe tools/manual/kgn.py send set_enabled '{"enabled":true}'     # 10.4
-.venv/Scripts/python.exe tools/manual/kgn.py send reload_config                      # 10.5
-.venv/Scripts/python.exe tools/manual/kgn.py send set_bindings '{"id":"default"}'    # 10.6
-.venv/Scripts/python.exe tools/manual/kgn.py send release_all                        # 10.7
-```
-
-Every reply must be `"ok": true` — SPEC §5.4 makes a reply mean **applied**, not merely accepted. Motion must stop immediately and everything held must release.
-
-- [ ] **Step 5: Row 10.8 — abrupt client disconnect**
-
-Engage the layer, hold a key, and kill the overlay/IPC client process abruptly. Expected: the core keeps working, nothing is stranded.
-
-- [ ] **Step 6: Row 10.9 — modifier audit after every row**
-
-```sh
+CAP='C:/Projects/KeyGnosys/.superpowers/sdd/2026-09-04-m3-completion/captures/2026-09-13-s10'   # git-ignored
+mkdir -p "$CAP/config/bindings"
 .venv/Scripts/python.exe -c "
-rows=[l.strip().split(',') for l in open('/tmp/s10k.csv') if l.strip()]
-inj=[(float(t),int(vk),d) for t,vk,i,d in rows if i=='1']
-import collections
-bal=collections.Counter()
-for _,vk,d in inj: bal[vk]+= 1 if d=='D' else -1
-stuck={hex(k):v for k,v in bal.items() if v!=0}
-print('synthetic keys never released:', stuck or 'none')"
+import json, sys
+d = json.load(open('data/bindings/default.json', encoding='utf-8'))
+d['id'] = 'm3-s10-unbound'; d['name'] = 'M3 section 10: default without KeyD'
+del d['bindings']['KeyD']
+json.dump(d, open(sys.argv[1], 'w', encoding='utf-8'), indent=2)" "$CAP/config/bindings/m3-s10-unbound.json"
 ```
 
-Expected: `none`. Any non-zero entry is a stranded synthetic key — a P7 failure. Also open the Windows on-screen keyboard and confirm visually that no modifier is latched.
+- [ ] **Step 2: Arm both observers — before any core, and validate them**
 
-- [ ] **Step 7: Record and commit**
+```sh
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/manual/observe_keys.ps1  -Seconds 28800 -Out "$CAP/keys.csv"  > "$CAP/keys.out"  2>&1 &
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/manual/observe_mouse.ps1 -Seconds 28800 -Out "$CAP/mouse.csv" > "$CAP/mouse.out" 2>&1 &
+```
+
+Both `.out` files must report the probe `ok`. Known-positives, with **no core running** so nothing is suppressed: the operator presses one letter and clicks the real left button once. `keys.csv` must show that letter `D`/`U` with `injected=0`; `mouse.csv` a `D`/`U` with `injected=0`. Only then is a zero from either believed.
+
+Note the hook order: an observer installed *before* a core is called *after* it, so while a core runs the key observer sees only what the core passes on — native passthrough and everything injected. That is what the stranded-key question needs, and it is why the physical known-positive is taken with no core running.
+
+- [ ] **Step 3: Launch each core alone in a classic console — agent-launched, no keystroke**
+
+```powershell
+$env:PATH = 'C:\msys64\ucrt64\bin;' + $env:PATH
+Start-Process conhost.exe -ArgumentList @('C:\Projects\KeyGnosys\build\default\core\keygnosys-core.exe', '--config-dir', '<CAP>\config')
+```
+
+**Nothing else may share that console.** A PowerShell wrapper (`& core | Tee-Object`) receives the same `CTRL_C_EVENT` and terminates the core mid-unwind: exit code `-1` in the 2026-09-13 self-test, against `0` for the core alone. Then start `record.py --out "$CAP/core-<n>.jsonl"` and take its known-positive (`set_activation_mode hybrid` must add a `mode` line) **before** telling the operator the row is ready — that command drops an engaged layer.
+
+Rows 10.1 and 10.2 end the core; relaunch (and re-arm the recorder) before the next row.
+
+- [ ] **Step 4: Each row — the operator fires it**
+
+The operator runs, in **their own** terminal (not the core's console):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\Projects\KeyGnosys\tools\manual\delayed.ps1 -Do <action> -Seconds 8 -After 6 -Log <CAP>\10.<n>.log
+```
+
+then takes up the hold during the countdown. Cancel = close that window with the mouse. The agent reads `10.<n>.log`, `10.<n>.log.samples.csv`, the observers and the recorder.
+
+| Row | `-Do` | Hold | Expected, as evidence |
+|---|---|---|---|
+| 10.1 | `ctrl-c-core` | standard | Core exit code **0**. `lbutton` 1 → 0 at the unwind, pointer stops, injected mouse `U`, no positive key count. **Substitution:** keyboard `Ctrl+C` is not executable with the layer engaged (`C` is swallowed); `CTRL_C_EVENT` is delivered by `GenerateConsoleCtrlEvent`, the same event the console raises for the keystroke. |
+| 10.2 | `kill-core` | standard | taskkill exit 0; core exit code 1. Record the OS button state after the operator releases. **Predicted risk:** only natively-forwarded presses are crash-safe (threading design §3). The left button is a *synthetic* press, and no process can release it after `TerminateProcess` — expect it to stay down until a physical click. Record what is observed; do not pre-judge the row. |
+| 10.3 | `set-enabled-false` | standard | `ok:true`; `lbutton` 1 → 0 and pointer motion stops within the reply latency; nothing held after release. |
+| 10.4 | (agent sends `set_enabled true`; no hold) | — | `ok:true`; then the operator uses the layer normally (tap `CapsLock`, move, click, leave): mode events, balanced injected pairs, no leftover state. |
+| 10.5 | `reload-config` | standard | `ok:true`; button up and motion stopped at the fire; nothing re-pressed while the keys are still held; nothing held after release. |
+| 10.6 | `set-bindings-unbound` | standard | `ok:true`; the `D` click (unbound in the new document) is released at the fire, not left held by a binding that no longer exists. Afterwards the agent restores `set_bindings {id: default}`. |
+| 10.7 | `release-all` | standard **plus left `Shift`** | `ok:true`; button up, motion stopped, `Shift` up in the OS at the fire (an injected `Shift U` with no injected `D` is expected). |
+| 10.8 | `drop-client` | standard | The client process is terminated at the fire; `delayed.ps1` then pings the core `ok`. Record whether the hold survives the disconnect; nothing held after release. |
+| 10.9 | — | — | After every row: `GetAsyncKeyState` clear on `0x01 0x02 0x04 0x10 0x11 0x12 0x5B`, no positive injected key count, and once at the end the on-screen keyboard (`osk.exe`) shows no modifier latched. |
+
+**Do not use the console close button as an equivalent of 10.1.** `CTRL_CLOSE_EVENT` enters the same handler as `CTRL_C_EVENT`, but Windows ends the process as soon as that handler returns: exit code `0xC000013A` in 3 of 3 self-test runs, against `0` for `CTRL_C_EVENT`. See finding O-3 in the log. `delayed.ps1 -Do close-core-console` exists to test that path deliberately, not to stand in for 10.1.
+
+- [ ] **Step 5: Clean up after the section**
+
+Stop every recorder, both observers and any core. List command lines to confirm (a `-match 'observe_'` query matches itself), and read `GetAsyncKeyState` clear.
+
+- [ ] **Step 6: Record and commit**
+
+Per row: the `delayed.ps1` log lines (fire, reply or exit code), the `samples.csv` transition times relative to the fire, the observer counts, and the final OS state. Record substitutions as substitutions.
 
 ```bash
 git add docs/manual-test-logs
-git commit -m "Record section 10: shutdown, disable and reload leave nothing held"
+git commit -m "Record section 10: shutdown, disable and reload safety"
 ```
 
 ---
