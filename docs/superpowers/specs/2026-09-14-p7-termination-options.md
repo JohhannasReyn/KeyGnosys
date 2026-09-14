@@ -419,6 +419,123 @@ schedule. E4 affects recovery guidance under either outcome.
 
 ---
 
+## 6. Experiment results — 2026-09-14
+
+Approved: E1, E2, E3, E5, E6. E4 and E7 deferred. Captures are in the
+git-ignored `.superpowers/sdd/2026-09-04-m3-completion/captures/` (`e1`–`e6`).
+No SPEC, P7 wording or production behaviour was changed. The E1 build lives only
+on branch `experiment/e1-close-wait` (`a377617`, `main.cpp` only), in a separate
+worktree.
+
+### E1 — bounded wait in the close handler: **O-3 repaired in-process**
+
+The E1 build's handler sets the existing stop request, then on
+`CTRL_CLOSE_EVENT` waits — bounded to `min(SPI_GETHUNGAPPTIMEOUT − 1 s, 4 s)` —
+for an event `main` signals after `Core::run()` returns, i.e. after `Core::stop`
+has released everything. The handler releases nothing itself. Its `ctest
+--preset default` run passed 16/16.
+
+The held test re-ran the 10.1b scenario (`D`+`F`+`H`, observers validated,
+`delayed.ps1 -Do close-core-console`), timed from the helper's FIRE on one QPC
+clock:
+
+| Step | Time |
+|---|---|
+| `WM_CLOSE` posted (the helper's child process startup) | +332.5 ms |
+| handler receives `CTRL_CLOSE_EVENT`, starts waiting | +340.0 ms |
+| `Core::run()` returns — `Core::stop` complete | +345.1 ms |
+| handler wakes (**waited 4.4 ms**) and returns | +345.3 ms |
+| first Windows sample with the button **up** | +356.5 ms |
+| mouse observer's injected up | ≈ +360.6 ms |
+
+The `shutdown` event appeared, the core exited with **0**, and no recovery click
+was needed — the operator reported the drift stopping and no button held. On
+the production build the same scenario gave `0xC000013A`, no `shutdown` event,
+and a button held for ≈ 10.8 s. An idle run (nothing held) waited 13.2 ms.
+
+The exit code changes from `0xC000013A` to 0 because `main` returns — and the
+process exits normally — before the handler returns control to Windows.
+
+### E2 — Windows Terminal tab close (nothing held)
+
+Core launched directly as a tab's process (`wt -w new new-tab`, no shell); the
+operator closed only that tab.
+
+| Build | Handler | `shutdown` event | Exit code |
+|---|---|---|---|
+| production | returns immediately | no | `0xC000013A` |
+| E1 | received type 2 (`CTRL_CLOSE_EVENT`), wait SIGNALED after 11.2 ms | yes | 0 |
+
+A WT tab close is the same announced close, and E1 covers it. The held-key
+variant was not run in WT (the helper's close action requires a classic console
+window); the release itself was shown in conhost.
+
+### E3 — Task Manager **End task** (nothing held, production build)
+
+| Launch mode | Exit code | `shutdown` event | Category |
+|---|---|---|---|
+| console-attached (alone in conhost) | `0xC000013A` | no | announced close — O-3; E1 applies |
+| detached (`DETACHED_PROCESS`: no console, no window, parent exited) | **1** | no | `TerminateProcess` — the 10.2 class |
+
+The documented emergency exit is therefore repairable for a console core and a
+hard kill for a background core.
+
+### E5 — stray and duplicate left-ups (script-owned window only)
+
+| Injection | Received by the window | Effect |
+|---|---|---|
+| stray up over a button | `MouseUp` | no `Click` |
+| stray up over a text box with a selection | `MouseUp` | selection unchanged |
+| stray up over a blank panel | `MouseUp` | no `Click` |
+| down, up, **duplicate** up over a button | two `MouseUp`s | exactly **one** `Click` |
+| duplicate up after a click in the text box | `MouseUp` | selection unchanged by the duplicate |
+| normal click afterwards | — | one `Click`; state not corrupted |
+
+Windows' button state stayed up throughout, and the mouse observer saw every
+injection. **Limitation:** the application *does* receive the stray
+`WM_LBUTTONUP`. Standard controls ignore it because they act on capture and
+click, but custom mouse-up logic — drawing tools, games, drag-end handlers,
+controls that act on release — could react. The result supports prototyping the
+"possible obligation → send Up" policy, with the refinement of skipping the Up
+when `GetAsyncKeyState` already reads the button up.
+
+### E6 — guardian spike: **forced termination is recoverable from outside the process**
+
+Throwaway PowerShell/C# under `captures/e6/`; a fake target stands in for the
+core. The write-ahead map is named by the target's pid plus start FILETIME; the
+guardian waits on the target's handle, is launched by the controller rather than
+by the target, and has no hooks, IPC server or configuration.
+
+| Case | Result |
+|---|---|
+| T0 target exits cleanly (released, slot `UP`) | guardian: "nothing to release"; no extra injected event |
+| T1 `taskkill /F` while holding | released **+5.8 ms** after death detected; Windows button up +7.7 ms after the target's exit was seen |
+| T2 `taskkill /T /F` | guardian **survived** (not in the target's tree); released +6.1 ms; up +13.6 ms |
+| T3a death after `SendInput(down)`, before `DOWN` was recorded | slot still `DOWN_INTENDED` → released +6.0 ms; up +30.2 ms |
+| T3b death after the intent, before injecting | Windows read the button up → **skipped**, no Up sent |
+| T4 guardian killed | target reported "GUARDIAN LOST" 15.2 ms later |
+| T5a guardian pointed at a dead pid | refused (exit 3) |
+| T5b stale state | a dead instance's map disappears once its holders exit; a restarted target gets a new identity; a guardian pointed at a live process without a map refuses (exit 4); the new guardian attaches only to the new instance |
+
+Not run: Task Manager End task against the target. E3b already places End task
+on a windowless process in the `TerminateProcess` category that T1 exercises.
+
+### What the results settle
+
+- **O-3 is fixable in-process** with the bounded handler wait, for console
+  close, Windows Terminal tab close and Task Manager End task on a console core.
+  Logoff/shutdown still need the hidden-window path, which was not built.
+- **Forced termination cannot be fixed in-process, but an external guardian
+  demonstrably recovers it**, within ≈ 6 ms of death detection, including the
+  race between injection and recording, without killing itself alongside the
+  target, and without releasing on a clean exit or attaching to stale state.
+- **Still open:** a guardian adds a process, a lifecycle and a launcher-contract
+  change; E5's harmlessness result covers standard controls only; the spike
+  guards one button and uses PowerShell, so production latency and
+  multi-obligation behaviour are unmeasured.
+
+---
+
 ## Sources
 
 - [HandlerRoutine callback — Windows Console](https://learn.microsoft.com/en-us/windows/console/handlerroutine) — close/logoff/shutdown semantics, new-thread execution, timeouts table
