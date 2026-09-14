@@ -76,6 +76,7 @@ $s.IconLocation='shell32.dll,131'; $s.Save()
 | Did the core *synthesize* output? | `observe_keys.ps1` — an independent hook; the core cannot see its own injected events |
 | Is a mouse button still held down? | `observe_mouse.ps1` — same reason, for buttons |
 | Was a drag lock released at the right *moment*? | `record.py` + `observe_mouse.ps1` + `analyse_drag.py` — balance alone cannot tell |
+| A command must land while both hands hold keys (section 10) | `delayed.ps1` — operator-launched countdown, a fixed action set, and OS button/modifier/pointer samples on the fire's own clock |
 | Did a chord resolve as a layer action or leak a letter? | `observe_keys.ps1` + `analyse_chords.py` |
 | What does the core think its state is? | `kgn.py send get_state` |
 | Is the hook alive at all? | `kgn_hook_smoke` (built by CMake, not here) |
@@ -100,6 +101,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/manual/observe_mouse.p
 # drag-lock release timing (rows 5.4, 5.5); exit 0 PASS, 1 FAIL, 2 INCONCLUSIVE
 .venv/Scripts/python.exe tools/manual/analyse_drag.py C:/kgn/drag.jsonl C:/kgn/drag.csv
 ```
+
+```powershell
+# operator-launched: countdown, then one fixed action; exit 0 fired+ok, 1 fired+failed, 2 refused
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\manual\delayed.ps1 -Do release-all -Seconds 8 -After 6 -Log C:\kgn\10.7.log
+```
+
+Its actions are a fixed list (see the header of `delayed.ps1`) — no arbitrary
+command. Cancel before the fire by closing its window. For `ctrl-c-core` and
+`close-core-console` the core must run **alone** in a classic console
+(`Start-Process conhost.exe -ArgumentList <core.exe>`).
 
 **Use absolute Windows paths for captures.** The observers run under PowerShell,
 where `/tmp` means `C:\tmp`; Git Bash reads `/tmp` as MSYS2's own directory. A

@@ -239,6 +239,20 @@ Every row here is a P7 test. A failure leaves a key or a button held.
 | 10.8 | Engage the layer, hold a key, and disconnect the overlay client abruptly. | The core keeps working. Nothing is stranded. |
 | 10.9 | After every row above, check the modifier state (open an on-screen keyboard). | No modifier is stuck down. |
 
+> **How to run these rows.** Both hands are busy holding keys, so every command
+> in this section is fired by
+> [`tools/manual/delayed.ps1`](../tools/manual/delayed.ps1), which the operator
+> launches before taking up the hold. Two consequences for 10.1:
+>
+> - **Keyboard `Ctrl+C` cannot be executed as written** — while the layer is
+>   engaged `C` is swallowed. Deliver the same console event instead
+>   (`-Do ctrl-c-core`), with the core as the **only** process on its console: a
+>   shell wrapper receives the event too and can terminate the core mid-unwind.
+>   Log it as a substitution.
+> - **Closing the console window is not equivalent.** `CTRL_CLOSE_EVENT` reaches
+>   the same handler, but Windows ends the process as soon as the handler
+>   returns, so the unwind is not given time to run (M3 log, finding O-3).
+
 ## 11. IPC and clients
 
 | # | Procedure | Expected |
