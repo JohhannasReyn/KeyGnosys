@@ -145,7 +145,14 @@ if ($After -lt 0 -or $After -gt 60) { Refuse "-After must be 0..60" }
 $dir = Split-Path -Parent $Log
 if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
 $samples = "$Log.samples.csv"
-foreach ($p in @($Log, $samples, "$Log.child.txt")) { if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p } }
+# Never delete a previous run's evidence. Re-running the same command line (an
+# up-arrow and Enter) once wiped a fired run's log and samples before refusing.
+foreach ($p in @($Log, $samples, "$Log.child.txt", "$Log.client.txt")) {
+    if (Test-Path -LiteralPath $p) {
+        Write-Host "REFUSED: $p already exists -- use a new -Log name; earlier evidence is kept" -ForegroundColor Red
+        exit 2
+    }
+}
 Stamp $Log ("launch: -Do {0} -Seconds {1} -After {2} pid {3}" -f $Do, $Seconds, $After, $PID) | Out-Null
 
 function Invoke-Kgn([string]$name, [string]$data, [int]$timeoutMs = 5000) {
@@ -182,10 +189,18 @@ function Get-CorePid {
     return $procs[0].Id
 }
 
-function Start-SignalChild([string]$mode, [int]$corePid) {
+function Start-SignalChild([string]$mode, [int]$corePid, [scriptblock]$whileWaiting = $null) {
     $argsList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
                   '-Signal', $mode, '-CorePid', $corePid, '-Log', $Log)
-    $p = Start-Process powershell.exe -ArgumentList $argsList -WindowStyle Hidden -PassThru -Wait
+    $p = Start-Process powershell.exe -ArgumentList $argsList -WindowStyle Hidden -PassThru
+    [void]$p.Handle   # without a handle taken early, ExitCode reads empty after exit
+    # At the fire, keep sampling while the child starts and signals: a blocking
+    # wait here left a ~1 s hole in samples.csv exactly where the release lands.
+    while (-not $p.HasExited) {
+        if ($null -ne $whileWaiting) { & $whileWaiting }
+        [System.Threading.Thread]::Sleep(10)
+    }
+    $p.WaitForExit()
     return $p.ExitCode
 }
 
@@ -290,13 +305,16 @@ try {
     } elseif ($Do -eq 'noop') {
         $exitCode = 0
     } elseif ($Do -eq 'kill-core') {
-        $out = & taskkill.exe /F /IM keygnosys-core.exe 2>&1
-        $code = $LASTEXITCODE
-        Stamp $Log ("taskkill exit {0}: {1}" -f $code, ($out -join ' ')) | Out-Null
+        $tk = Start-Process taskkill.exe -ArgumentList @('/F', '/IM', 'keygnosys-core.exe') -WindowStyle Hidden -PassThru
+        [void]$tk.Handle
+        while (-not $tk.HasExited) { Sample; [System.Threading.Thread]::Sleep(10) }
+        $tk.WaitForExit()
+        $code = $tk.ExitCode
+        Stamp $Log ("taskkill exit {0}" -f $code) | Out-Null
         $exitCode = if ($code -eq 0) { 0 } else { 1 }
     } elseif ($Do -eq 'ctrl-c-core' -or $Do -eq 'close-core-console') {
         $mode = if ($Do -eq 'ctrl-c-core') { 'ctrl-c' } else { 'close' }
-        $code = Start-SignalChild $mode $corePid
+        $code = Start-SignalChild $mode $corePid { Sample }
         Stamp $Log ("signal child exit {0}" -f $code) | Out-Null
         $exitCode = if ($code -eq 0) { 0 } else { 1 }
     } elseif ($Do -eq 'drop-client') {
