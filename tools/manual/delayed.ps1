@@ -25,6 +25,12 @@
 #   ctrl-c-core           CTRL_C_EVENT to the core's console   (row 10.1)
 #   close-core-console    WM_CLOSE to the core's classic console window, which
 #                         delivers CTRL_CLOSE_EVENT            (row 10.1 alternate)
+#   close-window-titled   WM_CLOSE to the ONE top-level window whose title is
+#                         exactly -Title (e.g. a dedicated Windows Terminal window
+#                         hosting only the core). Refused unless exactly one window
+#                         matches; no substring matching; the matched window is
+#                         logged before the countdown and re-checked at the fire.
+#                         WM_CLOSE is the only message it can send.
 #
 # Exit: 0 fired and the action succeeded; 1 fired and the action failed;
 #       2 refused before the countdown (bad arguments or unmet precondition).
@@ -40,6 +46,8 @@ param(
     [int]$Seconds = 8,
     [int]$After = 3,
     [string]$Log = "",
+    # For close-window-titled only: the exact, whole window title to match.
+    [string]$Title = "",
     # Internal: the console-signal child. Not for direct use.
     [string]$Signal = "",
     [int]$CorePid = 0
@@ -67,6 +75,23 @@ public static class KgnDelayed {
   }
   public static int Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0 ? 1 : 0; }
   public static string ClassOf(IntPtr h) { var s = new StringBuilder(256); GetClassNameW(h, s, 256); return s.ToString(); }
+
+  // Exact-title lookup over ALL top-level windows, visible or not.
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern int GetWindowTextLengthW(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  public static string TitleOf(IntPtr h) {
+    int n = GetWindowTextLengthW(h);
+    var s = new StringBuilder(n + 2); GetWindowTextW(h, s, n + 1); return s.ToString();
+  }
+  public static IntPtr[] WindowsTitled(string title) {
+    var found = new System.Collections.Generic.List<IntPtr>();
+    EnumWindows((h, l) => { if (string.Equals(TitleOf(h), title, StringComparison.Ordinal)) found.Add(h); return true; }, IntPtr.Zero);
+    return found.ToArray();
+  }
 }
 "@
 
@@ -127,7 +152,7 @@ $ipc = @{
     'set-bindings-unbound' = @('set_bindings',  '{"id":"m3-s10-unbound"}')
     'set-bindings-default' = @('set_bindings',  '{"id":"default"}')
 }
-$other = @('noop', 'drop-client', 'kill-core', 'ctrl-c-core', 'close-core-console')
+$other = @('noop', 'drop-client', 'kill-core', 'ctrl-c-core', 'close-core-console', 'close-window-titled')
 
 function Refuse([string]$why) {
     Write-Host "REFUSED: $why" -ForegroundColor Red
@@ -141,6 +166,8 @@ if (-not ($ipc.ContainsKey($Do) -or $other -contains $Do)) {
 }
 if ($Seconds -lt 3 -or $Seconds -gt 120) { Refuse "-Seconds must be 3..120" }
 if ($After -lt 0 -or $After -gt 60) { Refuse "-After must be 0..60" }
+if ($Do -eq 'close-window-titled' -and $Title -eq '') { Refuse "close-window-titled needs -Title with the exact window title" }
+if ($Do -ne 'close-window-titled' -and $Title -ne '') { Refuse "-Title applies only to close-window-titled" }
 
 $dir = Split-Path -Parent $Log
 if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
@@ -222,6 +249,21 @@ if ($ipc.ContainsKey($Do) -or $Do -eq 'drop-client') {
     $probe = Invoke-Kgn 'ping' '{}'
     if (-not $probe.ok) { Refuse ("core did not answer ping: " + $probe.line) }
     Stamp $Log ("precondition: ping ok in {0:F1} ms" -f ($probe.got - $probe.sent)) | Out-Null
+}
+$targetWindow = [IntPtr]::Zero
+if ($Do -eq 'close-window-titled') {
+    $titled = @([KgnDelayed]::WindowsTitled($Title))
+    if ($titled.Count -ne 1) {
+        $list = ($titled | ForEach-Object { "0x{0:X}" -f $_.ToInt64() }) -join ', '
+        Refuse ("exactly one top-level window must be titled exactly '{0}'; found {1} {2}" -f $Title, $titled.Count, $list)
+    }
+    $targetWindow = $titled[0]
+    $windowPid = [uint32]0
+    [void][KgnDelayed]::GetWindowThreadProcessId($targetWindow, [ref]$windowPid)
+    $windowProc = Get-Process -Id $windowPid -ErrorAction SilentlyContinue
+    Stamp $Log ("precondition: window 0x{0:X} class '{1}' owner pid {2} ({3}) title '{4}'" -f $targetWindow.ToInt64(),
+        [KgnDelayed]::ClassOf($targetWindow), $windowPid, $(if ($windowProc) { $windowProc.ProcessName } else { '?' }),
+        [KgnDelayed]::TitleOf($targetWindow)) | Out-Null
 }
 if ($Do -eq 'ctrl-c-core' -or $Do -eq 'close-core-console') {
     $mode = if ($Do -eq 'ctrl-c-core') { 'check-ctrl-c' } else { 'check-close' }
@@ -321,6 +363,18 @@ try {
         Stop-Process -Id $client.Id -Force
         Stamp $Log ("client pid {0} force-terminated" -f $client.Id) | Out-Null
         $exitCode = 0
+    } elseif ($Do -eq 'close-window-titled') {
+        # Re-check the identity matched before the countdown: a window closed or
+        # retitled in the meantime is not closed by mistake.
+        if (-not [KgnDelayed]::IsWindow($targetWindow) -or
+            -not [string]::Equals([KgnDelayed]::TitleOf($targetWindow), $Title, [StringComparison]::Ordinal)) {
+            Stamp $Log ("NOT SENT: window 0x{0:X} no longer exists or is no longer titled '{1}'" -f $targetWindow.ToInt64(), $Title) | Out-Null
+            $exitCode = 1
+        } else {
+            $ok = [KgnDelayed]::PostMessageW($targetWindow, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+            Stamp $Log ("PostMessage(WM_CLOSE) to window 0x{0:X} returned {1}" -f $targetWindow.ToInt64(), $ok) | Out-Null
+            $exitCode = if ($ok) { 0 } else { 1 }
+        }
     }
 
     while ([KgnDelayed]::Ms() -lt $endAt) { Sample; [System.Threading.Thread]::Sleep(10) }
