@@ -8,7 +8,9 @@
 #
 # CANCEL before it fires: close this window with the mouse. Ctrl+C also works,
 # but only while the cursor layer is not engaged -- an engaged layer swallows
-# the C. Nothing persists: no process started here outlives the script.
+# the C. Nothing persists: no process started here outlives the script -- except
+# with start-core, which exists to leave a core running, and which logs the pid
+# of the core and of the two evidence processes it starts so they can be stopped.
 #
 # Actions -- a fixed set, deliberately no arbitrary command:
 #   noop                  fire nothing; exercises countdown, log and sampling
@@ -31,6 +33,15 @@
 #                         matches; no substring matching; the matched window is
 #                         logged before the countdown and re-checked at the fire.
 #                         WM_CLOSE is the only message it can send.
+#   start-core            (O-1 measurements) start THE repository's
+#                         build\default core alone in a classic console. Refused
+#                         if any keygnosys-core is already running. After the fire
+#                         it waits for the core to answer ping, then starts an
+#                         independent key observer (<Log>.keys-post.csv) and a core
+#                         event recorder (<Log>.core.jsonl) -- both installed AFTER
+#                         the core, so the observer sees physical events before
+#                         the core's hook can suppress them -- and only then prints
+#                         the release prompt.
 #
 # Exit: 0 fired and the action succeeded; 1 fired and the action failed;
 #       2 refused before the countdown (bad arguments or unmet precondition).
@@ -40,7 +51,8 @@
 # until -After seconds past the fire, <Log>.samples.csv records the pointer
 # position and the async state of the mouse buttons and modifiers roughly every
 # 10 ms, so "motion stopped" and "the button came up" are measured on the same
-# clock as the fire itself.
+# clock as the fire itself. The lshift/rshift columns are Windows' async state for
+# VK_LSHIFT/VK_RSHIFT, read by this process independently of any KeyGnosys hook.
 param(
     [string]$Do = "",
     [int]$Seconds = 8,
@@ -152,7 +164,9 @@ $ipc = @{
     'set-bindings-unbound' = @('set_bindings',  '{"id":"m3-s10-unbound"}')
     'set-bindings-default' = @('set_bindings',  '{"id":"default"}')
 }
-$other = @('noop', 'drop-client', 'kill-core', 'ctrl-c-core', 'close-core-console', 'close-window-titled')
+$other = @('noop', 'drop-client', 'kill-core', 'ctrl-c-core', 'close-core-console', 'close-window-titled', 'start-core')
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$coreExe = Join-Path $repoRoot 'build\default\core\keygnosys-core.exe'
 
 function Refuse([string]$why) {
     Write-Host "REFUSED: $why" -ForegroundColor Red
@@ -174,7 +188,8 @@ if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force $d
 $samples = "$Log.samples.csv"
 # Never delete a previous run's evidence. Re-running the same command line (an
 # up-arrow and Enter) once wiped a fired run's log and samples before refusing.
-foreach ($p in @($Log, $samples, "$Log.child.txt", "$Log.client.txt")) {
+foreach ($p in @($Log, $samples, "$Log.child.txt", "$Log.client.txt",
+                 "$Log.keys-post.csv", "$Log.keys-post.out", "$Log.core.jsonl", "$Log.core.out")) {
     if (Test-Path -LiteralPath $p) {
         Write-Host "REFUSED: $p already exists -- use a new -Log name; earlier evidence is kept" -ForegroundColor Red
         exit 2
@@ -182,11 +197,11 @@ foreach ($p in @($Log, $samples, "$Log.child.txt", "$Log.client.txt")) {
 }
 Stamp $Log ("launch: -Do {0} -Seconds {1} -After {2} pid {3}" -f $Do, $Seconds, $After, $PID) | Out-Null
 
-function Invoke-Kgn([string]$name, [string]$data, [int]$timeoutMs = 5000) {
+function Invoke-Kgn([string]$name, [string]$data, [int]$timeoutMs = 5000, [int]$connectMs = 2000) {
     # One connection per command: nothing is left connected and unread.
     $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'keygnosys', [System.IO.Pipes.PipeDirection]::InOut)
     try {
-        $pipe.Connect(2000)
+        $pipe.Connect($connectMs)
         $enc = New-Object System.Text.UTF8Encoding($false)
         $reader = New-Object System.IO.StreamReader($pipe, $enc)
         $writer = New-Object System.IO.StreamWriter($pipe, $enc)
@@ -236,7 +251,12 @@ function Start-SignalChild([string]$mode, [int]$corePid, [scriptblock]$whileWait
 
 $corePid = 0
 $client = $null
-if ($Do -ne 'noop') {
+if ($Do -eq 'start-core') {
+    if (@(Get-Process keygnosys-core -ErrorAction SilentlyContinue).Count -ne 0) { Refuse "a keygnosys-core is already running; start-core needs none" }
+    if (-not (Test-Path -LiteralPath $coreExe)) { Refuse "core executable not found: $coreExe" }
+    Stamp $Log "precondition: no core running; will start $coreExe" | Out-Null
+}
+if ($Do -ne 'noop' -and $Do -ne 'start-core') {
     $corePid = Get-CorePid
     if ($corePid -eq 0) { Refuse "exactly one keygnosys-core must be running" }
     # Open the handle now: an exit code is only readable through a handle taken
@@ -307,7 +327,7 @@ while ($null -ne $reader.ReadLine()) { }
 
 [void][KgnDelayed]::timeBeginPeriod(1)
 $sw = New-Object System.IO.StreamWriter($samples, $false, (New-Object System.Text.UTF8Encoding($false)))
-$sw.WriteLine("qpc_ms,rel_fire_ms,x,y,lbutton,rbutton,mbutton,shift,ctrl,alt,lwin")
+$sw.WriteLine("qpc_ms,rel_fire_ms,x,y,lbutton,rbutton,mbutton,shift,ctrl,alt,lwin,lshift,rshift")
 $fireAt = [KgnDelayed]::Ms() + $Seconds * 1000.0
 $endAt = $fireAt + $After * 1000.0
 $fired = $false
@@ -319,9 +339,28 @@ function Sample {
     $pt = New-Object KgnDelayed+POINT
     [void][KgnDelayed]::GetCursorPos([ref]$pt)
     $now = [KgnDelayed]::Ms()
-    $sw.WriteLine(("{0:F3},{1:F1},{2},{3},{4},{5},{6},{7},{8},{9},{10}" -f $now, ($now - $fireAt),
+    $sw.WriteLine(("{0:F3},{1:F1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12}" -f $now, ($now - $fireAt),
         $pt.X, $pt.Y, [KgnDelayed]::Down(0x01), [KgnDelayed]::Down(0x02), [KgnDelayed]::Down(0x04),
-        [KgnDelayed]::Down(0x10), [KgnDelayed]::Down(0x11), [KgnDelayed]::Down(0x12), [KgnDelayed]::Down(0x5B)))
+        [KgnDelayed]::Down(0x10), [KgnDelayed]::Down(0x11), [KgnDelayed]::Down(0x12), [KgnDelayed]::Down(0x5B),
+        [KgnDelayed]::Down(0xA0), [KgnDelayed]::Down(0xA1)))
+}
+
+# Starts one fixed evidence command hidden, its output redirected to a file.
+# Encoded, because Start-Process would otherwise mangle the quoting.
+function Start-Evidence([string]$script) {
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+    $p = Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded) -WindowStyle Hidden -PassThru
+    return $p
+}
+
+function Wait-Sampling([scriptblock]$done, [int]$timeoutMs) {
+    $deadline = [KgnDelayed]::Ms() + $timeoutMs
+    while ([KgnDelayed]::Ms() -lt $deadline) {
+        if (& $done) { return $true }
+        Sample
+        [System.Threading.Thread]::Sleep(10)
+    }
+    return (& $done)
 }
 
 Stamp $Log ("armed: fires in {0} s" -f $Seconds) | Out-Null
@@ -374,6 +413,55 @@ try {
             $ok = [KgnDelayed]::PostMessageW($targetWindow, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
             Stamp $Log ("PostMessage(WM_CLOSE) to window 0x{0:X} returned {1}" -f $targetWindow.ToInt64(), $ok) | Out-Null
             $exitCode = if ($ok) { 0 } else { 1 }
+        }
+    } elseif ($Do -eq 'start-core') {
+        $env:PATH = 'C:\msys64\ucrt64\bin;' + $env:PATH
+        $host1 = Start-Process conhost.exe -ArgumentList @($coreExe) -PassThru
+        Stamp $Log ("conhost pid {0} started for the core" -f $host1.Id) | Out-Null
+        $script:startedCore = $null
+        $appeared = Wait-Sampling { $script:startedCore = Get-Process keygnosys-core -ErrorAction SilentlyContinue | Select-Object -First 1; $null -ne $script:startedCore } 10000
+        if (-not $appeared) {
+            Stamp $Log "START FAILED: no keygnosys-core process within 10 s" | Out-Null
+        } else {
+            $corePid = $script:startedCore.Id
+            $coreProc = $script:startedCore; [void]$coreProc.Handle
+            Stamp $Log ("core process pid {0} exists" -f $corePid) | Out-Null
+            $script:readyReply = $null
+            # Short connect timeout, so sampling keeps running while the core
+            # comes up; a pipe that does not exist yet throws, which is "not ready".
+            $ready = Wait-Sampling {
+                $r = $null
+                try { $r = Invoke-Kgn 'ping' '{}' 500 50 } catch { $r = @{ ok = $false } }
+                if ($r.ok) { $script:readyReply = $r }
+                $r.ok
+            } 10000
+            if (-not $ready) {
+                Stamp $Log "START FAILED: core did not answer ping within 10 s" | Out-Null
+            } else {
+                Stamp $Log ("core READY (answered ping; hook installed during start)") | Out-Null
+                $obsScript = "& '{0}' -Seconds 3600 -Out '{1}' *> '{2}'" -f (Join-Path $PSScriptRoot 'observe_keys.ps1'), "$Log.keys-post.csv", "$Log.keys-post.out"
+                $recScript = "& '{0}' '{1}' --out '{2}' --timeout 3600 *> '{3}'" -f (Join-Path $repoRoot '.venv\Scripts\python.exe'), (Join-Path $PSScriptRoot 'record.py'), "$Log.core.jsonl", "$Log.core.out"
+                $obs = Start-Evidence $obsScript
+                $rec = Start-Evidence $recScript
+                Stamp $Log ("evidence: post-core key observer wrapper pid {0}; recorder wrapper pid {1}" -f $obs.Id, $rec.Id) | Out-Null
+                $armed = Wait-Sampling {
+                    (Test-Path -LiteralPath "$Log.keys-post.out") -and ((Get-Content -LiteralPath "$Log.keys-post.out" -ErrorAction SilentlyContinue) -match 'probe: ok') -and
+                    (Test-Path -LiteralPath "$Log.core.out") -and ((Get-Content -LiteralPath "$Log.core.out" -ErrorAction SilentlyContinue) -match 'recording to')
+                } 20000
+                if ($armed) {
+                    Stamp $Log "evidence ARMED: post-core observer probe ok; recorder connected" | Out-Null
+                    Stamp $Log "RELEASE PROMPT shown" | Out-Null
+                    Write-Host ""
+                    Write-Host "  >>> READY: core running and observed. RELEASE THE KEY UNDER TEST NOW. <<<" -ForegroundColor Green
+                    Write-Host "  (then touch nothing until this window prints 'done')" -ForegroundColor Green
+                    Write-Host ""
+                    $endAt = [Math]::Max($endAt, [KgnDelayed]::Ms() + $After * 1000.0)
+                    $exitCode = 0
+                } else {
+                    Stamp $Log "EVIDENCE NOT ARMED within 20 s -- run not valid" | Out-Null
+                    Write-Host "  EVIDENCE NOT ARMED -- this run is not valid; tell the agent" -ForegroundColor Red
+                }
+            }
         }
     }
 
