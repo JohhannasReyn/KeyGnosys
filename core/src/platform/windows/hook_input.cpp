@@ -241,7 +241,7 @@ LRESULT HookInput::onHook(int code, WPARAM wParam, LPARAM lParam) {
 
     decisions_.clear();
     engine_.onKey(key, state, Clock::now(), decisions_);
-    const bool native = translateDecisions(decisions_, key, state, *work_);
+    const bool native = translateDecisions(decisions_, key, state, *work_, &channel_);
     republish();
     publishPhysical(key, state, !native);
 
@@ -377,6 +377,11 @@ void HookInput::run() {
     // these records.
     physical_.forgetAll();
     provenance_.forgetAll();
+    // Nothing can still be delivered for these presses: the hook is gone, so no
+    // native path remains, and the ring is drained by a core loop that stops
+    // with it. A commitment kept past that point would describe a press nobody
+    // is carrying.
+    channel_.forgetAll();
 }
 
 void HookInput::requestWake() {
@@ -477,7 +482,7 @@ void HookInput::drainControl() {
                 decisions_.clear();
                 engine_.setBindings(*static_cast<const BindingMap*>(control.payload),
                                     decisions_);
-                translateDecisions(decisions_, KeyCode{}, KeyState::Down, *work_);
+                translateDecisions(decisions_, KeyCode{}, KeyState::Down, *work_, &channel_);
                 break;
             case Control::Kind::ReleaseAll:
                 // Engine obligations only. The physical bitmap is deliberately
@@ -487,12 +492,12 @@ void HookInput::drainControl() {
                 // a held modifier as released.
                 decisions_.clear();
                 engine_.releaseAll(decisions_);
-                translateDecisions(decisions_, KeyCode{}, KeyState::Down, *work_);
+                translateDecisions(decisions_, KeyCode{}, KeyState::Down, *work_, &channel_);
                 break;
             case Control::Kind::SetEnabled:
                 decisions_.clear();
                 engine_.releaseAll(decisions_);
-                translateDecisions(decisions_, KeyCode{}, KeyState::Down, *work_);
+                translateDecisions(decisions_, KeyCode{}, KeyState::Down, *work_, &channel_);
                 enabled_ = control.flag;
                 break;
             case Control::Kind::Stop:
@@ -515,7 +520,7 @@ void HookInput::expireGrace() {
     // No physical event is in hand, so nothing here can be native and no
     // PhysicalRecord is produced -- a grace expiry is not a key the user just
     // pressed, and reporting it as one would light a key twice.
-    translateDecisions(decisions_, KeyCode{}, KeyState::Down, *work_);
+    translateDecisions(decisions_, KeyCode{}, KeyState::Down, *work_, &channel_);
     republish();
 }
 

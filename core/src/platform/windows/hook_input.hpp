@@ -34,6 +34,7 @@
 #include "kgn/hookchannel.hpp"
 #include "kgn/hookpump.hpp"
 #include "kgn/layer_engine.hpp"
+#include "kgn/delivery_channel.hpp"
 #include "kgn/delivery_provenance.hpp"
 #include "kgn/physical.hpp"
 #include "grace_timer.hpp"
@@ -73,6 +74,10 @@ public:
     [[nodiscard]] bool physicallyDownForTests(KeyCode code) const {
         return physical_.down(code);
     }
+    [[nodiscard]] DeliveryChannel::Channel channelForTests(KeyCode code) const {
+        return channel_.stateFor(code);
+    }
+
     [[nodiscard]] DeliveryProvenance::State provenanceForTests(KeyCode code) const {
         return provenance_.stateFor(code);
     }
@@ -139,6 +144,9 @@ private:
     PhysicalKeyState physical_;
     // Which of this press's events Windows has already received (finding O-1).
     DeliveryProvenance provenance_;
+    // O-5: which channel is carrying each press. Hook thread only, like the
+    // provenance above, and for the same reason.
+    DeliveryChannel channel_;
     bool enabled_ = true;
 
     // Shared with the core.

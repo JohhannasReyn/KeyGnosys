@@ -55,7 +55,8 @@ std::uint32_t StatePublisher::version() const {
 // Decision translation
 
 bool translateDecisions(const DecisionBuffer& decisions, KeyCode code,
-                        KeyState state, WorkRing& out) {
+                        KeyState state, WorkRing& out,
+                        DeliveryChannel* channel) {
     // Native passthrough: the engine asked for exactly this event and nothing
     // else, so the cheapest way to make it true is to let the OS deliver it
     // itself. Anything more than one decision means something has to be
@@ -73,12 +74,33 @@ bool translateDecisions(const DecisionBuffer& decisions, KeyCode code,
     // always emits its own Suppress first, so the buffer is never of size one
     // on that path. Both facts are load-bearing: taking the fast path would
     // drop the exit signal and strand a drag lock.
-    const bool native = code.valid()
+    const bool shapeIsNative = code.valid()
                         && decisions.size() == 1
                         && decisions[0].kind == Decision::Kind::Forward
                         && decisions[0].code == code
                         && decisions[0].state == state;
-    if (native) return true;
+
+    // O-5. The shape above says the OS could deliver this event itself; it does
+    // not say that doing so preserves the order the engine asked for. A press
+    // already committed to the ring may still be short of SendInput -- the ring
+    // reports it gone at DEQUEUE -- so a synchronous release would race ahead of
+    // its own press and leave the key held. Once committed, a press finishes on
+    // the channel it started on, and ordering follows from the ring being FIFO
+    // with a single consumer rather than from anyone observing its progress.
+    const bool native = shapeIsNative &&
+                        (channel == nullptr || channel->nativeAllowed(code));
+    if (native) {
+        if (channel != nullptr) {
+            // A release ends the press; a Down or a Repeat commits it to the
+            // path the OS is about to carry it down.
+            if (state == KeyState::Up) {
+                channel->release(code);
+            } else {
+                channel->commitNative(code);
+            }
+        }
+        return true;
+    }
 
     for (const Decision& decision : decisions) {
         switch (decision.kind) {
@@ -86,6 +108,16 @@ bool translateDecisions(const DecisionBuffer& decisions, KeyCode code,
                 out.push(WorkItem{WorkItem::Kind::SendKey,
                                   decision.state != KeyState::Up,
                                   decision.code.id()});
+                // Committed per DECISION, not per event in hand: a grace expiry
+                // carries no physical event at all, and one physical event can
+                // resolve several keys.
+                if (channel != nullptr) {
+                    if (decision.state == KeyState::Up) {
+                        channel->release(decision.code);
+                    } else {
+                        channel->commitSynthetic(decision.code);
+                    }
+                }
                 break;
             case Decision::Kind::RunAction:
                 out.push(WorkItem{WorkItem::Kind::RunAction, false,

@@ -31,6 +31,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "kgn/delivery_channel.hpp"
 #include "kgn/keycode.hpp"
 #include "kgn/layer_engine.hpp"
 
@@ -96,6 +97,24 @@ struct PhysicalRecord {
 // obligation at all would otherwise spend reserved capacity while discharging
 // nothing, and a user can produce those without limit. The bound would not
 // exist.
+//
+// O-5 AND AUTOREPEAT. A repeat of a key committed to synthetic delivery now
+// emits one SendKey where the native fast path emitted none, so autorepeat --
+// which a user can hold down indefinitely -- reaches this ring. The proof is
+// unchanged, and deliberately so:
+//
+//   - the gate above already counts a Repeat as obligation-creating, so every
+//     one is admitted only while free >= kWorkAdmissionGate and emits at most
+//     kDecisionCapacity items. That is exactly the step quoted above;
+//   - a repeat does not change U. It adds no held action and no pending press,
+//     so the release-capacity bound it must leave behind is the same one it
+//     found, and free - U >= 0 still holds across it;
+//   - the stream is self-limiting rather than unbounded. If the core loop
+//     stalls, free() falls, and once it is below the gate the repeats are
+//     refused and suppressed (hook_input.cpp). Refusing a repeat is safe in a
+//     way that refusing an Up would not be: the key is already down in Windows
+//     and its release is still coming, so nothing is stranded -- only a repeat
+//     is missed.
 
 // The layer-exit signal. ONE item covers the whole drain, per the argument
 // above: leaving the layer emits a single ReleaseToggles regardless of how
@@ -282,7 +301,15 @@ public:
 // `code` and `state` describe the physical event in hand. The timer and
 // control paths have none: pass an invalid KeyCode and the result is always
 // false.
+//
+// `channel` carries the O-5 rule: a press committed to synthetic delivery keeps
+// its repeats and its release on that channel, because the native path is
+// synchronous and the ring is not, so a natively forwarded release can overtake
+// a synthetic press that has not reached SendInput yet. It is updated here,
+// where the channel is actually chosen. Pass nullptr where no physical event
+// can be forwarded natively anyway -- the result is then unchanged.
 bool translateDecisions(const DecisionBuffer& decisions, KeyCode code,
-                        KeyState state, WorkRing& out);
+                        KeyState state, WorkRing& out,
+                        DeliveryChannel* channel = nullptr);
 
 }  // namespace kgn
