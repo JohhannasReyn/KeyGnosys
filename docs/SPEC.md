@@ -1194,6 +1194,17 @@ There is exactly one code path by which a press reaches the OS, and it records
 the key as it goes. That is what makes the invariant checkable rather than
 merely intended.
 
+> **Note (non-normative).** One code path, but not necessarily one *delivery
+> channel*: an implementation may let the OS deliver a physical event itself, or
+> synthesise it. Where both exist, forwarding a release down the synchronous
+> channel while its press is still queued on the asynchronous one delivers the
+> release **first**, and the requirement above is met while the key is left held
+> anyway. Whatever the mechanism, once the OS-visible press for a physical press
+> is committed to a channel, the rest of that press has to stay on it. M3 finding
+> O-5 is this failure, measured: a replayed `Space` press lost the race with its
+> own natively forwarded release and Windows held the key until a later press of
+> the same key cleared it.
+
 #### 6.3.1 State capacity and the key domain
 
 Per-key state **MUST** cover the entire `KeyCode` id space, and the storage
