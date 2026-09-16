@@ -98,6 +98,16 @@ KGN_TEST(a_key_held_across_disable_and_enable_keeps_its_release) {
     KGN_CHECK(p.stateFor(SHIFT) == State::None);
 }
 
+KGN_TEST(the_press_alone_earns_the_release_no_repeat_required) {
+    // The press made while interception was off is what establishes that
+    // Windows holds the key. If the release only survived because an autorepeat
+    // arrived after re-enabling, correctness would depend on the repeat delay,
+    // the repeat rate, and how long the key happened to be held.
+    DeliveryProvenance p;
+    KGN_CHECK(p.route(SHIFT, KeyState::Down, kDisabled) == Route::Native);
+    KGN_CHECK(p.route(SHIFT, KeyState::Up, kEnabled) == Route::Native);
+}
+
 KGN_TEST(an_engine_press_that_goes_native_while_disabled_keeps_its_release) {
     DeliveryProvenance p;
     KGN_CHECK(p.route(A, KeyState::Down, kEnabled) == Route::Engine);
