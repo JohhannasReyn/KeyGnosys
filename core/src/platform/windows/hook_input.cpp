@@ -203,11 +203,28 @@ LRESULT HookInput::onHook(int code, WPARAM wParam, LPARAM lParam) {
     // should still show a modifier the user is holding.
     republish();
 
+    // Where this press's events have been allowed to go decides whether its
+    // release may be withheld (finding O-1). A release the engine never saw the
+    // press for -- because interception was off, because the hook did not exist
+    // yet, or because an elevated window owned the input -- must reach Windows,
+    // which already has the key down.
+    const Route route = provenance_.route(key, state, enabled_);
+
     if (!enabled_) {
         // The engine is not consulted at all, so it creates no obligations
         // while disabled and restarts clean when re-enabled. The physical
         // bitmap above still tracks the keyboard, which is why re-enabling
-        // does not misread the next autorepeat as a fresh press.
+        // does not misread the next autorepeat as a fresh press. Provenance
+        // above has recorded that Windows received this event, so the eventual
+        // release is not suppressed after re-enabling.
+        return ::CallNextHookEx(nullptr, code, wParam, lParam);
+    }
+
+    if (route == Route::Native) {
+        // No positive provenance that suppressing this release would be right,
+        // so it goes to Windows untouched and the engine is not consulted about
+        // a press it never saw.
+        publishPhysical(key, state, false);
         return ::CallNextHookEx(nullptr, code, wParam, lParam);
     }
 
@@ -353,8 +370,13 @@ void HookInput::run() {
     uninstall();
     // Only here, and only because the hook is now gone: from this point the
     // bitmap describes a keyboard nobody is observing, so keeping it would be
-    // stale rather than physical.
+    // stale rather than physical. Routing provenance goes with it, and strictly
+    // in this order: cleared any earlier and a release could arrive with its
+    // provenance already erased, at a moment when this hook can still swallow
+    // it. P7's shutdown order is obligations first, then interception, then
+    // these records.
     physical_.forgetAll();
+    provenance_.forgetAll();
 }
 
 void HookInput::requestWake() {
