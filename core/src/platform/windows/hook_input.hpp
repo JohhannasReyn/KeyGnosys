@@ -34,6 +34,7 @@
 #include "kgn/hookchannel.hpp"
 #include "kgn/hookpump.hpp"
 #include "kgn/layer_engine.hpp"
+#include "kgn/delivery_provenance.hpp"
 #include "kgn/physical.hpp"
 #include "grace_timer.hpp"
 #include "scancode_keymap.hpp"
@@ -71,6 +72,9 @@ public:
     }
     [[nodiscard]] bool physicallyDownForTests(KeyCode code) const {
         return physical_.down(code);
+    }
+    [[nodiscard]] DeliveryProvenance::State provenanceForTests(KeyCode code) const {
+        return provenance_.stateFor(code);
     }
     void applyControlForTests(const Control& control) {
         control_.push(control);
@@ -133,6 +137,8 @@ private:
     // control operation may clear it: release_all discharges obligations, it
     // does not lift the user's finger off a key.
     PhysicalKeyState physical_;
+    // Which of this press's events Windows has already received (finding O-1).
+    DeliveryProvenance provenance_;
     bool enabled_ = true;
 
     // Shared with the core.
