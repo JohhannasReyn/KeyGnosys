@@ -60,8 +60,14 @@ def cmd_send(name, data, timeout=5.0):
             result["ok"] = bool(m.get("ok"))
             got.set()
 
-    threading.Thread(target=reader, args=(f, sink), daemon=True).start()
+    # Write BEFORE the reader starts. The pipe is a synchronous handle, and
+    # Windows serialises I/O on one: a write issued while the reader thread is
+    # parked in read() waits behind that read, which only returns when the core
+    # sends something. That hung `send get_state` indefinitely on 2026-09-13 --
+    # and before the timeout below was ever armed. Commands are one line, so
+    # the write completes into the pipe buffer at once.
     f.write((json.dumps(msg) + "\n").encode())
+    threading.Thread(target=reader, args=(f, sink), daemon=True).start()
     if not got.wait(timeout):
         print("NO REPLY within %.1fs" % timeout)
         sys.stdout.flush()
