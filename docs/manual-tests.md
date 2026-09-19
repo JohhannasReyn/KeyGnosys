@@ -26,7 +26,10 @@ log.
 > the product. Trigger a signal you know should appear, confirm the observer
 > reports it, and only then trust a zero. `kgn_hook_smoke` is the preferred
 > pre-check for the input path: it answers "is the hook receiving anything at
-> all?" in twelve seconds, against the real backend. The instruments themselves
+> all?" in twelve seconds, against the real backend. **The operator launches
+> it locally, after reading the brief**, never a remote or assistant session
+> relaying the start through chat; a timeout with no key pressed is
+> inconclusive, not a FAIL. The instruments themselves
 > live in [`tools/manual/`](../tools/manual/), with the method rules that
 > produced them.
 
@@ -137,8 +140,18 @@ Run **unelevated** unless a row says otherwise.
 | 5.1 | Click, right-click and middle-click over a target. | The expected menus and selections. |
 | 5.2 | Hold the click key over a text selection and move the pointer. | Text selects — click-and-hold works as a drag. |
 | 5.3 | Double-click over a word. | The word is selected. Two pairs land within the OS double-click interval. |
-| 5.4 | ⚠ Engage drag lock, move a file across a folder, engage again. | The file drags and drops. The button is down between the two presses and up after. |
-| 5.5 | ⚠ Engage drag lock, then leave the layer without disengaging it. | The button is released automatically (SPEC §7.2). Nothing stays held. |
+| 5.4 | ⚠ Engage drag lock, move a file across a folder, engage again. | The file drags and drops. The button goes down on the first press and up **on the second press** — not earlier, not on a later key. |
+| 5.5 | ⚠ Engage drag lock, then leave the layer without disengaging it. | The button is released **as part of the layer exit** (SPEC §7.2): in the core's stream no key press lies between the `mode` cursor→normal transition and `drag_lock {active:false}`, and an independent mouse hook confirms that release as a real injected button-up aligned with it. Nothing stays held. |
+
+> **Rows 5.4 and 5.5 are judged on timing, not balance.** A net down count of
+> zero passed on the real 5.5 failure: the button came up 9.2 s after the layer
+> was left, on an unrelated keypress. Judge them with
+> [`tools/manual/analyse_drag.py`](../tools/manual/analyse_drag.py), which
+> correlates the core's `record.py` stream with `observe_mouse.ps1`, aligns the
+> two clocks from the session's own lock/unlock pairs, and uses their measured
+> spread as the only tolerance. Run one lock/unlock cycle inside the layer
+> before the 5.5 gesture, or the alignment cannot be established. Balance is
+> reported as a secondary check only.
 | 5.6 | With left-click bound to two keys, hold one and tap the other. | The button does not double-press, and does not lift while the first key is still held. |
 | 5.7 | Scroll up and down, then left and right. | Content scrolls the expected way, with its own ramp. |
 | 5.8 | Press the page-scroll key. | About a screenful per press. |
@@ -225,6 +238,20 @@ Every row here is a P7 test. A failure leaves a key or a button held.
 | 10.7 | Hold several keys and send `release_all`. | Everything lifts. The reply is `ok`. |
 | 10.8 | Engage the layer, hold a key, and disconnect the overlay client abruptly. | The core keeps working. Nothing is stranded. |
 | 10.9 | After every row above, check the modifier state (open an on-screen keyboard). | No modifier is stuck down. |
+
+> **How to run these rows.** Both hands are busy holding keys, so every command
+> in this section is fired by
+> [`tools/manual/delayed.ps1`](../tools/manual/delayed.ps1), which the operator
+> launches before taking up the hold. Two consequences for 10.1:
+>
+> - **Keyboard `Ctrl+C` cannot be executed as written** — while the layer is
+>   engaged `C` is swallowed. Deliver the same console event instead
+>   (`-Do ctrl-c-core`), with the core as the **only** process on its console: a
+>   shell wrapper receives the event too and can terminate the core mid-unwind.
+>   Log it as a substitution.
+> - **Closing the console window is not equivalent.** `CTRL_CLOSE_EVENT` reaches
+>   the same handler, but Windows ends the process as soon as the handler
+>   returns, so the unwind is not given time to run (M3 log, finding O-3).
 
 ## 11. IPC and clients
 

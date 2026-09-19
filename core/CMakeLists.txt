@@ -55,6 +55,9 @@ add_library(kgn_engine
     src/hookchannel.cpp
     src/slots.cpp
     src/physical.cpp
+    src/shutdown_coordinator.cpp
+    src/delivery_provenance.cpp
+    src/delivery_channel.cpp
 )
 target_include_directories(kgn_engine PUBLIC include)
 target_link_libraries(kgn_engine PRIVATE kgn_warnings)
@@ -181,6 +184,9 @@ if(KGN_BUILD_TESTS)
     kgn_add_test(test_hookchannel)
     kgn_add_test(test_hookpump)
     kgn_add_test(test_slots)
+    kgn_add_test(test_shutdown_coordinator)
+    kgn_add_test(test_delivery_provenance)
+    kgn_add_test(test_delivery_channel)
     if(WIN32)
         # The scancode table is Windows-only, and so is its test. It reaches
         # into src/platform/windows for the header rather than exporting it:

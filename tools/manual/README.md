@@ -33,6 +33,11 @@ It installs the real hook and reports PASS on the first genuine keystroke, in
 twelve seconds. It exists because a completely dead hook was once discovered
 forty rows into a matrix run.
 
+**The operator launches it, on the machine under test, after reading the brief**
+— never an assistant or a remote session relaying "it's running, press a key"
+(method rule 7). A timeout with no key pressed is **inconclusive**, not a FAIL:
+re-run it, and draw no conclusion about the product.
+
 ---
 
 ## Emergency exits, strongest first
@@ -70,6 +75,8 @@ $s.IconLocation='shell32.dll,131'; $s.Save()
 | Did the core *see* the key? | `record.py` — the core's own event stream |
 | Did the core *synthesize* output? | `observe_keys.ps1` — an independent hook; the core cannot see its own injected events |
 | Is a mouse button still held down? | `observe_mouse.ps1` — same reason, for buttons |
+| Was a drag lock released at the right *moment*? | `record.py` + `observe_mouse.ps1` + `analyse_drag.py` — balance alone cannot tell |
+| A command must land while both hands hold keys (section 10) | `delayed.ps1` — operator-launched countdown, a fixed action set, and OS button/modifier/pointer samples on the fire's own clock |
 | Did a chord resolve as a layer action or leak a letter? | `observe_keys.ps1` + `analyse_chords.py` |
 | What does the core think its state is? | `kgn.py send get_state` |
 | Is the hook alive at all? | `kgn_hook_smoke` (built by CMake, not here) |
@@ -90,7 +97,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/manual/observe_mouse.p
 
 # chord pairing, one-to-one, +/-80 ms window
 .venv/Scripts/python.exe tools/manual/analyse_chords.py /tmp/keys.csv 80
+
+# drag-lock release timing (rows 5.4, 5.5); exit 0 PASS, 1 FAIL, 2 INCONCLUSIVE
+.venv/Scripts/python.exe tools/manual/analyse_drag.py C:/kgn/drag.jsonl C:/kgn/drag.csv
 ```
+
+```powershell
+# operator-launched: countdown, then one fixed action; exit 0 fired+ok, 1 fired+failed, 2 refused
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\manual\delayed.ps1 -Do release-all -Seconds 8 -After 6 -Log C:\kgn\10.7.log
+```
+
+Its actions are a fixed list (see the header of `delayed.ps1`) — no arbitrary
+command. Cancel before the fire by closing its window. For `ctrl-c-core` and
+`close-core-console` the core must run **alone** in a classic console
+(`Start-Process conhost.exe -ArgumentList <core.exe>`).
+
+**Use absolute Windows paths for captures.** The observers run under PowerShell,
+where `/tmp` means `C:\tmp`; Git Bash reads `/tmp` as MSYS2's own directory. A
+writer and reader on different files produce an empty capture that reads exactly
+like a real negative. (The `/tmp` examples above are only safe when every
+command runs in the same shell.)
 
 `observe_keys.ps1` writes `elapsed_ms,vk,injected,D|U`.
 `observe_mouse.ps1` writes `elapsed_ms,D|U,injected`.
@@ -131,3 +157,12 @@ scheduling quantum, suspect the instrument first.
 **6. A row is PASS only when its expected result was actually observed.**
 `NOT RUN`, with a reason, is honest. A pass inferred from an adjacent row, from
 green unit tests, or from plausibility is not.
+
+**7. Whoever applies a timed physical stimulus starts the timer.** A check that
+waits a fixed window for a human action — `kgn_hook_smoke` today — is launched by
+the operator, locally, after the brief. Launching it from an assistant session
+and announcing the start through chat puts relay and UI latency *inside* the
+window: on 2026-09-13 an assistant-launched smoke expired before the operator
+could act and printed `FAIL`. It was not counted. If such a check ever has to be
+started remotely, it must wait for an explicit ready/start signal, not a fixed
+window.

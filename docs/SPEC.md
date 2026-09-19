@@ -1194,6 +1194,17 @@ There is exactly one code path by which a press reaches the OS, and it records
 the key as it goes. That is what makes the invariant checkable rather than
 merely intended.
 
+> **Note (non-normative).** One code path, but not necessarily one *delivery
+> channel*: an implementation may let the OS deliver a physical event itself, or
+> synthesise it. Where both exist, forwarding a release down the synchronous
+> channel while its press is still queued on the asynchronous one delivers the
+> release **first**, and the requirement above is met while the key is left held
+> anyway. Whatever the mechanism, once the OS-visible press for a physical press
+> is committed to a channel, the rest of that press has to stay on it. M3 finding
+> O-5 is this failure, measured: a replayed `Space` press lost the race with its
+> own natively forwarded release and Windows held the key until a later press of
+> the same key cleared it.
+
 #### 6.3.1 State capacity and the key domain
 
 Per-key state **MUST** cover the entire `KeyCode` id space, and the storage
@@ -1270,7 +1281,8 @@ can all produce them.
 | A press for a key already forwarded | Forwarded **as a repeat**, not as a second press. A second press would owe a second release, and only one physical release is coming — so the key would be left down forever. |
 | A press for a key already running an action | Suppressed; the action is already held. |
 | A press for a key already buffered | Kept buffered, retaining the **original** press time, so a repeated press cannot extend the grace window indefinitely. |
-| A release for a key with no matching press | Suppressed (the mirror obligation, below). |
+| A release for a key whose press the engine **observed and withheld** | Suppressed (the mirror obligation, below). |
+| A release for a key whose press the engine **never observed** | **Forwarded natively.** Not observing a press is not evidence that the OS did not receive one (routing provenance, below). |
 | An invalid key code | Suppressed in every direction. It never produces a press, so it can never owe a release. |
 
 **CapsLock is not exempt.** It is dispatched before the general per-key logic,
@@ -1293,12 +1305,45 @@ The recorded press time **MUST** be cleared on release. Left set, it remains
 available to a later malformed event, which could latch the layer from a clock
 reading that belongs to a keypress long finished.
 
-**The mirror obligation.** A release **MUST NOT** be forwarded unless the
-matching press was forwarded. If the layer deactivates while suppressed keys are
-still physically held — an unbound key, or one that was running an action — their
-releases **MUST** be suppressed too. Forwarding them would send the OS a key-up
-for a key it never saw go down, which is the same class of corruption as a stuck
-key, in the opposite direction.
+**The mirror obligation.** A release **MUST NOT** be forwarded when the matching
+press was **observed and withheld from the OS** by the engine. If the layer
+deactivates while suppressed keys are still physically held — an unbound key, or
+one that was running an action — their releases **MUST** be suppressed too.
+Forwarding them would send the OS a key-up for a key it never saw go down, which
+is the same class of corruption as a stuck key, in the opposite direction.
+
+**Routing provenance.** The mirror obligation binds only where the press is
+accounted for. A press can reach the OS without the engine ever seeing it — it
+was made before the input backend was installed, while interception was
+disabled, or while the OS withheld input from the backend (§8.2). The engine
+therefore holds no record of it, and the OS is holding the key down.
+
+> A release **MUST NOT** be withheld from the OS unless the implementation has
+> positive provenance that withholding it is what the press/release obligation
+> for that physical press requires. Lacking that provenance, the release
+> **MUST** be forwarded natively.
+
+Concretely, a backend **MUST** distinguish three cases for the press currently
+under the finger, and **MUST** keep that routing provenance separate from both
+the physical-held state and the engine's own obligations, which serve different
+purposes and are reset at different times:
+
+| Provenance of the press | Its release |
+|---|---|
+| Routed to the engine while interception was enabled | Follows the engine's decision above — it owns whether the press was forwarded, buffered, suppressed, or already discharged by a synthesized release |
+| Allowed through to the OS without the engine (interception disabled) | **MUST** reach the OS |
+| Never observed | **MUST** reach the OS |
+
+A press that was routed to the engine and whose events later reach the OS
+natively — a key held across a disable — is reclassified as OS-delivered for the
+rest of that press, because the OS is then holding a key the engine owes nothing
+for. Provenance is cleared by the physical release, and at teardown only after
+interception has stopped, so that no release can be judged against provenance
+that has already been erased while the backend can still withhold it.
+
+This is not a theoretical case: live M3 validation held a key across a disable
+and re-enable, the release was suppressed, and the OS kept the key down until the
+user pressed it again (finding O-1).
 
 Both directions are proved by property tests over randomised event sequences
 (§13), not merely asserted. The generator's event space covers what this section
