@@ -203,8 +203,9 @@ def test_a_bare_key_shows_the_app_action(blender: AppState) -> None:
 
 
 def test_a_bare_key_the_app_does_not_claim_keeps_its_own_label(blender: AppState) -> None:
-    result = render(blender, "KeyQ", "Q")
-    assert result.text == "Q"
+    # J is in no Blender map; Q is (Quick Favourites), which is the point.
+    result = render(blender, "KeyJ", "J")
+    assert result.text == "J"
     # Never dimmed: greying out every unclaimed letter would make ordinary
     # typing look broken, which is the opposite of informative.
     assert result.dim is False
@@ -213,13 +214,13 @@ def test_a_bare_key_the_app_does_not_claim_keeps_its_own_label(blender: AppState
 def test_shift_alone_can_be_a_shortcut(blender: AppState) -> None:
     blender.press("ShiftLeft")
     assert blender.active_layer() is LegendLayer.SHIFT
-    assert render(blender, "KeyA", "A").text == "Add…"
+    assert render(blender, "KeyA", "A").text == "Add object"
 
 
 def test_shift_falls_back_to_the_shift_legend_on_a_miss(blender: AppState) -> None:
     blender.press("ShiftLeft")
     assert render(blender, "Digit9", "9", shift="(").text == "("
-    assert render(blender, "KeyQ", "q").text == "Q"
+    assert render(blender, "KeyJ", "j").text == "J"
 
 
 def test_a_modifier_shortcut_still_wins_over_the_bare_one(blender: AppState) -> None:
