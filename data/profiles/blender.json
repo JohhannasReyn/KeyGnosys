@@ -1,0 +1,73 @@
+{
+  "schema": "keygnosys/profile/1",
+  "id": "blender",
+  "name": "Blender",
+  "priority": 60,
+  "match": {
+    "process": ["blender.exe", "blender"],
+    "wm_class": ["Blender", "blender"],
+    "title_regex": null
+  },
+  "shortcuts": {
+    "None": {
+      "KeyG": "Move",
+      "KeyR": "Rotate",
+      "KeyS": "Scale",
+      "KeyX": "Delete…",
+      "KeyZ": "Shading",
+      "KeyA": "Select all",
+      "KeyB": "Box select",
+      "KeyC": "Circle select",
+      "KeyI": "Insert keyframe",
+      "KeyM": "Move to collection",
+      "KeyN": "Sidebar",
+      "KeyO": "Proportional edit",
+      "KeyP": "Separate",
+      "KeyT": "Toolbar",
+      "Tab": "Edit mode",
+      "Digit1": "Vertex select",
+      "Digit2": "Edge select",
+      "Digit3": "Face select",
+      "Period": "Pivot point",
+      "Comma": "Transform orient.",
+      "Slash": "Local view",
+      "Numpad0": "Camera view",
+      "Numpad1": "Front view",
+      "Numpad3": "Right view",
+      "Numpad5": "Toggle ortho",
+      "Numpad7": "Top view",
+      "NumpadDecimal": "Frame selected"
+    },
+    "Shift": {
+      "KeyA": "Add…",
+      "KeyD": "Duplicate",
+      "KeyS": "Snap…",
+      "KeyC": "Centre cursor",
+      "KeyZ": "Rendered view",
+      "KeyR": "Repeat last",
+      "Backquote": "Fly / walk"
+    },
+    "Control": {
+      "KeyZ": "Undo",
+      "KeyS": "Save",
+      "KeyO": "Open",
+      "KeyN": "New file",
+      "KeyJ": "Join",
+      "KeyA": "Apply…",
+      "KeyI": "Invert selection",
+      "KeyB": "Bevel",
+      "KeyR": "Loop cut",
+      "Tab": "Mode pie"
+    },
+    "Control+Shift": {
+      "KeyZ": "Redo",
+      "KeyS": "Save as"
+    },
+    "Alt": {
+      "KeyA": "Deselect all",
+      "KeyG": "Clear location",
+      "KeyR": "Clear rotation",
+      "KeyS": "Clear scale"
+    }
+  }
+}

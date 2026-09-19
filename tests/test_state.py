@@ -180,3 +180,63 @@ def test_pressing_a_fading_key_again_cancels_the_fade(state: AppState) -> None:
     state.release("KeyA")
     state.press("KeyA")
     assert "KeyA" not in state.fading
+
+
+# -- shortcuts that need no modifier (SPEC section 9.4 rules 3 and 4) -------
+#
+# Modal and creative applications command with bare keys -- Blender's G, R, S,
+# Tab -- so a lookup that only fires while Control is down is silent exactly
+# where it would help most.
+
+@pytest.fixture()
+def blender(registry: Registry) -> AppState:
+    st = AppState()
+    st.layout = registry.layouts["us-ansi-104"]
+    st.binding_set = registry.bindings["default"]
+    st.profile = registry.profiles["blender"]
+    return st
+
+
+def test_a_bare_key_shows_the_app_action(blender: AppState) -> None:
+    assert blender.active_layer() is LegendLayer.BASE
+    assert render(blender, "KeyG", "G").text == "Move"
+
+
+def test_a_bare_key_the_app_does_not_claim_keeps_its_own_label(blender: AppState) -> None:
+    result = render(blender, "KeyQ", "Q")
+    assert result.text == "Q"
+    # Never dimmed: greying out every unclaimed letter would make ordinary
+    # typing look broken, which is the opposite of informative.
+    assert result.dim is False
+
+
+def test_shift_alone_can_be_a_shortcut(blender: AppState) -> None:
+    blender.press("ShiftLeft")
+    assert blender.active_layer() is LegendLayer.SHIFT
+    assert render(blender, "KeyA", "A").text == "Add…"
+
+
+def test_shift_falls_back_to_the_shift_legend_on_a_miss(blender: AppState) -> None:
+    blender.press("ShiftLeft")
+    assert render(blender, "Digit9", "9", shift="(").text == "("
+    assert render(blender, "KeyQ", "q").text == "Q"
+
+
+def test_a_modifier_shortcut_still_wins_over_the_bare_one(blender: AppState) -> None:
+    blender.press("ControlLeft")
+    assert blender.active_layer() is LegendLayer.MODIFIER
+    assert render(blender, "KeyS", "S").text == "Save"
+
+
+def test_the_cursor_layer_still_outranks_every_app_shortcut(blender: AppState) -> None:
+    blender.cursor_layer = True
+    # The layer owns the keyboard while engaged; the app's bare-key meaning is
+    # irrelevant because nothing reaches the app at all.
+    assert render(blender, "KeyG", "G").text != "Move"
+
+
+def test_an_app_without_bare_shortcuts_is_unchanged(state: AppState) -> None:
+    """Chrome declares none, so its keyboard must look exactly as before."""
+    assert render(state, "KeyG", "G").text == "G"
+    state.press("ShiftLeft")
+    assert render(state, "KeyA", "A").text == "A"
