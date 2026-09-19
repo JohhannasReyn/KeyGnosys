@@ -593,8 +593,29 @@ Identifies an application and supplies its shortcut legends.
 **Modifier combination keys** are a `+`-joined, canonically ordered string drawn
 from `Control`, `Alt`, `Shift`, `Meta` — in exactly that order. The overlay
 computes the currently-held combination in the same canonical order and looks it
-up directly. `Shift` alone is **never** a shortcut combination; a lone Shift
-selects the `shift` legend layer instead.
+up directly.
+
+Two combinations name no modifier or one:
+
+| Key | Means |
+|-----|-------|
+| `None` | The key on its own, with no modifier held |
+| `Shift` | Shift and the key, where the application treats that as a command rather than as a capital |
+
+**A shortcut does not require a modifier.** Creative and modal applications bind
+bare keys as their primary command surface — in Blender `G` grabs, `R` rotates,
+`S` scales, `Tab` toggles edit mode — and an overlay that only speaks while
+`Control` is down is silent exactly where it would help most. `None` and `Shift`
+are therefore ordinary combinations, looked up the same way as any other:
+
+```jsonc
+  "shortcuts": {
+    "None":  { "KeyG": "Grab", "KeyR": "Rotate", "KeyS": "Scale" },
+    "Shift": { "KeyA": "Add menu", "KeyD": "Duplicate" }
+  }
+```
+
+A profile that declares neither behaves exactly as before.
 
 **Matching.** The core reports the focused window's process name, WM class (X11)
 and title. The overlay selects the highest-`priority` profile where *any*
@@ -1765,8 +1786,17 @@ For each key, in order — the first rule that produces text wins:
 2. **A non-Shift modifier is held** → look up the canonical modifier combination
    (§4.4) in the active profile. On a hit, show the shortcut description. On a
    miss, show the base legend **dimmed**.
-3. **Shift held** → `legend.shift` if present, else `legend.base` upper-cased.
-4. Otherwise → `legend.base`.
+3. **Shift alone held** → the profile's `Shift` shortcut if present; else
+   `legend.shift` if present, else `legend.base` upper-cased.
+4. **No modifier held** → the profile's `None` shortcut if present; else
+   `legend.base`.
+
+**Rules 3 and 4 never dim on a miss**, and rule 2 always does. The difference is
+not cosmetic. Holding `Control` is a question — *what can I do from here?* — so a
+key with no answer should say so by going quiet. Resting hands ask nothing, and a
+keyboard whose every unmapped letter is greyed out reads as broken rather than as
+informative. So an application that maps bare keys lights up the ones it claims
+and leaves the rest looking exactly as they do in a text editor.
 
 Long shortcut descriptions are elided with `…` and shown in full on hover — but
 only when click-through is off, since hover is impossible otherwise.

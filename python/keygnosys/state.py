@@ -131,13 +131,36 @@ class AppState:
             return KeyRender(text=text, style=self._style_for(code, role),
                              dim=dim, sub=None, led=self._led_for(code))
 
+        # Rules 3 and 4 both consult the profile first and NEITHER dims on a
+        # miss (SPEC section 9.4). An application that commands with bare keys
+        # -- Blender's G/R/S, Tab for edit mode -- is the case the modifier-only
+        # lookup was blind to, and it is the case where naming the key's action
+        # is worth most. Dimming every unclaimed letter would make ordinary
+        # typing look broken, so a miss simply leaves the key as it was.
         if layer is LegendLayer.SHIFT:
-            text = key.shift if key.shift is not None else key.base.upper()
+            text = self._profile_shortcut("Shift", code)
+            if text is None:
+                text = key.shift if key.shift is not None else key.base.upper()
             return KeyRender(text=text, style=self._style_for(code, role),
                              dim=False, sub=key.sub, led=self._led_for(code))
 
-        return KeyRender(text=key.base, style=self._style_for(code, role),
+        text = self._profile_shortcut("", code)
+        return KeyRender(text=key.base if text is None else text,
+                         style=self._style_for(code, role),
                          dim=False, sub=key.sub, led=self._led_for(code))
+
+    def _profile_shortcut(self, combo: str, code: str) -> str | None:
+        """The active profile's description for `combo` + `code`, or None.
+
+        `combo` is a canonical modifier string; `""` is the bare key.
+        """
+        if self.profile is None:
+            return None
+        table = self.profile.shortcuts.get(combo)
+        if not table:
+            return None
+        text = table.get(code)
+        return _elide(text, SHORTCUT_LIMIT) if text else None
 
     def _cursor_legend(self, code: str) -> tuple[str, bool]:
         """(text, dim) for a key while the cursor layer is engaged."""
@@ -166,15 +189,10 @@ class AppState:
         keyboard that goes blank reads as a bug, not as "no shortcut here".
         """
         combo = self.modifier_combo()
-        if self.profile is None or not combo:
+        if not combo:
             return base, True
-        table = self.profile.shortcuts.get(combo)
-        if not table:
-            return base, True
-        text = table.get(code)
-        if not text:
-            return base, True
-        return _elide(text, SHORTCUT_LIMIT), False
+        text = self._profile_shortcut(combo, code)
+        return (base, True) if text is None else (text, False)
 
     def _style_for(self, code: str, role: str, unbound: bool = False) -> KeyStyle:
         if code in self.pressed:
