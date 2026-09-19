@@ -185,3 +185,33 @@ def test_user_document_shadows_bundled_one_by_id(tmp_path, monkeypatch) -> None:
 
     reg = Registry().load_all()
     assert reg.layouts["shared"].name == "User"
+
+
+def test_none_names_the_bare_key_combination() -> None:
+    """'None' is the readable spelling of "no modifier held"."""
+    profile = Profile.from_dict({
+        "schema": "keygnosys/profile/1",
+        "id": "p",
+        "shortcuts": {"None": {"KeyG": "Move"}},
+    })
+    # It canonicalises to the empty combination, which is what the overlay
+    # computes when nothing is held.
+    assert profile.shortcuts[""]["KeyG"] == "Move"
+
+
+def test_none_merges_with_an_empty_combination_key() -> None:
+    profile = Profile.from_dict({
+        "schema": "keygnosys/profile/1",
+        "id": "p",
+        "shortcuts": {"None": {"KeyG": "Move"}, "": {"KeyR": "Rotate"}},
+    })
+    assert profile.shortcuts[""] == {"KeyG": "Move", "KeyR": "Rotate"}
+
+
+def test_a_still_unknown_modifier_is_still_rejected() -> None:
+    with pytest.raises(DocumentError):
+        Profile.from_dict({
+            "schema": "keygnosys/profile/1",
+            "id": "p",
+            "shortcuts": {"Hyper": {"KeyG": "Move"}},
+        })
