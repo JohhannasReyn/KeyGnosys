@@ -10,64 +10,63 @@
   },
   "shortcuts": {
     "None": {
-      "KeyG": "Move",
-      "KeyR": "Rotate",
-      "KeyS": "Scale",
-      "KeyX": "Delete…",
-      "KeyZ": "Shading",
       "KeyA": "Select all",
       "KeyB": "Box select",
       "KeyC": "Circle select",
+      "KeyG": "Move",
+      "KeyH": "Hide objects",
       "KeyI": "Insert keyframe",
+      "KeyK": "Insert keyframe menu",
       "KeyM": "Move to collection",
-      "KeyN": "Sidebar",
       "KeyO": "Proportional edit",
-      "KeyP": "Separate",
-      "KeyT": "Toolbar",
-      "Tab": "Edit mode",
-      "Digit1": "Vertex select",
-      "Digit2": "Edge select",
-      "Digit3": "Face select",
+      "KeyQ": "Quick favourites",
+      "KeyR": "Rotate",
+      "KeyS": "Resize",
+      "KeyW": "Select box tool",
+      "KeyX": "Delete…",
+      "KeyZ": "Shading",
+      "Comma": "Orientation",
       "Period": "Pivot point",
-      "Comma": "Transform orient.",
-      "Slash": "Local view",
+      "Backquote": "View",
+      "F1": "Manual",
+      "F2": "Rename",
+      "F3": "Search menu",
+      "F4": "File menu",
       "Numpad0": "Camera view",
       "Numpad1": "Front view",
+      "Numpad2": "Orbit down",
       "Numpad3": "Right view",
-      "Numpad5": "Toggle ortho",
+      "Numpad4": "Orbit left",
+      "Numpad5": "Persp/ortho",
+      "Numpad6": "Orbit right",
       "Numpad7": "Top view",
-      "NumpadDecimal": "Frame selected"
+      "Numpad8": "Orbit up"
     },
     "Shift": {
-      "KeyA": "Add…",
+      "KeyA": "Add object",
+      "KeyC": "Frame all, centre",
       "KeyD": "Duplicate",
-      "KeyS": "Snap…",
-      "KeyC": "Centre cursor",
-      "KeyZ": "Rendered view",
       "KeyR": "Repeat last",
-      "Backquote": "Fly / walk"
+      "KeyS": "Snap",
+      "KeyZ": "Wireframe"
     },
     "Control": {
-      "KeyZ": "Undo",
-      "KeyS": "Save",
-      "KeyO": "Open",
       "KeyN": "New file",
-      "KeyJ": "Join",
-      "KeyA": "Apply…",
-      "KeyI": "Invert selection",
-      "KeyB": "Bevel",
-      "KeyR": "Loop cut",
-      "Tab": "Mode pie"
+      "KeyO": "Open",
+      "KeyQ": "Quit",
+      "KeyS": "Save",
+      "F2": "Batch rename"
     },
-    "Control+Shift": {
-      "KeyZ": "Redo",
+    "Control+Alt": {
       "KeyS": "Save as"
     },
     "Alt": {
       "KeyA": "Deselect all",
+      "KeyD": "Duplicate linked",
       "KeyG": "Clear location",
-      "KeyR": "Clear rotation",
-      "KeyS": "Clear scale"
+      "KeyH": "Show hidden",
+      "KeyI": "Delete keyframe",
+      "KeyW": "Fallback tool pie"
     }
   }
 }

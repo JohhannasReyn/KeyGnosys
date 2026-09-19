@@ -24,3 +24,6 @@ Thumbs.db
 # CMake
 build/
 CMakeUserPresets.json
+
+# Local-only scratch: reference material, never committed
+.local-only/
