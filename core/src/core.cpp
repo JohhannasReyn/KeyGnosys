@@ -547,7 +547,7 @@ struct Core::Impl {
             case ActionId::WindowSlot: {
                 const std::optional<WindowId> id = slots.at(action.index);
                 if (!id.has_value()) return;   // an empty slot does nothing
-                if (!backends.window->focus(*id)) noteUnsupported(action.id);
+                if (!backends.window->focus(*id)) noteFocusRefused(action.id);
                 return;
             }
             case ActionId::WindowCycle: {
@@ -569,7 +569,7 @@ struct Core::Impl {
                 const std::size_t next = action.cycle == Cycle::Next
                                              ? (at + 1) % count
                                              : (at + count - 1) % count;
-                if (!backends.window->focus(ids[next])) noteUnsupported(action.id);
+                if (!backends.window->focus(ids[next])) noteFocusRefused(action.id);
                 return;
             }
             case ActionId::WindowFocusMonitor: {
@@ -610,6 +610,15 @@ struct Core::Impl {
             }
             default: return;
         }
+    }
+
+    // The backend can focus windows, but Windows refused this one: the window
+    // has gone, or the foreground lock held despite the input-queue attach.
+    // Distinct from noteUnsupported, which means the operation is missing.
+    void noteFocusRefused(ActionId id) {
+        note(DiagLevel::Warn, "window.unsupported",
+             std::string(actionName(id)) +
+                 ": the system refused to focus the target window; try again");
     }
 
     void noteUnsupported(ActionId id) {
