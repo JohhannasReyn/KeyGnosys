@@ -302,6 +302,7 @@ private:
     [[nodiscard]] bool isPending(KeyCode code) const;
     bool takePending(KeyCode code);
     void resolvePendingBefore(KeyCode code, DecisionBuffer& out);
+    void resolveOldestPending(std::size_t count, DecisionBuffer& out);
 
     EngineConfig config_;
     Mode mode_ = Mode::Normal;

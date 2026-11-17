@@ -193,6 +193,34 @@ KGN_TEST(a_quick_tap_cannot_overtake_an_earlier_buffered_press) {
     KGN_CHECK(has(f.last, Decision::Kind::Forward, H));
 }
 
+KGN_TEST(an_unbound_press_cannot_overtake_an_earlier_buffered_press) {
+    // O-12, "teh" for "the": H (bound) is buffered, then Q (unbound) is
+    // pressed. Q must not reach the OS ahead of H. H, still held, resolves
+    // first as an ordinary hold.
+    Fixture f;
+    f.press(H, 0);
+    f.press(Q, 10);
+    KGN_CHECK_EQ(f.last.size(), std::size_t{2});
+    KGN_CHECK(f.last[0].kind == Decision::Kind::Forward);
+    KGN_CHECK(f.last[0].code == H);
+    KGN_CHECK(f.last[0].state == KeyState::Down);
+    KGN_CHECK(f.last[1].kind == Decision::Kind::Forward);
+    KGN_CHECK(f.last[1].code == Q);
+    KGN_CHECK(f.last[1].state == KeyState::Down);
+
+    f.tick(60);
+    KGN_CHECK_EQ(f.last.size(), std::size_t{0});
+    f.release(H, 80);
+    KGN_CHECK(has(f.last, Decision::Kind::Forward, H));
+}
+
+KGN_TEST(an_unbound_press_with_nothing_buffered_is_forwarded_alone) {
+    Fixture f;
+    f.press(Q, 0);
+    KGN_CHECK_EQ(f.last.size(), std::size_t{1});
+    KGN_CHECK(has(f.last, Decision::Kind::Forward, Q));
+}
+
 KGN_TEST(a_quick_tap_leaves_later_buffered_presses_buffered) {
     // Only presses EARLIER than the tap are resolved. H, pressed after J, is
     // still inside its own window and may yet be promoted by CapsLock.
@@ -1306,7 +1334,8 @@ KGN_TEST(partial_expiry_preserves_the_order_of_what_remains) {
     Fixture f;
     f.press(H, 0);
     f.press(J, 40);
-    f.press(Q, 45);          // unbound, forwarded immediately, never buffered
+    // No unbound press here: since O-12 one resolves every buffered press
+    // ahead of itself (an_unbound_press_cannot_overtake_...).
     f.tick(60);              // H has expired; J has not
     KGN_CHECK_EQ(f.last.size(), std::size_t{1});
     KGN_CHECK(f.last[0].code == H);

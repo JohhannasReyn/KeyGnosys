@@ -222,6 +222,13 @@ void LayerEngine::resolvePendingBefore(KeyCode code, DecisionBuffer& out) {
     std::size_t earlier = 0;
     while (earlier < pendingCount_ && pending_[earlier].code != code) ++earlier;
     if (earlier == pendingCount_) return;   // not buffered: nothing to order
+    resolveOldestPending(earlier, out);
+}
+
+// The oldest `count` buffered presses resolve as ordinary holds, in press
+// order. Used when a key that is NOT buffered is about to reach the OS: every
+// buffered press is older than it, so all of them go first.
+void LayerEngine::resolveOldestPending(std::size_t earlier, DecisionBuffer& out) {
     for (std::size_t i = 0; i < earlier; ++i) {
         slot(pending_[i].code).clear(Slot::kPending);
         forwardPress(pending_[i].code, KeyState::Down, out);
@@ -333,6 +340,9 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
             // nothing for the grace window to disambiguate. Buffering it would
             // cost latency and buy nothing.
             if (!s.has(Slot::kBound) || s.has(Slot::kPassthrough)) {
+                // Not buffered, so it would overtake every buffered press,
+                // all of which were made before it. They go first (O-12).
+                resolveOldestPending(pendingCount_, out);
                 forwardPress(code, state, out);
                 return;
             }

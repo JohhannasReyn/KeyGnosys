@@ -1268,7 +1268,11 @@ resolves more than one key at once:
   **before** it are still pending. Those earlier presses resolve first, as
   ordinary holds, and then the tap is forwarded. A quick tap must never
   overtake a key pressed before it. Presses buffered **after** the tap keep
-  their own windows.
+  their own windows;
+- a press that is **not** buffered (an unbound key, a passthrough key or a
+  modifier) while presses are still pending. Every pending press resolves
+  first, as an ordinary hold, and then the new press is forwarded. Without
+  this, typing `the` with `h` action-bound reaches the OS as `teh`.
 
 Input order is observable. It decides how chords resolve, which of two
 simultaneous movement keys starts first, and whether a bug reproduces. Leaving
