@@ -4,6 +4,42 @@
 #include <cctype>
 
 namespace kgn::win {
+
+namespace {
+
+// The integrity RID (last sub-authority of the token's label SID) of
+// `process`, or nullopt when it cannot be read.
+std::optional<DWORD> integrityLevelOf(HANDLE process) {
+    if (process == nullptr) return std::nullopt;
+    HANDLE token = nullptr;
+    if (::OpenProcessToken(process, TOKEN_QUERY, &token) == 0) return std::nullopt;
+
+    std::optional<DWORD> level;
+    DWORD needed = 0;
+    ::GetTokenInformation(token, TokenIntegrityLevel, nullptr, 0, &needed);
+    if (needed >= sizeof(TOKEN_MANDATORY_LABEL)) {
+        std::vector<unsigned char> buffer(needed);
+        if (::GetTokenInformation(token, TokenIntegrityLevel, buffer.data(),
+                                  needed, &needed) != 0) {
+            PSID sid = reinterpret_cast<TOKEN_MANDATORY_LABEL*>(buffer.data())
+                           ->Label.Sid;
+            const UCHAR count = *::GetSidSubAuthorityCount(sid);
+            if (count > 0) level = *::GetSidSubAuthority(sid, count - 1U);
+        }
+    }
+    ::CloseHandle(token);
+    return level;
+}
+
+}  // namespace
+
+bool runsAboveOurIntegrity(HANDLE process) {
+    static const std::optional<DWORD> ours = integrityLevelOf(::GetCurrentProcess());
+    const std::optional<DWORD> theirs = integrityLevelOf(process);
+    if (!ours || !theirs) return false;
+    return *theirs > *ours;
+}
+
 namespace {
 
 std::string lowercased(std::wstring_view wide) {
@@ -84,6 +120,7 @@ BOOL CALLBACK Win32Window::enumerate(HWND window, LPARAM param) {
                 info.process = lowercased(
                     slash == std::wstring_view::npos ? full : full.substr(slash + 1));
             }
+            info.elevated = runsAboveOurIntegrity(process);
             ::CloseHandle(process);
         }
     }

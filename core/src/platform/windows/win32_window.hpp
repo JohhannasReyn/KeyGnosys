@@ -28,6 +28,11 @@ bool windowRescalesItself(HWND window);
 // that rescales itself keeps its current size; any other is scaled.
 SIZE sizeAfterDpiMove(SIZE current, double dpiScale, bool selfScaling);
 
+// True when `process` runs at a higher integrity level than this process.
+// Windows withholds input to such a window from our low-level hook (M3
+// finding O-10). False when either token cannot be read.
+bool runsAboveOurIntegrity(HANDLE process);
+
 class Win32Window final : public WindowBackend {
 public:
     [[nodiscard]] std::vector<WindowInfo> windows() override;

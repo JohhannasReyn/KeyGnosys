@@ -52,6 +52,9 @@ struct WindowInfo {
     std::string wmClass;    // X11 WM_CLASS; empty on Windows
     std::string title;
     int monitor = 0;
+    // Its process runs above this process's integrity level; Windows
+    // withholds its input from our hook.
+    bool elevated = false;
 };
 
 // What a backend can actually do. Reported to the UI verbatim so an

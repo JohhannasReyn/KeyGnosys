@@ -61,6 +61,14 @@ KGN_TEST(a_per_monitor_aware_window_rescales_itself) {
     ::DestroyWindow(window);
 }
 
+KGN_TEST(our_own_process_is_not_above_our_integrity) {
+    KGN_CHECK(!kgn::win::runsAboveOurIntegrity(::GetCurrentProcess()));
+}
+
+KGN_TEST(an_unreadable_process_is_not_called_elevated) {
+    KGN_CHECK(!kgn::win::runsAboveOurIntegrity(nullptr));
+}
+
 int main() { return kgn::test::runAll(); }
 
 #else
