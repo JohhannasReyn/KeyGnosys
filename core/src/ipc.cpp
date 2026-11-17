@@ -43,6 +43,10 @@ void Server::setCommandHandler(CommandHandler handler) {
     handler_ = std::move(handler);
 }
 
+void Server::setGreetingProvider(GreetingProvider provider) {
+    greeting_ = std::move(provider);
+}
+
 Server::Session* Server::find(ClientId client) {
     for (auto& session : sessions_) {
         if (session.id == client) return &session;
@@ -183,6 +187,11 @@ void Server::acceptNew() {
         // is not a ready core, which is precisely what the launcher contract
         // relies on (LAUNCHING.md section 4.2).
         enqueueEvent(sessions_.back(), "hello", hello_.toJson());
+        if (greeting_) {
+            for (const Greeting& greeting : greeting_()) {
+                enqueueEvent(sessions_.back(), greeting.name, greeting.data);
+            }
+        }
         flush(sessions_.back());
     }
 }

@@ -212,6 +212,16 @@ Json parseLine(const std::string& line) {
     return value;
 }
 
+// The next reply, skipping events: a client is greeted with `hello` and the
+// current `mode` before it has asked anything.
+Json readReply(RawClient& client, Core& core) {
+    for (int i = 0; i < 16; ++i) {
+        const Json message = parseLine(client.readLine(core));
+        if (message["t"].asString() == "reply") return message;
+    }
+    return Json();
+}
+
 // A core on its own endpoint, torn down with the test.
 // Test doubles. Recording what the core ASKED for is not the same thing as a
 // fake backend shipped to a user: P6 forbids the second, and these never leave
@@ -450,7 +460,7 @@ KGN_TEST(ping_is_answered_with_an_uptime) {
     client.readLine(fixture.core);   // hello
 
     client.send(R"({"v":1,"t":"command","n":"ping","id":"c1","d":{}})" "\n");
-    const Json reply = parseLine(client.readLine(fixture.core));
+    const Json reply = readReply(client, fixture.core);
     KGN_CHECK_EQ(reply["t"].asString(), std::string("reply"));
     KGN_CHECK_EQ(reply["id"].asString(), std::string("c1"));
     KGN_CHECK(reply["ok"].asBool());
@@ -469,7 +479,7 @@ KGN_TEST(get_state_reports_what_is_true_and_nothing_more) {
     client.readLine(fixture.core);
 
     client.send(R"({"v":1,"t":"command","n":"get_state","id":"c1","d":{}})" "\n");
-    const Json reply = parseLine(client.readLine(fixture.core));
+    const Json reply = readReply(client, fixture.core);
     KGN_CHECK(reply["ok"].asBool());
     KGN_CHECK_EQ(reply["d"]["mode"].asString(), std::string("normal"));
     KGN_CHECK_EQ(reply["d"]["activation"].asString(), std::string("hybrid"));
@@ -538,7 +548,7 @@ KGN_TEST(an_unknown_command_is_refused_by_name) {
     client.readLine(fixture.core);
 
     client.send(R"({"v":1,"t":"command","n":"launch_missiles","id":"c1","d":{}})" "\n");
-    const Json reply = parseLine(client.readLine(fixture.core));
+    const Json reply = readReply(client, fixture.core);
     KGN_CHECK(!reply["ok"].asBool(true));
     KGN_CHECK_EQ(reply["e"]["code"].asString(), std::string("ipc.unsupported"));
     client.close();
@@ -555,7 +565,7 @@ KGN_TEST(an_unknown_setting_path_is_refused_rather_than_ignored) {
     client.send(
         R"({"v":1,"t":"command","n":"set_setting","id":"c1","d":{"path":"behavior.nonsense","value":1}})"
         "\n");
-    const Json reply = parseLine(client.readLine(fixture.core));
+    const Json reply = readReply(client, fixture.core);
     KGN_CHECK(!reply["ok"].asBool(true));
     KGN_CHECK_EQ(reply["e"]["code"].asString(), std::string("config.invalid"));
     client.close();
@@ -572,7 +582,7 @@ KGN_TEST(a_known_setting_is_applied) {
     client.send(
         R"({"v":1,"t":"command","n":"set_setting","id":"c1","d":{"path":"behavior.grace_ms","value":40}})"
         "\n");
-    const Json reply = parseLine(client.readLine(fixture.core));
+    const Json reply = readReply(client, fixture.core);
     KGN_CHECK(reply["ok"].asBool());
     client.close();
 }
@@ -923,6 +933,32 @@ KGN_TEST(focusing_an_elevated_window_makes_the_layer_inert_and_says_so_once) {
     const Json after = f.state();
     KGN_CHECK(!after["inert"].asBool(true));
     KGN_CHECK_EQ(after["latched"].asBool(false), before["latched"].asBool(true));
+    f.client.close();
+}
+
+KGN_TEST(a_client_that_connects_while_an_elevated_window_has_focus_is_told_inert) {
+    InertFixture f("inertlate");
+    KGN_CHECK(f.fixture->core.start().ok());
+    f.windows->focusedId = 22;
+    f.fixture->core.step(kgn::Clock::now());   // nobody is connected to hear it
+
+    KGN_CHECK(f.client.connect(f.fixture->address));
+    const std::vector<Json> greeting = drainMessages(f.client, f.fixture->core);
+
+    int helloAt = -1;
+    int modeAt = -1;
+    for (std::size_t i = 0; i < greeting.size(); ++i) {
+        const std::string name = greeting[i]["n"].asString();
+        if (name == "hello" && helloAt < 0) helloAt = static_cast<int>(i);
+        if (name == "mode" && modeAt < 0) modeAt = static_cast<int>(i);
+    }
+    KGN_CHECK(helloAt >= 0);
+    KGN_CHECK(modeAt > helloAt);
+    if (modeAt >= 0) {
+        const Json& mode = greeting[static_cast<std::size_t>(modeAt)]["d"];
+        KGN_CHECK(mode["inert"].asBool(false));
+        KGN_CHECK(mode.contains("latched"));
+    }
     f.client.close();
 }
 

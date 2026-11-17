@@ -826,16 +826,23 @@ struct Core::Impl {
                  " needs an output backend, and this build has none");
     }
 
-    void publishState() {
-        const PublishedState state = published.state();
-        publishedVersion = published.version();
-        if (!server) return;
-
+    // The `mode` event payload. One place, so the broadcast and the greeting a
+    // late client gets cannot disagree about what the event carries.
+    [[nodiscard]] Json modeJson(const PublishedState& state) const {
         Json mode = Json::object();
         mode.set("mode", Json(state.mode == Mode::Cursor ? "cursor" : "normal"));
         mode.set("latched", Json(state.latched));
         mode.set("activation", Json(activationName(state.activation)));
         mode.set("inert", Json(inert));
+        return mode;
+    }
+
+    void publishState() {
+        const PublishedState state = published.state();
+        publishedVersion = published.version();
+        if (!server) return;
+
+        Json mode = modeJson(state);
         server->broadcast("mode", std::move(mode));
 
         Json modifiers = Json::object();
@@ -1153,6 +1160,11 @@ OwnResult Core::start() {
         std::make_unique<Server>(impl_->hello, impl_->owner.takeTransport());
     impl_->server->setCommandHandler(
         [impl = impl_.get()](const Command& command) { return impl->handle(command); });
+    impl_->server->setGreetingProvider([impl = impl_.get()] {
+        std::vector<Server::Greeting> greeting;
+        greeting.push_back({"mode", impl->modeJson(impl->published.state())});
+        return greeting;
+    });
 
     std::string from;
     if (impl_->loadBindings(from)) {

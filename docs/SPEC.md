@@ -980,7 +980,7 @@ events.
 | `hello` | `{core_version, protocol, platform, backends:{input,output,window}, capabilities:[…], limitations:[…]}` | Immediately on connect |
 | `key` | `{code, state:"down"\|"up"\|"repeat", suppressed:bool}` | Every physical key event, suppressed or not |
 | `modifiers` | `{shift, control, alt, meta, caps_layer}` — all bool | Any modifier state change |
-| `mode` | `{mode:"normal"\|"cursor", latched:bool, activation:"toggle"\|"hold"\|"hybrid", inert:bool}` | Layer engaged/released, or `inert` changed |
+| `mode` | `{mode:"normal"\|"cursor", latched:bool, activation:"toggle"\|"hold"\|"hybrid", inert:bool}` | Layer engaged/released, `inert` changed, and on connect (sent to that client only, after `hello`) |
 | `focus` | `{app_id, process, wm_class, title, window_id}` | Focused window changes |
 | `windows` | `{slots:[{index, window_id, process, title, monitor}]}` | Window list changes (debounced ≥250 ms) |
 | `monitors` | `{monitors:[{index, x, y, w, h, primary, name}]}` | Monitor topology changes |
@@ -1005,7 +1005,7 @@ positional codes are transmitted. See §12.
 
 | `n` | Payload | Reply |
 |-----|---------|-------|
-| `get_state` | `{}` | Full snapshot: mode, modifiers, focus, windows, monitors |
+| `get_state` | `{}` | Full snapshot: mode, latched, activation, enabled, inert, modifiers, focus, windows, monitors |
 | `set_activation_mode` | `{mode}` | `{}` |
 | `set_enabled` | `{enabled:bool}` | `{}` — master switch; disables interception entirely |
 | `reload_config` | `{}` | `{loaded:{layouts:n, bindings:n, profiles:n}}` |
