@@ -301,6 +301,7 @@ private:
     bool addPending(KeyCode code, TimePoint now);
     [[nodiscard]] bool isPending(KeyCode code) const;
     bool takePending(KeyCode code);
+    void resolvePendingBefore(KeyCode code, DecisionBuffer& out);
 
     EngineConfig config_;
     Mode mode_ = Mode::Normal;

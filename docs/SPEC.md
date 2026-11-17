@@ -1170,7 +1170,7 @@ Such a press is **buffered**, not forwarded, for up to `grace_ms`. It resolves a
 | Event within the window | Resolution |
 |-------------------------|------------|
 | CapsLock arrives | Promote to a cursor-layer press. Nothing reaches the OS. |
-| The key is released | Ordinary tap. Forward press+release together, in order. |
+| The key is released | Ordinary tap. Forward press+release together, in order. Any press buffered before it resolves first as an ordinary hold (§6.3.3). |
 | `grace_ms` elapses | Ordinary hold. Forward the press, mark **passthrough**. |
 
 **The forwarded-release invariant (P7).** A key whose press was forwarded to the
@@ -1263,7 +1263,12 @@ resolves more than one key at once:
 - buffered presses whose grace window lapses together;
 - buffered presses promoted together when CapsLock arrives;
 - held actions released when the layer is left;
-- forwarded presses unwound by `release_all`.
+- forwarded presses unwound by `release_all`;
+- a buffered press released inside its window (a tap) while presses buffered
+  **before** it are still pending. Those earlier presses resolve first, as
+  ordinary holds, and then the tap is forwarded. A quick tap must never
+  overtake a key pressed before it. Presses buffered **after** the tap keep
+  their own windows.
 
 Input order is observable. It decides how chords resolve, which of two
 simultaneous movement keys starts first, and whether a bug reproduces. Leaving

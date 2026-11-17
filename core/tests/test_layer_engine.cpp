@@ -168,6 +168,44 @@ KGN_TEST(release_inside_the_window_is_an_ordinary_tap) {
     KGN_CHECK(f.last[1].state == KeyState::Up);
 }
 
+KGN_TEST(a_quick_tap_cannot_overtake_an_earlier_buffered_press) {
+    // O-12: H is pressed and held; J is tapped inside H's window. The OS must
+    // see H go down before J -- press order -- not J first because it was
+    // released first. H, still physically held, resolves as an ordinary hold.
+    Fixture f;
+    f.press(H, 0);
+    f.press(J, 10);
+    f.release(J, 20);
+    KGN_CHECK_EQ(f.last.size(), std::size_t{3});
+    KGN_CHECK(f.last[0].kind == Decision::Kind::Forward);
+    KGN_CHECK(f.last[0].code == H);
+    KGN_CHECK(f.last[0].state == KeyState::Down);
+    KGN_CHECK(f.last[1].code == J);
+    KGN_CHECK(f.last[1].state == KeyState::Down);
+    KGN_CHECK(f.last[2].code == J);
+    KGN_CHECK(f.last[2].state == KeyState::Up);
+
+    // H is no longer buffered: its window lapsing sends nothing more, and its
+    // release is forwarded (P7).
+    f.tick(60);
+    KGN_CHECK_EQ(f.last.size(), std::size_t{0});
+    f.release(H, 80);
+    KGN_CHECK(has(f.last, Decision::Kind::Forward, H));
+}
+
+KGN_TEST(a_quick_tap_leaves_later_buffered_presses_buffered) {
+    // Only presses EARLIER than the tap are resolved. H, pressed after J, is
+    // still inside its own window and may yet be promoted by CapsLock.
+    Fixture f;
+    f.press(J, 0);
+    f.press(H, 10);
+    f.release(J, 20);
+    KGN_CHECK_EQ(f.last.size(), std::size_t{2});
+    KGN_CHECK(!has(f.last, Decision::Kind::Forward, H));
+    f.press(CAPS, 30);
+    KGN_CHECK(has(f.last, Decision::Kind::RunAction, H));
+}
+
 KGN_TEST(the_window_lapsing_makes_it_an_ordinary_hold) {
     Fixture f;
     f.press(H, 0);

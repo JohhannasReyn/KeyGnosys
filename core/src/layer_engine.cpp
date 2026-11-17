@@ -213,6 +213,25 @@ bool LayerEngine::takePending(KeyCode code) {
     return false;
 }
 
+// A buffered key is about to resolve as a tap. Every press buffered BEFORE it
+// resolves first, as the ordinary hold it has turned out to be (the user is
+// typing, and those keys are still down), so the OS sees presses in the order
+// they were made -- not a quick tap overtaking a key pressed earlier (SPEC
+// 6.3.3). Presses buffered after it keep their own windows.
+void LayerEngine::resolvePendingBefore(KeyCode code, DecisionBuffer& out) {
+    std::size_t earlier = 0;
+    while (earlier < pendingCount_ && pending_[earlier].code != code) ++earlier;
+    if (earlier == pendingCount_) return;   // not buffered: nothing to order
+    for (std::size_t i = 0; i < earlier; ++i) {
+        slot(pending_[i].code).clear(Slot::kPending);
+        forwardPress(pending_[i].code, KeyState::Down, out);
+    }
+    for (std::size_t i = earlier; i < pendingCount_; ++i) {
+        pending_[i - earlier] = pending_[i];
+    }
+    pendingCount_ -= earlier;
+}
+
 std::optional<TimePoint> LayerEngine::nextDeadline() const {
     if (pendingCount_ == 0) return std::nullopt;
     // pending_ is kept in press order and `grace` is uniform across entries,
@@ -340,6 +359,7 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
                 return;
             }
 
+            resolvePendingBefore(code, out);
             if (takePending(code)) {
                 // Released before the grace window resolved: an ordinary quick
                 // tap. Send the whole press and release now, in order -- and
