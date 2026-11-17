@@ -206,6 +206,7 @@ class Overlay:
 
     def _on_disconnected(self, _reason: str) -> None:
         self.state.connected = False
+        self.state.inert = False
         self.state.release_all()
         self.window.view.update()
         self._update_status()

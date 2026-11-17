@@ -202,3 +202,18 @@ def test_inert_status_names_the_reason(state: AppState) -> None:
 
 def test_no_status_override_when_not_inert(state: AppState) -> None:
     assert state.status_text() is None
+
+
+def test_banner_text_while_inert(state: AppState) -> None:
+    state.inert = True
+    assert state.banner_text() == "Layer inactive: admin window has focus"
+
+
+def test_banner_shows_without_the_cursor_layer(state: AppState) -> None:
+    state.cursor_layer = False
+    state.inert = True
+    assert state.banner_text() is not None
+
+
+def test_no_banner_when_not_inert(state: AppState) -> None:
+    assert state.banner_text() is None

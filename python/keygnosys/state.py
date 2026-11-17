@@ -217,6 +217,12 @@ class AppState:
             "ordinary window has focus.",
         )
 
+    def banner_text(self) -> str | None:
+        """Large on-keyboard notice, shown whenever the layer is inert."""
+        if not self.inert:
+            return None
+        return "Layer inactive: admin window has focus"
+
     # -- mutation ---------------------------------------------------------
 
     def press(self, code: str) -> None:

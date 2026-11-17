@@ -240,6 +240,33 @@ class KeyboardView(QWidget):
                 continue
             self._paint_key(painter, key, rect, radius)
 
+        banner = self._state.banner_text()
+        if banner:
+            self._paint_banner(painter, banner)
+
+    def _paint_banner(self, painter: QPainter, text: str) -> None:
+        """A big plate across the keyboard, readable over any theme."""
+        font = QFont()
+        font.setBold(True)
+        font.setPixelSize(max(10, int(self.height() * 0.11)))
+        metrics = QFontMetricsF(font)
+        max_w = self.width() * 0.9
+        pad = font.pixelSize() * 0.6
+        # Shrink to fit rather than overflow a narrow or heavily scaled view.
+        while metrics.horizontalAdvance(text) + 2 * pad > max_w and font.pixelSize() > 8:
+            font.setPixelSize(font.pixelSize() - 1)
+            metrics = QFontMetricsF(font)
+            pad = font.pixelSize() * 0.6
+        w = metrics.horizontalAdvance(text) + 2 * pad
+        h = metrics.height() + pad
+        plate = QRectF((self.width() - w) / 2, (self.height() - h) / 2, w, h)
+        painter.setFont(font)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 190))
+        painter.drawRoundedRect(plate, h * 0.25, h * 0.25)
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(plate, Qt.AlignCenter, text)
+
     def _paint_key(self, painter: QPainter, key: Key, rect: QRectF,
                    radius: float) -> None:
         theme = self._theme
