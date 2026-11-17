@@ -884,7 +884,8 @@ KGN_TEST(focusing_an_elevated_window_makes_the_layer_inert_and_says_so_once) {
     KGN_CHECK(f.open());
 
     f.focus(11);
-    KGN_CHECK(!f.state()["inert"].asBool(true));
+    const Json before = f.state();
+    KGN_CHECK(!before["inert"].asBool(true));
 
     const std::vector<Json> entering = f.focus(22);
     int inertTrue = 0;
@@ -905,6 +906,7 @@ KGN_TEST(focusing_an_elevated_window_makes_the_layer_inert_and_says_so_once) {
 
     // Moving between elevated windows is not a change.
     const std::vector<Json> staying = f.focus(33);
+    KGN_CHECK_EQ(countEvents(staying, "focus"), 1);   // it did read this step
     KGN_CHECK_EQ(countEvents(staying, "mode"), 0);
     KGN_CHECK_EQ(countEvents(staying, "diagnostic"), 0);
 
@@ -920,14 +922,24 @@ KGN_TEST(focusing_an_elevated_window_makes_the_layer_inert_and_says_so_once) {
 
     const Json after = f.state();
     KGN_CHECK(!after["inert"].asBool(true));
-    KGN_CHECK(!after["latched"].asBool(true));
+    KGN_CHECK_EQ(after["latched"].asBool(false), before["latched"].asBool(true));
     f.client.close();
 }
 
-KGN_TEST(no_focused_window_is_not_inert) {
+KGN_TEST(losing_focus_entirely_clears_inert) {
     InertFixture f("noinert");
     KGN_CHECK(f.open());
-    f.focus(0);
+    f.focus(22);
+    KGN_CHECK(f.state()["inert"].asBool(false));
+
+    const std::vector<Json> events = f.focus(0);
+    int inertFalse = 0;
+    for (const Json& message : events) {
+        if (message["n"].asString() == "mode" && !message["d"]["inert"].asBool(true)) {
+            ++inertFalse;
+        }
+    }
+    KGN_CHECK_EQ(inertFalse, 1);
     KGN_CHECK(!f.state()["inert"].asBool(true));
     f.client.close();
 }
