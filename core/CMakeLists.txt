@@ -197,6 +197,7 @@ if(KGN_BUILD_TESTS)
         kgn_add_test_with(test_hook_input kgn_platform)
         kgn_add_test_with(test_sendinput_output kgn_platform)
         kgn_add_test_with(test_dpi_awareness kgn_platform)
+        kgn_add_test_with(test_window_move kgn_platform)
 
         # Built, deliberately NOT registered with ctest. It installs a real
         # low-level hook and waits for a real keystroke, so a CI run that
