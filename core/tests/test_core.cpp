@@ -812,6 +812,126 @@ KGN_TEST(a_setting_change_the_engine_never_applied_is_refused_not_reported_ok) {
     removeEndpoint(address);
 }
 
+// Everything the core has sent so far. readLine gives up after its attempts,
+// so this ends when the stream goes quiet rather than blocking.
+std::vector<Json> drainMessages(RawClient& client, Core& core) {
+    std::vector<Json> messages;
+    for (;;) {
+        const std::string line = client.readLine(core, 25);
+        if (line.empty()) break;
+        messages.push_back(parseLine(line));
+    }
+    return messages;
+}
+
+int countEvents(const std::vector<Json>& messages, const char* name) {
+    int count = 0;
+    for (const Json& message : messages) {
+        if (message["n"].asString() == name) ++count;
+    }
+    return count;
+}
+
+struct InertFixture {
+    RecordingWindow* windows = nullptr;
+    std::unique_ptr<Fixture> fixture;
+    RawClient client;
+
+    explicit InertFixture(const char* suffix) {
+        auto window = std::make_unique<RecordingWindow>();
+        windows = window.get();
+        kgn::WindowInfo ordinary;
+        ordinary.id = 11;
+        kgn::WindowInfo elevated;
+        elevated.id = 22;
+        elevated.elevated = true;
+        kgn::WindowInfo otherElevated;
+        otherElevated.id = 33;
+        otherElevated.elevated = true;
+        windows->list = {ordinary, elevated, otherElevated};
+
+        kgn::Backends backends;
+        backends.window = std::move(window);
+        backends.output = std::make_unique<RecordingOutput>();
+        fixture = std::make_unique<Fixture>(suffix, std::move(backends));
+    }
+
+    bool open() {
+        if (!fixture->core.start().ok()) return false;
+        if (!client.connect(fixture->address)) return false;
+        drainMessages(client, fixture->core);
+        return true;
+    }
+
+    // Focus a window, let the core notice, and return what it announced.
+    std::vector<Json> focus(kgn::WindowId id) {
+        windows->focusedId = id;
+        fixture->core.step(kgn::Clock::now());
+        return drainMessages(client, fixture->core);
+    }
+
+    Json state() {
+        client.send(R"({"v":1,"t":"command","n":"get_state","id":"s","d":{}})" "\n");
+        for (const Json& message : drainMessages(client, fixture->core)) {
+            if (message["t"].asString() == "reply") return message["d"];
+        }
+        return Json();
+    }
+};
+
+KGN_TEST(focusing_an_elevated_window_makes_the_layer_inert_and_says_so_once) {
+    InertFixture f("inert");
+    KGN_CHECK(f.open());
+
+    f.focus(11);
+    KGN_CHECK(!f.state()["inert"].asBool(true));
+
+    const std::vector<Json> entering = f.focus(22);
+    int inertTrue = 0;
+    int infoDiagnostics = 0;
+    for (const Json& message : entering) {
+        if (message["n"].asString() == "mode" && message["d"]["inert"].asBool(false)) {
+            ++inertTrue;
+        }
+        if (message["n"].asString() == "diagnostic" &&
+            message["d"]["code"].asString() == "input.elevated_window" &&
+            message["d"]["level"].asString() == "info") {
+            ++infoDiagnostics;
+        }
+    }
+    KGN_CHECK_EQ(inertTrue, 1);
+    KGN_CHECK_EQ(infoDiagnostics, 1);
+    KGN_CHECK(f.state()["inert"].asBool(false));
+
+    // Moving between elevated windows is not a change.
+    const std::vector<Json> staying = f.focus(33);
+    KGN_CHECK_EQ(countEvents(staying, "mode"), 0);
+    KGN_CHECK_EQ(countEvents(staying, "diagnostic"), 0);
+
+    const std::vector<Json> leaving = f.focus(11);
+    int inertFalse = 0;
+    for (const Json& message : leaving) {
+        if (message["n"].asString() == "mode" && !message["d"]["inert"].asBool(true)) {
+            ++inertFalse;
+        }
+    }
+    KGN_CHECK_EQ(inertFalse, 1);
+    KGN_CHECK_EQ(countEvents(leaving, "diagnostic"), 0);
+
+    const Json after = f.state();
+    KGN_CHECK(!after["inert"].asBool(true));
+    KGN_CHECK(!after["latched"].asBool(true));
+    f.client.close();
+}
+
+KGN_TEST(no_focused_window_is_not_inert) {
+    InertFixture f("noinert");
+    KGN_CHECK(f.open());
+    f.focus(0);
+    KGN_CHECK(!f.state()["inert"].asBool(true));
+    f.client.close();
+}
+
 KGN_TEST(window_slot_focuses_the_registry_entry_and_cycle_walks_slot_order) {
     auto window = std::make_unique<RecordingWindow>();
     RecordingWindow* recorded = window.get();

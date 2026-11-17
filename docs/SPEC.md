@@ -980,7 +980,7 @@ events.
 | `hello` | `{core_version, protocol, platform, backends:{input,output,window}, capabilities:[…], limitations:[…]}` | Immediately on connect |
 | `key` | `{code, state:"down"\|"up"\|"repeat", suppressed:bool}` | Every physical key event, suppressed or not |
 | `modifiers` | `{shift, control, alt, meta, caps_layer}` — all bool | Any modifier state change |
-| `mode` | `{mode:"normal"\|"cursor", latched:bool, activation:"toggle"\|"hold"\|"hybrid"}` | Layer engaged/released |
+| `mode` | `{mode:"normal"\|"cursor", latched:bool, activation:"toggle"\|"hold"\|"hybrid", inert:bool}` | Layer engaged/released, or `inert` changed |
 | `focus` | `{app_id, process, wm_class, title, window_id}` | Focused window changes |
 | `windows` | `{slots:[{index, window_id, process, title, monitor}]}` | Window list changes (debounced ≥250 ms) |
 | `monitors` | `{monitors:[{index, x, y, w, h, primary, name}]}` | Monitor topology changes |
@@ -1590,7 +1590,8 @@ pump. Returning non-zero from the hook proc suppresses the event.
   `docs/manual-test-logs/`.)*
 - Keys cannot be intercepted while an **elevated** window has focus unless the
   core itself runs elevated. Running unelevated is the default; the UI states
-  plainly when the layer is inert for this reason.
+  plainly when the layer is inert for this reason. The core reports this as
+  `mode.inert` and emits `input.elevated_window` when it begins.
 - `Ctrl+Alt+Del` and the Secure Attention Sequence are **never** interceptable.
   This is not a bug and **MUST NOT** be presented as one.
 - Injected events (`LLKHF_INJECTED`) **MUST** be ignored, or the core's own

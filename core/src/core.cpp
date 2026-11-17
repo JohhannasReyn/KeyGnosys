@@ -263,6 +263,9 @@ struct Core::Impl {
     bool started = false;
     bool stopped = false;
     bool enabled = true;
+    // An elevated window has focus and this process is not elevated, so the
+    // OS drops the core's input to it (SPEC 8.2).
+    bool inert = false;
 
     void note(DiagLevel level, std::string code, std::string message,
               std::string file = {}) {
@@ -733,6 +736,17 @@ struct Core::Impl {
         if (focusId != lastFocus) {
             lastFocus = focusId;
             server->broadcast("focus", focusJson());
+
+            const bool nowInert = focused.has_value() && focused->elevated;
+            if (nowInert != inert) {
+                inert = nowInert;
+                publishState();
+                if (inert) {
+                    note(DiagLevel::Info, "input.elevated_window",
+                         "Interception inert: an elevated window has focus, and this "
+                         "process is not elevated.");
+                }
+            }
         }
 
         if (!due) return;
@@ -821,6 +835,7 @@ struct Core::Impl {
         mode.set("mode", Json(state.mode == Mode::Cursor ? "cursor" : "normal"));
         mode.set("latched", Json(state.latched));
         mode.set("activation", Json(activationName(state.activation)));
+        mode.set("inert", Json(inert));
         server->broadcast("mode", std::move(mode));
 
         Json modifiers = Json::object();
@@ -847,6 +862,7 @@ struct Core::Impl {
         snapshot.set("latched", Json(state.latched));
         snapshot.set("activation", Json(activationName(state.activation)));
         snapshot.set("enabled", Json(enabled));
+        snapshot.set("inert", Json(inert));
         snapshot.set("modifiers", std::move(modifiers));
         snapshot.set("focus", focusJson());
         snapshot.set("windows", windowsJson());
