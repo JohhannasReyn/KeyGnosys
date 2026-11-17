@@ -180,3 +180,25 @@ def test_pressing_a_fading_key_again_cancels_the_fade(state: AppState) -> None:
     state.release("KeyA")
     state.press("KeyA")
     assert "KeyA" not in state.fading
+
+
+# -- inert (elevated window has focus) --------------------------------------
+
+def test_inert_cursor_layer_dims_every_key_but_keeps_its_text(state: AppState) -> None:
+    state.cursor_layer = True
+    before = render(state, "KeyH", "H")
+    assert before.dim is False
+    state.inert = True
+    after = render(state, "KeyH", "H")
+    assert after.dim is True and after.text == before.text
+
+
+def test_inert_status_names_the_reason(state: AppState) -> None:
+    state.inert = True
+    text, tip = state.status_text()
+    assert text == "layer inactive: admin window has focus"
+    assert "elevated (administrator) window" in tip
+
+
+def test_no_status_override_when_not_inert(state: AppState) -> None:
+    assert state.status_text() is None

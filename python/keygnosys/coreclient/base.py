@@ -32,6 +32,8 @@ class CoreClient(QObject):
     keyEvent = Signal(str, str, bool)
     #: (cursor_layer_engaged, latched)
     modeChanged = Signal(bool, bool)
+    #: (inert) an elevated window has focus, so the layer cannot act
+    inertChanged = Signal(bool)
     #: (payload with process / wm_class / title)
     focusChanged = Signal(dict)
     #: (list of slot payloads)
