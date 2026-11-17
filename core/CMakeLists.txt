@@ -107,6 +107,7 @@ if(WIN32)
         src/platform/windows/hook_input.cpp
         src/platform/windows/sendinput_output.cpp
         src/platform/windows/win32_window.cpp
+        src/platform/windows/dpi_awareness.cpp
         src/platform/windows/platform_windows.cpp)
 elseif(UNIX AND NOT APPLE)
     set(KGN_PLATFORM_NAME "linux-x11")
@@ -195,6 +196,7 @@ if(KGN_BUILD_TESTS)
         kgn_add_test_with(test_grace_timer kgn_platform)
         kgn_add_test_with(test_hook_input kgn_platform)
         kgn_add_test_with(test_sendinput_output kgn_platform)
+        kgn_add_test_with(test_dpi_awareness kgn_platform)
 
         # Built, deliberately NOT registered with ctest. It installs a real
         # low-level hook and waits for a real keystroke, so a CI run that
