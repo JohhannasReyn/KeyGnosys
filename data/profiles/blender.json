@@ -1,0 +1,72 @@
+{
+  "schema": "keygnosys/profile/1",
+  "id": "blender",
+  "name": "Blender",
+  "priority": 60,
+  "match": {
+    "process": ["blender.exe", "blender"],
+    "wm_class": ["Blender", "blender"],
+    "title_regex": null
+  },
+  "shortcuts": {
+    "None": {
+      "KeyA": "Select all",
+      "KeyB": "Box select",
+      "KeyC": "Circle select",
+      "KeyG": "Move",
+      "KeyH": "Hide objects",
+      "KeyI": "Insert keyframe",
+      "KeyK": "Insert keyframe menu",
+      "KeyM": "Move to collection",
+      "KeyO": "Proportional edit",
+      "KeyQ": "Quick favourites",
+      "KeyR": "Rotate",
+      "KeyS": "Resize",
+      "KeyW": "Select box tool",
+      "KeyX": "Delete…",
+      "KeyZ": "Shading",
+      "Comma": "Orientation",
+      "Period": "Pivot point",
+      "Backquote": "View",
+      "F1": "Manual",
+      "F2": "Rename",
+      "F3": "Search menu",
+      "F4": "File menu",
+      "Numpad0": "Camera view",
+      "Numpad1": "Front view",
+      "Numpad2": "Orbit down",
+      "Numpad3": "Right view",
+      "Numpad4": "Orbit left",
+      "Numpad5": "Persp/ortho",
+      "Numpad6": "Orbit right",
+      "Numpad7": "Top view",
+      "Numpad8": "Orbit up"
+    },
+    "Shift": {
+      "KeyA": "Add object",
+      "KeyC": "Frame all, centre",
+      "KeyD": "Duplicate",
+      "KeyR": "Repeat last",
+      "KeyS": "Snap",
+      "KeyZ": "Wireframe"
+    },
+    "Control": {
+      "KeyN": "New file",
+      "KeyO": "Open",
+      "KeyQ": "Quit",
+      "KeyS": "Save",
+      "F2": "Batch rename"
+    },
+    "Control+Alt": {
+      "KeyS": "Save as"
+    },
+    "Alt": {
+      "KeyA": "Deselect all",
+      "KeyD": "Duplicate linked",
+      "KeyG": "Clear location",
+      "KeyH": "Show hidden",
+      "KeyI": "Delete keyframe",
+      "KeyW": "Fallback tool pie"
+    }
+  }
+}

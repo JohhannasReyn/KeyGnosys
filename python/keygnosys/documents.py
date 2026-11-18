@@ -749,6 +749,13 @@ class Profile:
             if not isinstance(keys, dict):
                 raise DocumentError(f"shortcuts[{combo!r}] must be an object")
             parts = [p.strip() for p in str(combo).split("+") if p.strip()]
+            # "None" spells the bare key -- a shortcut with no modifier at all
+            # (SPEC section 4.4). It canonicalises to the empty combination,
+            # which is what the overlay computes when nothing is held; the word
+            # exists because an empty JSON key is unreadable, not because the
+            # lookup needs it.
+            if len(parts) == 1 and parts[0].casefold() == "none":
+                parts = []
             unknown = [p for p in parts if p not in MODIFIER_ORDER]
             if unknown:
                 raise DocumentError(
