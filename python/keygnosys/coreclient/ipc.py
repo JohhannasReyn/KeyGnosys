@@ -109,6 +109,7 @@ class IpcClient(CoreClient):
         elif name == "mode":
             self.modeChanged.emit(data.get("mode") == "cursor",
                                   bool(data.get("latched")))
+            self.inertChanged.emit(bool(data.get("inert")))
         elif name == "focus":
             self.focusChanged.emit(data)
         elif name == "windows":

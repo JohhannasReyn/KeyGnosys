@@ -213,6 +213,32 @@ bool LayerEngine::takePending(KeyCode code) {
     return false;
 }
 
+// A buffered key is about to resolve as a tap. Every press buffered BEFORE it
+// resolves first, as the ordinary hold it has turned out to be (the user is
+// typing, and those keys are still down), so the OS sees presses in the order
+// they were made -- not a quick tap overtaking a key pressed earlier (SPEC
+// 6.3.3). Presses buffered after it keep their own windows.
+void LayerEngine::resolvePendingBefore(KeyCode code, DecisionBuffer& out) {
+    std::size_t earlier = 0;
+    while (earlier < pendingCount_ && pending_[earlier].code != code) ++earlier;
+    if (earlier == pendingCount_) return;   // not buffered: nothing to order
+    resolveOldestPending(earlier, out);
+}
+
+// The oldest `count` buffered presses resolve as ordinary holds, in press
+// order. Used when a key that is NOT buffered is about to reach the OS: every
+// buffered press is older than it, so all of them go first.
+void LayerEngine::resolveOldestPending(std::size_t earlier, DecisionBuffer& out) {
+    for (std::size_t i = 0; i < earlier; ++i) {
+        slot(pending_[i].code).clear(Slot::kPending);
+        forwardPress(pending_[i].code, KeyState::Down, out);
+    }
+    for (std::size_t i = earlier; i < pendingCount_; ++i) {
+        pending_[i - earlier] = pending_[i];
+    }
+    pendingCount_ -= earlier;
+}
+
 std::optional<TimePoint> LayerEngine::nextDeadline() const {
     if (pendingCount_ == 0) return std::nullopt;
     // pending_ is kept in press order and `grace` is uniform across entries,
@@ -314,6 +340,9 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
             // nothing for the grace window to disambiguate. Buffering it would
             // cost latency and buy nothing.
             if (!s.has(Slot::kBound) || s.has(Slot::kPassthrough)) {
+                // Not buffered, so it would overtake every buffered press,
+                // all of which were made before it. They go first (O-12).
+                resolveOldestPending(pendingCount_, out);
                 forwardPress(code, state, out);
                 return;
             }
@@ -340,6 +369,7 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
                 return;
             }
 
+            resolvePendingBefore(code, out);
             if (takePending(code)) {
                 // Released before the grace window resolved: an ordinary quick
                 // tap. Send the whole press and release now, in order -- and

@@ -1001,7 +1001,7 @@ events.
 | `hello` | `{core_version, protocol, platform, backends:{input,output,window}, capabilities:[…], limitations:[…]}` | Immediately on connect |
 | `key` | `{code, state:"down"\|"up"\|"repeat", suppressed:bool}` | Every physical key event, suppressed or not |
 | `modifiers` | `{shift, control, alt, meta, caps_layer}` — all bool | Any modifier state change |
-| `mode` | `{mode:"normal"\|"cursor", latched:bool, activation:"toggle"\|"hold"\|"hybrid"}` | Layer engaged/released |
+| `mode` | `{mode:"normal"\|"cursor", latched:bool, activation:"toggle"\|"hold"\|"hybrid", inert:bool}` | Layer engaged/released, `inert` changed, and on connect (sent to that client only, after `hello`) |
 | `focus` | `{app_id, process, wm_class, title, window_id}` | Focused window changes |
 | `windows` | `{slots:[{index, window_id, process, title, monitor}]}` | Window list changes (debounced ≥250 ms) |
 | `monitors` | `{monitors:[{index, x, y, w, h, primary, name}]}` | Monitor topology changes |
@@ -1026,7 +1026,7 @@ positional codes are transmitted. See §12.
 
 | `n` | Payload | Reply |
 |-----|---------|-------|
-| `get_state` | `{}` | Full snapshot: mode, modifiers, focus, windows, monitors |
+| `get_state` | `{}` | Full snapshot: mode, latched, activation, enabled, inert, modifiers, focus, windows, monitors |
 | `set_activation_mode` | `{mode}` | `{}` |
 | `set_enabled` | `{enabled:bool}` | `{}` — master switch; disables interception entirely |
 | `reload_config` | `{}` | `{loaded:{layouts:n, bindings:n, profiles:n}}` |
@@ -1191,7 +1191,7 @@ Such a press is **buffered**, not forwarded, for up to `grace_ms`. It resolves a
 | Event within the window | Resolution |
 |-------------------------|------------|
 | CapsLock arrives | Promote to a cursor-layer press. Nothing reaches the OS. |
-| The key is released | Ordinary tap. Forward press+release together, in order. |
+| The key is released | Ordinary tap. Forward press+release together, in order. Any press buffered before it resolves first as an ordinary hold (§6.3.3). |
 | `grace_ms` elapses | Ordinary hold. Forward the press, mark **passthrough**. |
 
 **The forwarded-release invariant (P7).** A key whose press was forwarded to the
@@ -1284,7 +1284,16 @@ resolves more than one key at once:
 - buffered presses whose grace window lapses together;
 - buffered presses promoted together when CapsLock arrives;
 - held actions released when the layer is left;
-- forwarded presses unwound by `release_all`.
+- forwarded presses unwound by `release_all`;
+- a buffered press released inside its window (a tap) while presses buffered
+  **before** it are still pending. Those earlier presses resolve first, as
+  ordinary holds, and then the tap is forwarded. A quick tap must never
+  overtake a key pressed before it. Presses buffered **after** the tap keep
+  their own windows;
+- a press that is **not** buffered (an unbound key, a passthrough key or a
+  modifier) while presses are still pending. Every pending press resolves
+  first, as an ordinary hold, and then the new press is forwarded. Without
+  this, typing `the` with `h` action-bound reaches the OS as `teh`.
 
 Input order is observable. It decides how chords resolve, which of two
 simultaneous movement keys starts first, and whether a bug reproduces. Leaving
@@ -1602,7 +1611,8 @@ pump. Returning non-zero from the hook proc suppresses the event.
   `docs/manual-test-logs/`.)*
 - Keys cannot be intercepted while an **elevated** window has focus unless the
   core itself runs elevated. Running unelevated is the default; the UI states
-  plainly when the layer is inert for this reason.
+  plainly when the layer is inert for this reason. The core reports this as
+  `mode.inert` and emits `input.elevated_window` when it begins.
 - `Ctrl+Alt+Del` and the Secure Attention Sequence are **never** interceptable.
   This is not a bug and **MUST NOT** be presented as one.
 - Injected events (`LLKHF_INJECTED`) **MUST** be ignored, or the core's own

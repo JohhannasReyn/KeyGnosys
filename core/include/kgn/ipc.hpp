@@ -149,6 +149,16 @@ public:
 
     void setCommandHandler(CommandHandler handler);
 
+    // Events sent to a client right after `hello`, to that client only. This
+    // is how a client that connects late learns the current state without
+    // having to ask or to infer it from later events.
+    struct Greeting {
+        std::string name;
+        Json data;
+    };
+    using GreetingProvider = std::function<std::vector<Greeting>()>;
+    void setGreetingProvider(GreetingProvider provider);
+
     // Accept, read, dispatch and flush, once. Never blocks.
     void poll();
 
@@ -220,6 +230,7 @@ private:
     HelloInfo hello_;
     std::unique_ptr<Transport> transport_;
     CommandHandler handler_;
+    GreetingProvider greeting_;
     std::vector<Session> sessions_;
     ClientId nextClientId_ = 1;
     std::uint64_t eventsDropped_ = 0;

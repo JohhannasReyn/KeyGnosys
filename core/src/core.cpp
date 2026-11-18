@@ -263,6 +263,9 @@ struct Core::Impl {
     bool started = false;
     bool stopped = false;
     bool enabled = true;
+    // An elevated window has focus and this process is not elevated, so the
+    // OS drops the core's input to it (SPEC 8.2).
+    bool inert = false;
 
     void note(DiagLevel level, std::string code, std::string message,
               std::string file = {}) {
@@ -547,7 +550,7 @@ struct Core::Impl {
             case ActionId::WindowSlot: {
                 const std::optional<WindowId> id = slots.at(action.index);
                 if (!id.has_value()) return;   // an empty slot does nothing
-                if (!backends.window->focus(*id)) noteUnsupported(action.id);
+                if (!backends.window->focus(*id)) noteFocusRefused(action.id);
                 return;
             }
             case ActionId::WindowCycle: {
@@ -569,7 +572,7 @@ struct Core::Impl {
                 const std::size_t next = action.cycle == Cycle::Next
                                              ? (at + 1) % count
                                              : (at + count - 1) % count;
-                if (!backends.window->focus(ids[next])) noteUnsupported(action.id);
+                if (!backends.window->focus(ids[next])) noteFocusRefused(action.id);
                 return;
             }
             case ActionId::WindowFocusMonitor: {
@@ -610,6 +613,15 @@ struct Core::Impl {
             }
             default: return;
         }
+    }
+
+    // The backend can focus windows, but Windows refused this one: the window
+    // has gone, or the foreground lock held despite the input-queue attach.
+    // Distinct from noteUnsupported, which means the operation is missing.
+    void noteFocusRefused(ActionId id) {
+        note(DiagLevel::Warn, "window.unsupported",
+             std::string(actionName(id)) +
+                 ": the system refused to focus the target window; try again");
     }
 
     void noteUnsupported(ActionId id) {
@@ -724,6 +736,17 @@ struct Core::Impl {
         if (focusId != lastFocus) {
             lastFocus = focusId;
             server->broadcast("focus", focusJson());
+
+            const bool nowInert = focused.has_value() && focused->elevated;
+            if (nowInert != inert) {
+                inert = nowInert;
+                publishState();
+                if (inert) {
+                    note(DiagLevel::Info, "input.elevated_window",
+                         "Interception inert: an elevated window has focus, and this "
+                         "process is not elevated.");
+                }
+            }
         }
 
         if (!due) return;
@@ -803,15 +826,23 @@ struct Core::Impl {
                  " needs an output backend, and this build has none");
     }
 
+    // The `mode` event payload. One place, so the broadcast and the greeting a
+    // late client gets cannot disagree about what the event carries.
+    [[nodiscard]] Json modeJson(const PublishedState& state) const {
+        Json mode = Json::object();
+        mode.set("mode", Json(state.mode == Mode::Cursor ? "cursor" : "normal"));
+        mode.set("latched", Json(state.latched));
+        mode.set("activation", Json(activationName(state.activation)));
+        mode.set("inert", Json(inert));
+        return mode;
+    }
+
     void publishState() {
         const PublishedState state = published.state();
         publishedVersion = published.version();
         if (!server) return;
 
-        Json mode = Json::object();
-        mode.set("mode", Json(state.mode == Mode::Cursor ? "cursor" : "normal"));
-        mode.set("latched", Json(state.latched));
-        mode.set("activation", Json(activationName(state.activation)));
+        Json mode = modeJson(state);
         server->broadcast("mode", std::move(mode));
 
         Json modifiers = Json::object();
@@ -838,6 +869,7 @@ struct Core::Impl {
         snapshot.set("latched", Json(state.latched));
         snapshot.set("activation", Json(activationName(state.activation)));
         snapshot.set("enabled", Json(enabled));
+        snapshot.set("inert", Json(inert));
         snapshot.set("modifiers", std::move(modifiers));
         snapshot.set("focus", focusJson());
         snapshot.set("windows", windowsJson());
@@ -1128,6 +1160,11 @@ OwnResult Core::start() {
         std::make_unique<Server>(impl_->hello, impl_->owner.takeTransport());
     impl_->server->setCommandHandler(
         [impl = impl_.get()](const Command& command) { return impl->handle(command); });
+    impl_->server->setGreetingProvider([impl = impl_.get()] {
+        std::vector<Server::Greeting> greeting;
+        greeting.push_back({"mode", impl->modeJson(impl->published.state())});
+        return greeting;
+    });
 
     std::string from;
     if (impl_->loadBindings(from)) {

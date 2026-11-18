@@ -19,6 +19,20 @@
 
 namespace kgn::win {
 
+// True when `window` handles WM_DPICHANGED itself -- it is per-monitor DPI
+// aware -- so moving it to a monitor of another DPI must NOT also be scaled by
+// the core, or it is scaled twice (M3 finding O-13).
+bool windowRescalesItself(HWND window);
+
+// The size to give a window moved across a DPI ratio of `dpiScale`. A window
+// that rescales itself keeps its current size; any other is scaled.
+SIZE sizeAfterDpiMove(SIZE current, double dpiScale, bool selfScaling);
+
+// True when `process` runs at a higher integrity level than this process.
+// Windows withholds input to such a window from our low-level hook (M3
+// finding O-10). False when either token cannot be read.
+bool runsAboveOurIntegrity(HANDLE process);
+
 class Win32Window final : public WindowBackend {
 public:
     [[nodiscard]] std::vector<WindowInfo> windows() override;

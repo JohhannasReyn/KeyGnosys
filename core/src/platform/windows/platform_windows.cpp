@@ -5,6 +5,7 @@
 
 #include "kgn/platform.hpp"
 
+#include "dpi_awareness.hpp"
 #include "hook_input.hpp"
 #include "sendinput_output.hpp"
 #include "win32_window.hpp"
@@ -12,6 +13,12 @@
 namespace kgn {
 
 Backends createBackends() {
+    // First, before any backend exists: every monitor rectangle, cursor
+    // position and window rectangle the backends read must be physical pixels,
+    // not the virtualised ones a DPI-unaware process gets on a scaled monitor
+    // (M3 finding O-11).
+    win::enablePerMonitorDpiAwareness();
+
     Backends backends;
     backends.output = std::make_unique<win::SendInputOutput>();
     backends.window = std::make_unique<win::Win32Window>();

@@ -64,6 +64,8 @@ class AppState:
     profile: Profile | None = None
 
     cursor_layer: bool = False
+    #: The core cannot see keys because an elevated window has focus.
+    inert: bool = False
     caps_lock_led: bool = False
     num_lock_led: bool = True
     scroll_lock_led: bool = False
@@ -122,6 +124,9 @@ class AppState:
 
         if layer is LegendLayer.CURSOR:
             text, dim = self._cursor_legend(code)
+            # Inert: the layer is not acting, so no key is live. Keep the text
+            # so the user still sees what the layer would do.
+            dim = dim or self.inert
             style = self._style_for(code, role, unbound=dim)
             return KeyRender(text=text, style=style, dim=dim,
                              sub=None, led=self._led_for(code))
@@ -218,6 +223,23 @@ class AppState:
         if code == "ScrollLock":
             return self.scroll_lock_led
         return None
+
+    def status_text(self) -> tuple[str, str] | None:
+        """(status, tooltip) overriding the connection status, or None."""
+        if not self.inert:
+            return None
+        return (
+            "layer inactive: admin window has focus",
+            "Windows does not let a non-elevated program read keys typed into "
+            "an elevated (administrator) window. The layer resumes when an "
+            "ordinary window has focus.",
+        )
+
+    def banner_text(self) -> str | None:
+        """Large on-keyboard notice, shown whenever the layer is inert."""
+        if not self.inert:
+            return None
+        return "Layer inactive: admin window has focus"
 
     # -- mutation ---------------------------------------------------------
 

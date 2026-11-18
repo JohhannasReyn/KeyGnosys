@@ -132,6 +132,8 @@ class Overlay:
                 "mock input",
                 "Running without the native core.\n\n" + "\n".join(
                     f"• {line}" for line in limits))
+        elif self.state.connected and (inert := self.state.status_text()):
+            self.bar.set_status(*inert)
         elif self.state.connected:
             self.bar.set_status("core connected", "\n".join(limits))
         else:
@@ -154,6 +156,7 @@ class Overlay:
     def _connect_client(self) -> None:
         self.client.keyEvent.connect(self._on_key)
         self.client.modeChanged.connect(self._on_mode)
+        self.client.inertChanged.connect(self._on_inert)
         self.client.focusChanged.connect(self._on_focus)
         self.client.windowsChanged.connect(self._on_windows)
         self.client.overlayToggleRequested.connect(self._on_hide)
@@ -174,6 +177,11 @@ class Overlay:
 
     def _on_mode(self, cursor_layer: bool, _latched: bool) -> None:
         self.state.cursor_layer = cursor_layer
+        self.window.view.update()
+
+    def _on_inert(self, inert: bool) -> None:
+        self.state.inert = inert
+        self._update_status()
         self.window.view.update()
 
     def _on_focus(self, payload: dict) -> None:
@@ -198,6 +206,7 @@ class Overlay:
 
     def _on_disconnected(self, _reason: str) -> None:
         self.state.connected = False
+        self.state.inert = False
         self.state.release_all()
         self.window.view.update()
         self._update_status()
