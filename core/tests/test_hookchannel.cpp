@@ -81,30 +81,6 @@ KGN_TEST(a_forward_for_a_different_key_is_synthesised_not_passed_through) {
     KGN_CHECK_EQ(ring.size(), std::size_t{1});
 }
 
-KGN_TEST(the_grace_replay_synthesises_both_halves_in_order) {
-    // The physical event is the Up, but a synthetic Down must reach the OS
-    // first. Passing the Up through natively would deliver up-then-down and
-    // leave the key held forever.
-    DecisionBuffer decisions;
-    decisions.push(forwardOf("KeyD", KeyState::Down));
-    decisions.push(forwardOf("KeyD", KeyState::Up));
-    WorkRing ring;
-
-    const bool native = translateDecisions(
-        decisions, KeyCode::fromString("KeyD"), KeyState::Up, ring);
-
-    KGN_CHECK(!native);
-    WorkItem first{};
-    WorkItem second{};
-    KGN_CHECK(ring.pop(first));
-    KGN_CHECK(ring.pop(second));
-    KGN_CHECK(first.kind == WorkItem::Kind::SendKey);
-    KGN_CHECK(first.down);
-    KGN_CHECK(second.kind == WorkItem::Kind::SendKey);
-    KGN_CHECK(!second.down);
-    KGN_CHECK(ring.empty());
-}
-
 KGN_TEST(a_matching_forward_is_not_native_when_anything_follows_it) {
     // The "exactly one decision" half of the rule, pinned directly.
     //
@@ -139,14 +115,12 @@ KGN_TEST(the_timer_path_never_passes_anything_through) {
     KGN_CHECK_EQ(ring.size(), std::size_t{1});
 }
 
-KGN_TEST(suppress_and_buffer_decisions_cost_no_capacity) {
-    // This is what the release-capacity proof rests on. If either of these
-    // spends a slot, an Up for a key with no obligation spends reserve while
+KGN_TEST(suppress_decisions_cost_no_capacity) {
+    // This is what the release-capacity proof rests on. If a Suppress spends a
+    // slot, an Up for a key with no obligation spends reserve while
     // discharging nothing, and no bound exists.
     DecisionBuffer decisions;
     decisions.push(suppressOf("KeyQ", KeyState::Up));
-    decisions.push({Decision::Kind::Buffer, KeyCode::fromString("KeyW"),
-                    KeyState::Down});
     WorkRing ring;
 
     translateDecisions(decisions, KeyCode::fromString("KeyQ"), KeyState::Up, ring);

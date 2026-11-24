@@ -1,8 +1,8 @@
 // Which channel delivers a physical press, and why it may not change mid-press
 // (finding O-5).
 //
-// Live measurement on 2026-09-16: a `Space` press replayed when its grace window
-// lapsed was published to the work ring, and the physical release was then
+// Live measurement on 2026-09-16: a `Space` press replayed onto synthetic work
+// was published to the work ring, and the physical release was then
 // forwarded natively -- straight down the hook chain, while the replayed press
 // was still short of SendInput. Windows received Up, then Down, and held Space
 // until a later press of the same key cleared it.
@@ -48,7 +48,7 @@ std::vector<std::pair<std::uint16_t, bool>> drain(WorkRing& ring) {
     return out;
 }
 
-// One decision, translated as the grace timer does it: no physical event in
+// One decision, translated as a synthetic replay is: no physical event in
 // hand, so nothing can be native.
 bool translateTimer(const Decision& decision, WorkRing& ring, DeliveryChannel& channel) {
     DecisionBuffer buffer;
@@ -75,7 +75,7 @@ KGN_TEST(a_release_may_not_overtake_its_own_still_queued_press) {
     WorkRing ring;
     DeliveryChannel channel;
 
-    // 1. The grace window lapses and the press is replayed onto synthetic work.
+    // 1. The press is replayed onto synthetic work.
     KGN_CHECK(!translateTimer(forwardOf(SPACE, KeyState::Down), ring, channel));
     KGN_CHECK(channel.stateFor(SPACE) == Channel::Synthetic);
 
@@ -124,21 +124,6 @@ KGN_TEST(with_nothing_committed_the_native_path_is_still_taken) {
     // it, or it predates us. Native, exactly as before the repair.
     KGN_CHECK(translateEvent(forwardOf(A, KeyState::Up), A, KeyState::Up, ring, channel));
     KGN_CHECK(drain(ring).empty());
-}
-
-KGN_TEST(a_grace_pending_press_commits_to_neither_channel) {
-    WorkRing ring;
-    DeliveryChannel channel;
-    // Buffered: the Windows-visible Down has not happened on EITHER channel, so
-    // it must not constrain what follows.
-    DecisionBuffer buffer;
-    buffer.push({Decision::Kind::Buffer, A, KeyState::Down});
-    KGN_CHECK(!translateDecisions(buffer, A, KeyState::Down, ring, &channel));
-    KGN_CHECK(channel.stateFor(A) == Channel::None);
-    KGN_CHECK(drain(ring).empty());
-    // And a press that then resolves natively is free to do so.
-    KGN_CHECK(translateEvent(forwardOf(A, KeyState::Down), A, KeyState::Down, ring, channel));
-    KGN_CHECK(channel.stateFor(A) == Channel::Native);
 }
 
 // ---------------------------------------------------------------------------
