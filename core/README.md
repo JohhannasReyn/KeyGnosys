@@ -198,7 +198,7 @@ and reads two preallocated single-producer rings:
 - **work items** — what the core must *do*: synthesise a key, start or stop an
   action. Ordered, and provably never dropped. A lost release is a key or a
   mouse button held down forever.
-- **physical records** — one per hook callback, none for timer or control work.
+- **physical records** — one per hook callback, none for control work.
   These produce the `key` IPC event. Losing one costs an overlay highlight.
 
 Keeping them apart is not tidiness. It is what makes the queue bound provable:

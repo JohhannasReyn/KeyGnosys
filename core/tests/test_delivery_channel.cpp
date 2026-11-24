@@ -48,9 +48,9 @@ std::vector<std::pair<std::uint16_t, bool>> drain(WorkRing& ring) {
     return out;
 }
 
-// One decision, translated as a synthetic replay is: no physical event in
+// One decision, translated as release_all is: no physical event in
 // hand, so nothing can be native.
-bool translateTimer(const Decision& decision, WorkRing& ring, DeliveryChannel& channel) {
+bool translateWithoutPhysicalEvent(const Decision& decision, WorkRing& ring, DeliveryChannel& channel) {
     DecisionBuffer buffer;
     buffer.push(decision);
     return translateDecisions(buffer, KeyCode{}, KeyState::Down, ring, &channel);
@@ -76,7 +76,7 @@ KGN_TEST(a_release_may_not_overtake_its_own_still_queued_press) {
     DeliveryChannel channel;
 
     // 1. The press is replayed onto synthetic work.
-    KGN_CHECK(!translateTimer(forwardOf(SPACE, KeyState::Down), ring, channel));
+    KGN_CHECK(!translateWithoutPhysicalEvent(forwardOf(SPACE, KeyState::Down), ring, channel));
     KGN_CHECK(channel.stateFor(SPACE) == Channel::Synthetic);
 
     // 2. That work is NOT drained. This is the whole defect: the ring reports an
@@ -132,7 +132,7 @@ KGN_TEST(with_nothing_committed_the_native_path_is_still_taken) {
 KGN_TEST(repeats_of_a_synthetic_press_stay_ordered) {
     WorkRing ring;
     DeliveryChannel channel;
-    KGN_CHECK(!translateTimer(forwardOf(A, KeyState::Down), ring, channel));
+    KGN_CHECK(!translateWithoutPhysicalEvent(forwardOf(A, KeyState::Down), ring, channel));
     // layer_engine emits Forward(code, Repeat) for a repeat of a forwarded key,
     // which matches the native shape. It must not take it.
     KGN_CHECK(!translateEvent(forwardOf(A, KeyState::Repeat), A, KeyState::Repeat, ring, channel));
@@ -159,7 +159,7 @@ KGN_TEST(repeats_of_a_native_press_stay_native) {
 KGN_TEST(an_unrelated_key_is_not_blocked_by_a_committed_one) {
     WorkRing ring;
     DeliveryChannel channel;
-    KGN_CHECK(!translateTimer(forwardOf(A, KeyState::Down), ring, channel));
+    KGN_CHECK(!translateWithoutPhysicalEvent(forwardOf(A, KeyState::Down), ring, channel));
     // B has nothing pending of its own. Serialising it here would slow every
     // keystroke typed near a replayed one for no correctness gain: Windows key
     // state is per key, so B cannot be stranded by A's press.
@@ -196,7 +196,7 @@ KGN_TEST(a_fast_tap_replays_press_and_release_in_order) {
 KGN_TEST(a_modifier_replay_keeps_its_release_ordered) {
     WorkRing ring;
     DeliveryChannel channel;
-    KGN_CHECK(!translateTimer(forwardOf(SHIFT, KeyState::Down), ring, channel));
+    KGN_CHECK(!translateWithoutPhysicalEvent(forwardOf(SHIFT, KeyState::Down), ring, channel));
     KGN_CHECK(!translateEvent(forwardOf(SHIFT, KeyState::Up), SHIFT, KeyState::Up, ring, channel));
     const auto delivered = drain(ring);
     KGN_CHECK(delivered.size() == 2);
@@ -209,7 +209,7 @@ KGN_TEST(caps_lock_is_not_exempt) {
     // covered here or it bypasses the policy entirely (SPEC 6.3.4).
     WorkRing ring;
     DeliveryChannel channel;
-    KGN_CHECK(!translateTimer(forwardOf(CAPS, KeyState::Down), ring, channel));
+    KGN_CHECK(!translateWithoutPhysicalEvent(forwardOf(CAPS, KeyState::Down), ring, channel));
     KGN_CHECK(!translateEvent(forwardOf(CAPS, KeyState::Up), CAPS, KeyState::Up, ring, channel));
     KGN_CHECK(drain(ring).size() == 2);
 }
@@ -220,7 +220,7 @@ KGN_TEST(caps_lock_is_not_exempt) {
 KGN_TEST(release_all_discharges_every_commitment_in_press_order) {
     WorkRing ring;
     DeliveryChannel channel;
-    KGN_CHECK(!translateTimer(forwardOf(A, KeyState::Down), ring, channel));
+    KGN_CHECK(!translateWithoutPhysicalEvent(forwardOf(A, KeyState::Down), ring, channel));
     KGN_CHECK(translateEvent(forwardOf(B, KeyState::Down), B, KeyState::Down, ring, channel));
     KGN_CHECK(channel.stateFor(A) == Channel::Synthetic);
     KGN_CHECK(channel.stateFor(B) == Channel::Native);
@@ -240,7 +240,7 @@ KGN_TEST(release_all_discharges_every_commitment_in_press_order) {
 KGN_TEST(forgetting_everything_leaves_no_commitment) {
     WorkRing ring;
     DeliveryChannel channel;
-    KGN_CHECK(!translateTimer(forwardOf(A, KeyState::Down), ring, channel));
+    KGN_CHECK(!translateWithoutPhysicalEvent(forwardOf(A, KeyState::Down), ring, channel));
     channel.forgetAll();
     KGN_CHECK(channel.stateFor(A) == Channel::None);
     KGN_CHECK(channel.nativeAllowed(A));
@@ -266,7 +266,7 @@ KGN_TEST(a_commitment_is_a_routing_choice_not_a_receipt) {
     // orphan key-up (K-E5), reported through output.send_failed.
     WorkRing ring;
     DeliveryChannel channel;
-    KGN_CHECK(!translateTimer(forwardOf(A, KeyState::Down), ring, channel));
+    KGN_CHECK(!translateWithoutPhysicalEvent(forwardOf(A, KeyState::Down), ring, channel));
     // The consumer takes the press and, say, fails to send it. Nothing about
     // that reaches this decision.
     WorkItem item{};
@@ -285,7 +285,7 @@ KGN_TEST(a_commitment_is_a_routing_choice_not_a_receipt) {
 KGN_TEST(the_commitment_outlives_every_event_before_the_release) {
     WorkRing ring;
     DeliveryChannel channel;
-    KGN_CHECK(!translateTimer(forwardOf(A, KeyState::Down), ring, channel));
+    KGN_CHECK(!translateWithoutPhysicalEvent(forwardOf(A, KeyState::Down), ring, channel));
     for (int i = 0; i < 5; ++i) {
         KGN_CHECK(!translateEvent(forwardOf(A, KeyState::Repeat), A, KeyState::Repeat,
                                   ring, channel));
@@ -310,7 +310,7 @@ KGN_TEST(a_release_is_never_delivered_by_a_channel_its_press_did_not_use) {
             WorkRing ring;
             DeliveryChannel channel;
             if (synthetic != 0) {
-                KGN_CHECK(!translateTimer(forwardOf(A, press), ring, channel));
+                KGN_CHECK(!translateWithoutPhysicalEvent(forwardOf(A, press), ring, channel));
             } else {
                 KGN_CHECK(translateEvent(forwardOf(A, press), A, press, ring, channel));
             }

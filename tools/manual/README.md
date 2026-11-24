@@ -136,7 +136,7 @@ then trust a zero.
 
 **2. Injected events are invisible to the core's own stream, by design.** The
 hook skips `LLKHF_INJECTED` so its own `SendInput` output cannot feed back. So
-grace replays and `release_all` output can only be seen by an *independent* hook.
+grace replays (historical: the grace window was removed on 2026-11-22) and `release_all` output can only be seen by an *independent* hook.
 Never read "no synthetic event in the core's stream" as "the core did nothing".
 
 **3. The operator types their replies on the same keyboard.** Every capture is

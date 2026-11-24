@@ -312,8 +312,8 @@ struct Core::Impl {
 
     // Stream B. ONE `key` event per PHYSICAL event -- never one per decision.
     //
-    // A synthetic replay is two decisions and one physical event; a release_all is
-    // many decisions and no physical event at all. Publishing per decision, as
+    // However many work items one physical event yields, it publishes exactly one
+    // `key` event; a release_all publishes none, since it has no physical event. Publishing per decision, as
     // this once did, reports keys the user never pressed.
     void drainPublication() {
         PhysicalRecord record{};

@@ -18,10 +18,14 @@
 //   native     the hook callback returns CallNextHookEx and the physical event
 //              continues down the chain. Synchronous.
 //
-// A synthetic replay (release_all, a mode switch) publishes a synthetic Down; if
-// the physical release is then forwarded natively it can overtake that Down, and
-// Windows is left holding a key whose release has already gone past. Measured
-// live on 2026-09-16: a `Space` press replayed at grace expiry (by the
+// Today the only source of a synthetic Down is a duplicate Down for a key the
+// engine has already forwarded: it comes back as Forward(code, Repeat), which
+// fails the native shape for a Down event, so it is synthesised. (release_all
+// and leaving the layer emit only Up Forwards, ReleaseActions and LayerExited.)
+// If the physical release is then forwarded natively it can overtake that Down,
+// and Windows is left holding a key whose release has already gone past. The
+// race was first measured, with another source of synthetic Downs, live on
+// 2026-09-16: a `Space` press replayed at grace expiry (by the
 // since-removed grace window), its release forwarded natively 15 ms ahead of the
 // injected press, left Space held in Windows until a later press of the same
 // key cleared it.
@@ -48,7 +52,8 @@
 //                        Decided AFTER the engine. (O-5)
 //
 // An ordinary bound key passed through is Engine-routed and Native-delivered; a
-// synthetic replay is Engine-routed and Synthetic-delivered. Folding them into one
+// synthetic Down (a duplicate Down for a forwarded key) is Engine-routed and
+// Synthetic-delivered. Folding them into one
 // enum would need the cross product and would make the O-1 meaning ambiguous,
 // which is worth more than the byte it would save.
 //
@@ -67,8 +72,8 @@ public:
     enum class Channel : std::uint8_t {
         // No press of this key is in flight, or its release is done. The next
         // Down is free to select either channel -- including a press the engine
-        // is still withholding, which has selected NEITHER channel yet and so
-        // must not constrain anything.
+        // suppressed inside the layer, which has selected NEITHER channel and
+        // so must not constrain anything.
         None,
         // The Windows-visible Down was the physical event itself, passed down
         // the hook chain. The rest of the press may keep using that path.
