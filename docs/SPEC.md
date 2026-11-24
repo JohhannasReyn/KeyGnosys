@@ -142,8 +142,6 @@ and every locked drag button (P7).
 A reload **MUST NOT** discard physical input the user has already committed.
 Forwarded presses are untouched: P7 outranks a config reload.
 
-Multiple keys resolved by one reload are emitted in press order (§6.3.3).
-
 ### 3.4 Update and migration policy
 
 **An update adds capability. It never resets, discards, or silently rewrites
