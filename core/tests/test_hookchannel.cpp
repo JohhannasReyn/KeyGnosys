@@ -102,8 +102,8 @@ KGN_TEST(a_matching_forward_is_not_native_when_anything_follows_it) {
     KGN_CHECK_EQ(ring.size(), std::size_t{2});
 }
 
-KGN_TEST(the_timer_path_never_passes_anything_through) {
-    // No physical event is in hand, so nothing can be satisfied natively even
+KGN_TEST(a_decision_with_no_physical_event_never_passes_through) {
+    // No physical event is in hand (release_all, a control), so nothing can be satisfied natively even
     // when the decision looks like an ordinary forward.
     DecisionBuffer decisions;
     decisions.push(forwardOf("KeyD", KeyState::Down));
@@ -278,6 +278,10 @@ KGN_TEST(the_whole_release_drain_fits_inside_the_reserved_capacity) {
     // Drive the engine to its worst case -- as many held actions as it can
     // hold -- then admit nothing further and drain it entirely through Up
     // events, counting the work items produced.
+    //
+    // This drives the held-action half of the bound (U <= kMaxHeld); the
+    // forwarded half (F <= kMaxHeld, kMaxReleaseWork = 2 * kMaxHeld + 1 = 513)
+    // is covered by the layer-engine worst-case unwind test.
     //
     // The theorem says that total is at most kMaxReleaseWork. If it ever
     // exceeds it, the admission gate is too small and a release can be lost,
