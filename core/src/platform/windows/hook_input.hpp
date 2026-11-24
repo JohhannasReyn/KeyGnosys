@@ -2,7 +2,7 @@
 //
 // This backend is also the EngineOwner, and it has to be. Windows asks the
 // hook procedure a synchronous question -- suppress this event or not -- and
-// the answer is a function of mode, latch, grace and per-key state that only
+// the answer is a function of mode, latch and per-key state that only
 // the layer engine holds. There is no way to answer it from another thread
 // without making the hook wait, and a hook that waits past
 // LowLevelHooksTimeout is silently unhooked.

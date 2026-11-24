@@ -312,7 +312,7 @@ struct Core::Impl {
 
     // Stream B. ONE `key` event per PHYSICAL event -- never one per decision.
     //
-    // A grace replay is two decisions and one physical event; a release_all is
+    // A synthetic replay is two decisions and one physical event; a release_all is
     // many decisions and no physical event at all. Publishing per decision, as
     // this once did, reports keys the user never pressed.
     void drainPublication() {

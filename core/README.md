@@ -24,7 +24,7 @@ something that merely looks like it is working.
 |---|---|
 | ✅ | `kgn_engine`: the platform-free library — key vocabulary, layer engine, motion, actions, config, IPC protocol |
 | ✅ | `src/keycode.cpp` — the key vocabulary, interning, modifier grouping |
-| ✅ | `src/layer_engine.cpp` — the CapsLock state machine, the grace window, and the P7 forwarded-release invariant with its mirror |
+| ✅ | `src/layer_engine.cpp` — the CapsLock state machine and the P7 forwarded-release invariant with its mirror |
 | ✅ | `src/motion.cpp` — the 60 Hz integrator: ramp, diagonal normalisation, fractional accumulation |
 | ✅ | `src/actions.cpp` — the action catalog and the dispatcher, with its fail-safe obligation rule |
 | ✅ | `src/config.cpp` — bindings documents, where a bad binding costs exactly that binding |

@@ -308,8 +308,7 @@ clock and returns decisions, and touches no OS API.
 
 This began as [`legacy/kbd_layer.c`](legacy/kbd_layer.c), a single-file Linux
 evdev daemon with hardcoded bindings. The ideas that survive into the current
-design are grab-and-reinject, the CapsLock race grace window, live config
-reload, and the forwarded-release invariant that stops keys sticking down. What
+design are grab-and-reinject, live config reload, and the forwarded-release invariant that stops keys sticking down. What
 changed is everything else: two platforms, arbitrary actions, data-driven
 configuration, and a UI that can see what the engine is doing.
 

@@ -712,7 +712,7 @@ KGN_TEST(stepping_with_no_input_backend_moves_nothing_and_does_not_spin) {
 }
 
 KGN_TEST(a_key_event_is_published_once_per_physical_event_not_once_per_decision) {
-    // A grace replay is ONE physical Up that produces TWO Forward decisions.
+    // A synthetic replay is ONE physical Up that produces TWO Forward decisions.
     // Publishing per decision -- which is what the core did before the streams
     // were separated -- reports a key press the user never made.
     Fixture fixture("publish");
