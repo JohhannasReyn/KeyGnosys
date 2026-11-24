@@ -139,17 +139,8 @@ produces zero valid documents **MUST** keep the previous set and emit a diagnost
 Reloading bindings **MUST** release every held action whose binding disappeared,
 and every locked drag button (P7).
 
-A reload **MUST NOT** discard physical input the user has already committed. A
-press sitting in the grace window was delayed only to resolve *layer intent*,
-not to await permission:
-
-- if the key is still bound to an action, the press stays buffered, **retaining
-  its original press time** — restarting the clock would silently extend the
-  grace window;
-- if the key is no longer action-bound, there is nothing left to disambiguate,
-  so the press resolves immediately as the ordinary forwarded keystroke it
-  turned out to be, and its release obligation is recorded;
-- forwarded presses are untouched. P7 outranks a config reload.
+A reload **MUST NOT** discard physical input the user has already committed.
+Forwarded presses are untouched: P7 outranks a config reload.
 
 Multiple keys resolved by one reload are emitted in press order (§6.3.3).
 
@@ -643,7 +634,6 @@ Single document, user config root, written by the settings UI.
   "behavior": {
     "activation_mode": "hybrid",    // "toggle" | "hold" | "hybrid"
     "hybrid_tap_ms": 200,           // press shorter than this = tap/latch
-    "grace_ms": 50,                 // CapsLock race window (§6.3)
     "real_capslock_gesture": "Shift+CapsLock",   // or "double-tap" | "none"
     "layout": "us-ansi-104",
     "bindings": "default",
@@ -1135,7 +1125,7 @@ any file outside `src/platform/<os>/` plus one line in the factory.
 
 ### 6.3 Layer engine state machine
 
-States: `NORMAL`, `CURSOR`. Plus a per-key sub-state for the grace window.
+States: `NORMAL`, `CURSOR`.
 
 **CapsLock handling by activation mode:**
 
@@ -1179,20 +1169,17 @@ as passthrough while the first omits it, and a reload that removes a binding
 cannot leave stale behaviour behind, because the whole map is replaced in a
 single call with no observable intermediate state.
 
-**A passthrough key is never delayed by the grace window.** It does the same
-thing whether the layer is engaged or not, so there is nothing to disambiguate,
-and buffering it would cost latency and buy nothing.
+**No key is ever delayed.** A key bound in the cursor layer, pressed while the
+layer is off, is ordinary typing: it passes through natively, exactly like an
+unbound key. A passthrough key does the same thing whether the layer is engaged
+or not, so there is nothing to disambiguate either.
 
-**The grace window (inherited from the prototype).** A key bound in the cursor
-layer, pressed while in `NORMAL`, is *ambiguous* — the user may be typing it, or
-may be a few milliseconds ahead of the CapsLock that was meant to precede it.
-Such a press is **buffered**, not forwarded, for up to `grace_ms`. It resolves as:
-
-| Event within the window | Resolution |
-|-------------------------|------------|
-| CapsLock arrives | Promote to a cursor-layer press. Nothing reaches the OS. |
-| The key is released | Ordinary tap. Forward press+release together, in order. Any press buffered before it resolves first as an ordinary hold (§6.3.3). |
-| `grace_ms` elapses | Ordinary hold. Forward the press, mark **passthrough**. |
+**CapsLock first is the only way in.** A key pressed before CapsLock is typed;
+it is not retroactively promoted to a cursor-layer press. The prototype's grace
+window, which buffered bound keys for a few milliseconds to catch exactly that
+case, was removed on 2026-11-22: the latency on everyday letters and the
+reordering bugs O-2/O-12 outweighed catching a key pressed a few ms before
+CapsLock. See §15.10.
 
 **The forwarded-release invariant (P7).** A key whose press was forwarded to the
 OS is flagged. Its release **MUST** also be forwarded, unconditionally,
@@ -1201,14 +1188,13 @@ key stuck down in the compositor. The invariant applies equally to mode changes,
 config reloads, `release_all`, client disconnects, and process shutdown — every
 exit path **MUST** run `OutputBackend::releaseAll()`.
 
-It covers **every** press that reaches the OS, not only the grace-window replay:
+It covers **every** press that reaches the OS:
 
 | Forwarded press | Why it is at risk |
 |-----------------|-------------------|
 | Ordinary typing while the layer is off | The layer may engage before the key is released |
 | A **modifier** forwarded inside the layer | The layer may deactivate, or change mode, while the modifier is still physically held |
 | A **`key.passthrough`** binding | Same: the layer may drop while the key is held |
-| A key replayed when the **grace window** lapses | The layer may engage immediately afterwards |
 | A **real CapsLock** from the escape gesture | Shift is commonly released first, changing the modifier state mid-press |
 
 There is exactly one code path by which a press reaches the OS, and it records
@@ -1239,8 +1225,8 @@ cannot be unwound by `release_all`. One byte of packed flags per key covers the
 whole domain in 64 KiB, allocated once at construction, so the question does not
 arise.
 
-The remaining bounds are on **simultaneity** — how many keys can be buffered,
-held, or forwarded at one time — and each **MUST fail safe**:
+The remaining bounds are on **simultaneity** — how many keys can be
+held or forwarded at one time — and each **MUST fail safe**:
 
 > **When an obligation cannot be recorded, the decision that would create it is
 > not emitted.**
@@ -1266,9 +1252,8 @@ unreachable surfaces as a diagnostic if it ever occurs.
 
 A `Suppress` decision **MUST** report the `KeyState` of the input event it
 suppressed, not of some other event the engine was attempting to synthesise.
-The one case where these differ is the grace-window tap replay, which forwards
-a press while handling a release: if that press cannot be forwarded, the
-resulting `Suppress` reports the **release**.
+The rule matters wherever a handler synthesises a decision for one event while
+processing another: the `Suppress` still reports the event that was suppressed.
 
 The rule exists so a `Suppress` is self-describing. Logging, tracing,
 diagnostics and any future IPC consumer read the decision stream without access
@@ -1281,19 +1266,8 @@ Decisions **MUST** be emitted in a deterministic order, and that order **MUST**
 be the order the keys were pressed in. This applies to every place the engine
 resolves more than one key at once:
 
-- buffered presses whose grace window lapses together;
-- buffered presses promoted together when CapsLock arrives;
 - held actions released when the layer is left;
-- forwarded presses unwound by `release_all`;
-- a buffered press released inside its window (a tap) while presses buffered
-  **before** it are still pending. Those earlier presses resolve first, as
-  ordinary holds, and then the tap is forwarded. A quick tap must never
-  overtake a key pressed before it. Presses buffered **after** the tap keep
-  their own windows;
-- a press that is **not** buffered (an unbound key, a passthrough key or a
-  modifier) while presses are still pending. Every pending press resolves
-  first, as an ordinary hold, and then the new press is forwarded. Without
-  this, typing `the` with `h` action-bound reaches the OS as `teh`.
+- forwarded presses unwound by `release_all`.
 
 Input order is observable. It decides how chords resolve, which of two
 simultaneous movement keys starts first, and whether a bug reproduces. Leaving
@@ -1310,7 +1284,6 @@ can all produce them.
 |-------|-----------|
 | A press for a key already forwarded | Forwarded **as a repeat**, not as a second press. A second press would owe a second release, and only one physical release is coming — so the key would be left down forever. |
 | A press for a key already running an action | Suppressed; the action is already held. |
-| A press for a key already buffered | Kept buffered, retaining the **original** press time, so a repeated press cannot extend the grace window indefinitely. |
 | A release for a key whose press the engine **observed and withheld** | Suppressed (the mirror obligation, below). |
 | A release for a key whose press the engine **never observed** | **Forwarded natively.** Not observing a press is not evidence that the OS did not receive one (routing provenance, below). |
 | An invalid key code | Suppressed in every direction. It never produces a press, so it can never owe a release. |
@@ -1360,7 +1333,7 @@ purposes and are reset at different times:
 
 | Provenance of the press | Its release |
 |---|---|
-| Routed to the engine while interception was enabled | Follows the engine's decision above — it owns whether the press was forwarded, buffered, suppressed, or already discharged by a synthesized release |
+| Routed to the engine while interception was enabled | Follows the engine's decision above — it owns whether the press was forwarded, suppressed, or already discharged by a synthesized release |
 | Allowed through to the OS without the engine (interception disabled) | **MUST** reach the OS |
 | Never observed | **MUST** reach the OS |
 
@@ -1378,30 +1351,11 @@ user pressed it again (finding O-1).
 Both directions are proved by property tests over randomised event sequences
 (§13), not merely asserted. The generator's event space covers what this section
 claims: presses and releases, autorepeat, CapsLock transitions in all three
-activation modes, grace-window expiry, `release_all` mid-sequence with physical
+activation modes, `release_all` mid-sequence with physical
 releases continuing afterwards, configuration reloads while keys are held,
 malformed or duplicate physical events — including malformed CapsLock
 specifically, since it is dispatched before the general per-key logic — and
 invalid key codes.
-
-**`grace_ms` is a property of the user, not of the machine.** It is the human
-ambiguity window; implementation and scheduling latency **MUST NOT** be
-compensated for by narrowing it. See §15.10, which records why — and the M3
-measurement that nearly caused exactly that mistake.
-
-**Only bound keys are ever delayed.** Buffering adds up to `grace_ms` of latency,
-and it applies **only** to keys bound to an action in the cursor layer, and
-**only** while the layer is off. Three categories are never buffered and never
-delayed:
-
-- keys with no cursor-layer binding — nothing to disambiguate;
-- keys bound to `key.passthrough` — they behave identically in both modes;
-- every key, once the layer is already engaged — the ambiguity the window exists
-  to resolve cannot arise.
-
-This matters because the delay is otherwise invisible to the user: a keyboard
-that felt sluggish on ordinary typing would be a worse product than one without
-the layer at all.
 
 ### 6.4 Motion integrator
 
@@ -1423,19 +1377,10 @@ motion, not per key, so changing direction mid-travel does not reset to a crawl.
 
 Scroll uses the same structure with its own settings and its own accumulator.
 
-**The 60 Hz tick is the motion cadence, not the engine's.** The layer engine's
-only timed work is expiring buffered presses, so it is driven by a deadline —
-the earliest pending press plus `grace_ms` — rather than polled. An idle
-keyboard therefore produces no engine wakeups at all, and the grace window
-resolves at its deadline instead of up to one motion tick late.
-
-The deadline is a floor, not a promise of exactness. On Windows it is served by
-a high-resolution waitable timer, so the expiry **MUST NOT** fire early and
-**MAY** fire late by a small margin. Code
-**MUST** re-read the clock when the timer wakes and act only if the deadline has
-genuinely passed, so that a late, early or coalesced timer message is harmless.
-Observed timing is recorded by the Windows manual matrix rather than asserted
-here.
+**The 60 Hz tick is the motion cadence, not the engine's.** The layer engine has
+no timed work: every decision it makes is a function of the event in hand, so
+it is never polled and has no deadline. An idle keyboard produces no engine
+wakeups at all.
 
 ### 6.5 Window slots
 
@@ -1618,8 +1563,8 @@ pump. Returning non-zero from the hook proc suppresses the event.
 - Injected events (`LLKHF_INJECTED`) **MUST** be ignored, or the core's own
   `SendInput` output feeds back into its hook.
 
-**Engine ownership.** The suppression verdict is a function of mode, latch,
-grace and per-key state that only the layer engine holds, and Windows will not
+**Engine ownership.** The suppression verdict is a function of mode, latch
+and per-key state that only the layer engine holds, and Windows will not
 wait for another thread to supply it. The hook-owning thread is therefore the
 **sole mutating owner** of the layer engine, and the core never calls a
 mutating engine method: it submits control messages and reads results.
@@ -1633,10 +1578,6 @@ Consequently:
 - A physical event passes through natively **iff** the engine emitted exactly
   one decision and it is `Forward` for that same code and state. Anything else
   is suppressed and re-synthesised, so that ordering is the core's to control.
-- The **grace-window tap replay is re-synthesised, not passed through.** The
-  physical event is the release, but a synthetic press must reach the OS first;
-  passing the release through natively would deliver up-then-down and leave the
-  key held forever.
 - Native passthrough is preserved for ordinary typing deliberately. Re-injecting
   every keystroke would mark it `LLKHF_INJECTED`, add latency, risk IME
   breakage, and forfeit the property that a natively forwarded press is
@@ -2156,17 +2097,16 @@ explicit commitments.
 | Binding editor | Table-driven reassignment: assigning over an occupied key displaces exactly one command, and it reaches `unassigned` only when its last key is taken. Assert a command bound to two keys survives one of them being reassigned. Assert `params` and custom `legend` survive a displace/restore round-trip |
 | Update policy | Load a settings file missing new keys and assert defaults appear; load one carrying removed keys and assert they survive a rewrite; assert loading a prior-schema document never writes to disk |
 | Layout editor | Property test: every canvas operation (move, resize, align, distribute, snap, add, delete, segment edit) leaves a document that still validates. Round-trip test: save → load → save is byte-identical. Undo/redo returns to the exact prior document |
-| Layer engine | **Pure unit tests over a synthetic event trace.** The engine takes events and a clock and returns decisions — no OS involved. This is where the grace window and P7 are proven. |
-| Grace window | Table-driven: for each of the three resolutions in §6.3, assert the exact output event sequence |
+| Layer engine | **Pure unit tests over a synthetic event trace.** The engine takes events and a clock and returns decisions — no OS involved. This is where P7 is proven. |
 | P7 invariant | Property test over 200 randomised event sequences, across all three activation modes and including modifiers and a `key.passthrough` binding: assert every forwarded press has a matching forwarded release once the sequence is wound down |
 | P7 mirror | The same sweep in the opposite direction: assert no release is ever forwarded without a matching forwarded press, so a suppressed key held across a mode change cannot produce an orphan key-up |
-| Property-test coverage | Assert the generator is not degenerate: that it actually produced forwards, suppressions, actions, action releases, buffered presses and repeats in quantity. A generator that quietly stopped exercising a path would keep passing and prove nothing |
-| Event ordering | Exact-sequence tests: buffered presses expiring together, buffered presses promoted by CapsLock, held actions released on leaving the layer, and `release_all` all emit in press order. Plus a replay test asserting identical decision sequences across repeated runs |
+| Property-test coverage | Assert the generator is not degenerate: that it actually produced forwards, suppressions, actions, action releases and repeats in quantity. A generator that quietly stopped exercising a path would keep passing and prove nothing |
+| Event ordering | Exact-sequence tests: held actions released on leaving the layer, and `release_all` all emit in press order. Plus a replay test asserting identical decision sequences across repeated runs |
 | Allocation contract | Drive the engine through many event cycles against one `DecisionBuffer` and assert it never overflows its fixed capacity; separately construct the true worst-case unwind and assert the derived capacity holds it |
-| Forced capacity overflow | Deliberately exceed each bounded list — forwarded presses, held actions, buffered presses — with synthetic key codes, and assert the fail-safe: no forwarded press left unreleased, no action started without a release, no keystroke silently dropped where degrading would do. Observing that ordinary traffic does not overflow proves nothing about overflow |
+| Forced capacity overflow | Deliberately exceed each bounded list — forwarded presses and held actions — with synthetic key codes, and assert the fail-safe: no forwarded press left unreleased, no action started without a release, no keystroke silently dropped where degrading would do. Observing that ordinary traffic does not overflow proves nothing about overflow |
 | Key domain | Assert a code interned beyond the built-in vocabulary is tracked like any other, that an invalid code is suppressed in both directions, and that the largest valid id is tracked, bindable and safe to index |
 | Malformed CapsLock | Duplicate press does not double-toggle; orphan release does not change the mode or the latch; a stale press time cannot latch the layer later; an escape gesture suppressed for want of capacity leaves the mode and latch untouched through both its press and its release, in all three activation modes |
-| Reload | Assert a pending press survives a reload that keeps its binding, keeps its original press time, and resolves as a forwarded keystroke when the binding is removed |
+| Reload | Assert a forwarded press survives a reload that removes its binding, and its release is still forwarded |
 | Motion | Assert diagonal speed equals cardinal speed; assert fractional accumulation never loses pixels; assert the ramp is monotonic |
 | IPC | Golden-file tests of serialised messages; a fake client that stops reading, asserting the core does not block |
 | Overlay | `pytest-qt` against the mock backend; render each bundled layout at several scales and assert no key overlaps and no clipped legends |
@@ -2187,7 +2127,7 @@ logic inherited from the prototype can be tested at all.
 | **M2** | Core skeleton + IPC | Engine, motion integrator, action dispatcher, IPC server, unit tests. No OS backends — driven by a synthetic input backend |
 | **M3** | Windows backend | Hook, `SendInput`, Win32 windows/monitors. End-to-end on Windows |
 | **M4** | Linux/X11 backend | evdev, uinput, EWMH/XRandR, udev rule, all-keyboard grab. End-to-end on Linux |
-| **M5** | Configuration UI | Settings dialog, binding editor with silent reassignment and the unassigned-commands list, profile editor, **the layer indicator (§9.7)**, **Caps timing calibration (§15.10)** |
+| **M5** | Configuration UI | Settings dialog, binding editor with silent reassignment and the unassigned-commands list, profile editor, **the layer indicator (§9.7)** |
 | **M6** | **Visual layout editor** | Canvas, key palette, move/resize/align/distribute/snap, segment-edit mode, validation panel, import/export, reset-to-template |
 | **M7** | Packaging | Windows installer, Linux packages, first release |
 
@@ -2380,75 +2320,14 @@ rather than pretending it does not exist.
 
 → §3.4
 
-### 15.10 `grace_ms` measures the user's hands, not the machine
+### 15.10 Removed: the grace window
 
-**`grace_ms` is the human ambiguity window and nothing else.** It answers one
-question: *how far apart can this user's two hands land and still mean a chord?*
-It **MUST NOT** be tuned to compensate for implementation or machine latency.
+The grace window (`behavior.grace_ms`, default 50 ms) was removed on 2026-11-22.
+It buffered a cursor-layer-bound key pressed while the layer was off, for up to
+`grace_ms`, to catch a key that landed a few milliseconds ahead of the CapsLock
+meant to precede it. The cost was latency on everyday letters and the
+reordering bugs O-2/O-12; the benefit was a rare race. CapsLock first is now
+the only way into the layer (§6.3), the engine has no timed work, and the
+calibration plan that existed to tune the window is gone with it.
 
-This distinction was learned the hard way during M3 validation. A 50 ms window
-measured 70.6 ms end to end, and the obvious response — halve the window — would
-have bought ~22 ms by spending half the race-detection margin. The latency turned
-out to be a `WM_TIMER` artifact worth ~21 ms, and replacing the timer recovered
-almost the same amount at no cost to margin. Had the window been shrunk first,
-the product would have been permanently worse at the job the window exists for,
-in exchange for something a better timer gave away free.
-
-Three quantities are therefore kept conceptually distinct, and only the first is
-a function of the user:
-
-| Quantity | Means | Tuned by |
-|---|---|---|
-| `grace_ms` | How long the user's chord may take | The user's hands |
-| deadline overshoot | Timer, scheduling and message-pump cost | Implementation |
-| action delivery latency | Expiry to output reaching the OS | Implementation |
-
-**A slower machine MUST NOT be read as a user who needs a wider window**, and a
-faster one must not be read as a user who needs a narrower one.
-
-#### Calibration — specified, deferred to M5
-
-The default has to work on first launch, so calibration is **never mandatory**:
-KeyGnosys ships a conservative default and behaves correctly for a user who never
-opens the settings dialog.
-
-The settings UI (M5) **MAY** offer a *Calibrate Caps timing* action: the user
-performs 20–30 natural CapsLock-plus-bound-key gestures, and for each intended
-chord the tool records
-
-```text
-delta_t = bound_key_down - CapsLock_down
-```
-
-building a **distribution** rather than trusting one sample. It then reports a
-recommendation derived from a high percentile of that distribution plus a safety
-margin, clamped to a supported range — for example:
-
-```text
-Your Caps chord timing is usually within 18 ms.
-Recommended grace window: 30 ms
-Current grace window:     50 ms
-```
-
-The percentile, margin, sample count, clamp range and presentation are **future
-design decisions and are deliberately not fixed here**. What is fixed is the
-shape: it is a **recommendation the user explicitly accepts**, never a silent
-change to a setting that governs whether their keystrokes become letters or
-actions.
-
-#### Passive calibration — a later enhancement, not M5
-
-Once the settings infrastructure exists, KeyGnosys **MAY** maintain a small local
-rolling model of observed chord timing and offer a recommendation when the
-configured window is substantially wider — or narrower — than the user's
-demonstrated behaviour. The narrower case matters as much as the wider one: a
-user whose natural chords keep brushing the boundary should be offered a *wider*
-window rather than left with intermittent literal-key leakage.
-
-It **MUST NOT** adapt silently while the user is working, and it inherits the
-project's privacy rules without exception: local only, no telemetry, no network
-transmission, no persisted keystroke content, nothing from which typed text could
-be reconstructed, and no more than the timing statistics calibration requires.
-
-Deliberately placed after M5 so that the explicit, user-initiated version ships
-first and the passive one is judged against something that already works.
+Design record: `docs/superpowers/specs/2026-11-22-remove-grace-window-design.md`.
