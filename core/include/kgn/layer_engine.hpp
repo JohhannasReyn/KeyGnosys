@@ -186,9 +186,6 @@ public:
     // within LowLevelHooksTimeout or Windows silently unhooks it.
     void onKey(KeyCode code, KeyState state, TimePoint now, DecisionBuffer& out);
 
-    // A no-op: nothing is timed any more. Removed together with its caller.
-    void tick(TimePoint now, DecisionBuffer& out);
-
     // Release everything, unconditionally. Every exit path calls this (P7).
     // Allocation-free.
     void releaseAll(DecisionBuffer& out);
@@ -197,17 +194,12 @@ public:
 
     std::vector<Decision> setBindings(const BindingMap& bindings);
     std::vector<Decision> onKey(KeyCode code, KeyState state, TimePoint now);
-    std::vector<Decision> tick(TimePoint now);
     std::vector<Decision> releaseAll();
 
     [[nodiscard]] Mode mode() const { return mode_; }
     [[nodiscard]] bool latched() const { return latched_; }
     // In press order.
     [[nodiscard]] std::vector<KeyCode> heldActions() const;
-
-    // Always nullopt: the engine has no timed work. Removed together with its
-    // caller.
-    [[nodiscard]] std::optional<TimePoint> nextDeadline() const;
 
     // Diagnostics. Non-zero means input was dropped because an obligation
     // could not be recorded -- unreachable from a physical keyboard, and worth

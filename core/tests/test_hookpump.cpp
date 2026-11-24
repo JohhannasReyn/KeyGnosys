@@ -3,7 +3,7 @@
 // These exist because live M3 validation found a hook that installed cleanly,
 // reported healthy, and never received a callback -- and the whole automated
 // suite was green throughout. Nothing had pinned the pump's behaviour. These
-// tests pin the two parts of it that can be reasoned about without a desktop.
+// tests pin the part of it that can be reasoned about without a desktop.
 
 #include "kgn/hookpump.hpp"
 
@@ -17,12 +17,6 @@
 using namespace kgn;
 
 namespace {
-
-TimePoint at(int ms) {
-    return TimePoint{} + std::chrono::milliseconds(ms);
-}
-
-using Action = GraceTimerPlan::Action;
 
 // ---------------------------------------------------------------------------
 // Doorbell
@@ -145,121 +139,6 @@ KGN_TEST(doorbell_under_concurrency_never_loses_the_last_item) {
         consumer.join();
         KGN_CHECK_EQ(consumed.load(), produced.load());
     }
-}
-
-// ---------------------------------------------------------------------------
-// GraceTimerPlan
-
-KGN_TEST(no_deadline_and_no_timer_means_no_wakeups_at_all) {
-    // The zero-idle-wakeup property, stated as a test: an idle keyboard must
-    // not arm anything.
-    const auto d = GraceTimerPlan::decide(false, std::nullopt, at(0));
-    KGN_CHECK(d.action == Action::None);
-}
-
-KGN_TEST(a_deadline_arms_the_timer_once) {
-    const auto d = GraceTimerPlan::decide(false, at(50), at(0));
-    KGN_CHECK(d.action == Action::Arm);
-    KGN_CHECK_EQ(d.delayMs, 50u);
-}
-
-KGN_TEST(an_armed_timer_is_left_alone) {
-    // The head deadline only ever moves later, so an armed timer never needs
-    // replacing with an earlier one.
-    const auto d = GraceTimerPlan::decide(true, at(50), at(0));
-    KGN_CHECK(d.action == Action::None);
-}
-
-KGN_TEST(losing_the_last_deadline_kills_the_timer) {
-    const auto d = GraceTimerPlan::decide(true, std::nullopt, at(0));
-    KGN_CHECK(d.action == Action::Kill);
-}
-
-KGN_TEST(a_past_deadline_arms_at_the_floor_rather_than_spinning) {
-    // A 0 ms timer is a spin. The expiry runs on the next turn of the loop
-    // anyway, so the floor costs nothing and bounds the wakeup rate.
-    const auto d = GraceTimerPlan::decide(false, at(0), at(500));
-    KGN_CHECK(d.action == Action::Arm);
-    KGN_CHECK_EQ(d.delayMs, static_cast<std::uint32_t>(GraceTimerPlan::kMinDelayMs));
-}
-
-KGN_TEST(a_short_deadline_is_honoured_rather_than_rounded_up) {
-    // The floor was 10 ms while SetTimer served the deadline, because
-    // USER_TIMER_MINIMUM clamped anything smaller. A high-resolution waitable
-    // timer can honour a few milliseconds, and rounding up here would put back
-    // the very latency the timer change removed.
-    const auto d = GraceTimerPlan::decide(false, at(3), at(0));
-    KGN_CHECK(d.action == Action::Arm);
-    KGN_CHECK_EQ(d.delayMs, 3u);
-    KGN_CHECK(GraceTimerPlan::kMinDelayMs == 1);
-}
-
-// ---------------------------------------------------------------------------
-// Generation
-
-KGN_TEST(an_expiry_for_the_current_generation_is_accepted) {
-    KGN_CHECK(GraceTimerPlan::acceptExpiry(7, 7));
-}
-
-KGN_TEST(an_expiry_for_a_replaced_generation_is_ignored) {
-    // Arm for window N, replace it with N+1, then N's timer fires late.
-    KGN_CHECK(!GraceTimerPlan::acceptExpiry(7, 8));
-}
-
-KGN_TEST(a_generation_from_the_future_is_also_ignored) {
-    // Cannot happen through the intended path, but the rule is equality rather
-    // than "not older", so a corrupted or reordered wake is discarded too.
-    KGN_CHECK(!GraceTimerPlan::acceptExpiry(9, 8));
-}
-
-KGN_TEST(generation_survives_wraparound) {
-    // The counter is 32-bit and only ever incremented; equality does not care
-    // where it wrapped.
-    const std::uint32_t top = 0xFFFFFFFFu;
-    KGN_CHECK(GraceTimerPlan::acceptExpiry(top, top));
-    KGN_CHECK(!GraceTimerPlan::acceptExpiry(top, 0));
-}
-
-KGN_TEST(an_absurd_deadline_is_capped) {
-    const auto d = GraceTimerPlan::decide(false, at(9999999), at(0));
-    KGN_CHECK_EQ(d.delayMs, static_cast<std::uint32_t>(GraceTimerPlan::kMaxDelayMs));
-}
-
-KGN_TEST(a_stale_timer_message_is_harmless) {
-    // The loop kills a fired timer before consulting the engine, so the fired
-    // timer arrives as armed=false. With nothing pending the decision is None:
-    // no expiry runs, nothing is re-armed, and the thread goes back to
-    // blocking. This is what makes a coalesced or late WM_TIMER a no-op.
-    const auto afterFireWithNothingPending =
-        GraceTimerPlan::decide(false, std::nullopt, at(100));
-    KGN_CHECK(afterFireWithNothingPending.action == Action::None);
-
-    // And if a later deadline remains, it re-arms for that one instead.
-    const auto afterFireWithMorePending =
-        GraceTimerPlan::decide(false, at(150), at(100));
-    KGN_CHECK(afterFireWithMorePending.action == Action::Arm);
-    KGN_CHECK_EQ(afterFireWithMorePending.delayMs, 50u);
-}
-
-KGN_TEST(the_arm_kill_cycle_settles) {
-    // Walk the state machine the way the loop does: arm, fire, re-arm, fire,
-    // nothing left, kill. It must reach a state where nothing is armed.
-    bool armed = false;
-    auto d = GraceTimerPlan::decide(armed, at(50), at(0));
-    KGN_CHECK(d.action == Action::Arm);
-    armed = true;
-
-    // timer fires -> loop kills it first
-    armed = false;
-    d = GraceTimerPlan::decide(armed, at(90), at(50));   // a later pending remains
-    KGN_CHECK(d.action == Action::Arm);
-    KGN_CHECK_EQ(d.delayMs, 40u);
-    armed = true;
-
-    armed = false;                                       // fires again
-    d = GraceTimerPlan::decide(armed, std::nullopt, at(90));
-    KGN_CHECK(d.action == Action::None);                 // nothing left to arm
-    KGN_CHECK(!armed);
 }
 
 }  // namespace

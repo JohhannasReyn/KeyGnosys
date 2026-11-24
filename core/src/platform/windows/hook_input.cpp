@@ -9,8 +9,6 @@ namespace {
 // Doorbells, not payload. The control ring stays authoritative for both the
 // data and its ordering; these only wake the loop.
 constexpr UINT kMsgControl   = WM_APP + 1;   // drain the control ring
-constexpr UINT kMsgGraceSync = WM_APP + 2;   // re-evaluate the grace timer
-constexpr UINT kMsgGraceExpired = WM_APP + 3;   // a deadline came due
 }  // namespace
 
 HookInput* HookInput::instance_ = nullptr;
@@ -245,15 +243,6 @@ LRESULT HookInput::onHook(int code, WPARAM wParam, LPARAM lParam) {
     republish();
     publishPhysical(key, state, !native);
 
-    // A buffered press is the engine's only timed work. The loop is blocked in
-    // GetMessageW around this callback and cannot see the new deadline by
-    // itself, so nudge it -- but only on the transition, so ordinary typing
-    // adds no syscall. nextDeadline() is pure; the post is one bounded,
-    // non-blocking call, which is all the hook path is allowed.
-    if (!graceTimerArmed_ && engine_.nextDeadline().has_value()) {
-        requestGraceSync();
-    }
-
     if (native) return ::CallNextHookEx(nullptr, code, wParam, lParam);
     return 1;
 }
@@ -294,9 +283,6 @@ void HookInput::run() {
     MSG message;
     ::PeekMessageW(&message, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
     threadId_.store(::GetCurrentThreadId(), std::memory_order_release);
-    // Started here, after the queue exists and the thread id is known, so the
-    // helper can never post to a thread that cannot receive.
-    graceTimer_.start(::GetCurrentThreadId(), kMsgGraceExpired);
     install();
     ready_.store(true, std::memory_order_release);
 
@@ -305,23 +291,14 @@ void HookInput::run() {
     // so drain once here. Disarm first, as always.
     doorbell_.disarm();
     drainControl();
-    syncGraceTimer();
 
     while (!stopping_.load()) {
-        // GetMessageW, not MsgWaitForMultipleObjectsEx.
-        //
-        // WH_KEYBOARD_LL callbacks are delivered to the installing thread and
-        // dispatched only while that thread is inside a message-RETRIEVAL
-        // call. A wait is not a retrieval call. The previous design blocked in
-        // MsgWaitForMultipleObjectsEx with the grace deadline as its timeout,
-        // which meant that with no deadline pending it blocked forever and the
-        // PeekMessageW below it was never reached -- the hook installed, said
-        // it was healthy, and received nothing. Live validation on 2026-09-01
-        // measured 0 callbacks against 529 seen by an independent hook over
-        // the same keystrokes.
-        //
-        // GetMessageW blocks with zero wakeups when idle AND dispatches the
-        // callback, which is why the timeout is no longer needed for anything.
+        // GetMessageW, not MsgWaitForMultipleObjectsEx: WH_KEYBOARD_LL
+        // callbacks are dispatched to this thread only while it is inside a
+        // message-RETRIEVAL call, and a wait is not one. A wait here left the
+        // hook installed, reported healthy, and receiving nothing (live
+        // validation, 2026-09-01). GetMessageW blocks with zero wakeups when
+        // idle and dispatches the callback.
         const BOOL got = ::GetMessageW(&message, nullptr, 0, 0);
         if (got == 0 || got == -1) break;      // WM_QUIT, or a queue error
 
@@ -334,13 +311,6 @@ void HookInput::run() {
                 drainControl();
                 break;
 
-            case kMsgGraceSync:
-                break;   // the sync below is the whole point of this message
-
-            case kMsgGraceExpired:
-                onGraceExpiry(static_cast<std::uint32_t>(message.wParam));
-                break;
-
             default:
                 ::TranslateMessage(&message);
                 ::DispatchMessageW(&message);
@@ -348,7 +318,6 @@ void HookInput::run() {
         }
 
         if (stopping_.load()) break;
-        syncGraceTimer();
 
         // Retry an install that has never succeeded -- for example when the
         // desktop was not ready at startup. This is the ONLY case it can reach:
@@ -363,10 +332,6 @@ void HookInput::run() {
         }
     }
 
-    killGraceTimer();
-    // Joins the helper before any handle it waits on is closed, so shutdown
-    // cannot race an expiry into posting to a thread that is on its way out.
-    graceTimer_.stop();
     uninstall();
     // Only here, and only because the hook is now gone: from this point the
     // bitmap describes a keyboard nobody is observing, so keeping it would be
@@ -394,59 +359,6 @@ void HookInput::requestWake() {
     // reached its startup drain either -- and that drain runs after the id is
     // stored, so it is guaranteed to observe whatever was just pushed.
     if (tid != 0) ::PostThreadMessageW(tid, kMsgControl, 0, 0);
-}
-
-void HookInput::requestGraceSync() {
-    // Called from the hook callback, which runs on this same thread while the
-    // loop is blocked inside GetMessageW. Without this the loop would not
-    // learn that a buffered press just created a deadline until some other
-    // message happened along.
-    const DWORD tid = threadId_.load(std::memory_order_relaxed);
-    if (tid != 0) ::PostThreadMessageW(tid, kMsgGraceSync, 0, 0);
-}
-
-void HookInput::syncGraceTimer() {
-    const std::optional<TimePoint> deadline = engine_.nextDeadline();
-    const GraceTimerPlan::Decision decision =
-        GraceTimerPlan::decide(graceTimerArmed_, deadline, Clock::now());
-    switch (decision.action) {
-        case GraceTimerPlan::Action::Arm:
-            // The generation moves first, so any expiry already in flight for
-            // the previous window is stale by the time this one is armed.
-            ++graceGeneration_;
-            graceTimer_.arm(*deadline, graceGeneration_);
-            graceTimerArmed_ = true;
-            break;
-        case GraceTimerPlan::Action::Kill:
-            killGraceTimer();
-            break;
-        case GraceTimerPlan::Action::None:
-            break;
-    }
-}
-
-void HookInput::killGraceTimer() {
-    if (!graceTimerArmed_) return;
-    ++graceGeneration_;
-    graceTimer_.cancel(graceGeneration_);
-    graceTimerArmed_ = false;
-}
-
-void HookInput::onGraceExpiry(std::uint32_t generation) {
-    // Two independent guards, and the second is the one that actually holds.
-    //
-    // The generation discards an expiry armed for a window we have since
-    // replaced -- cheap, and it keeps the intent legible. But even if it were
-    // wrong, expireGrace() re-reads the clock and does nothing unless a
-    // deadline has genuinely passed, so no stale wake can expire a window
-    // early. That is the guarantee; this is the optimisation.
-    if (!GraceTimerPlan::acceptExpiry(generation, graceGeneration_)) return;
-
-    // Consider the timer spent before consulting the engine, so the decision
-    // below re-arms from whatever deadline remains rather than assuming the
-    // old one is still live.
-    graceTimerArmed_ = false;
-    expireGrace();
 }
 
 void HookInput::install() {
@@ -508,20 +420,6 @@ void HookInput::drainControl() {
         appliedSeq_.store(control.seq, std::memory_order_release);
         ::SetEvent(applied_);
     }
-}
-
-void HookInput::expireGrace() {
-    const std::optional<TimePoint> deadline = engine_.nextDeadline();
-    if (!deadline.has_value() || Clock::now() < *deadline) return;
-    if (work_->free() < kWorkAdmissionGate) return;   // retried next wake
-
-    decisions_.clear();
-    engine_.tick(Clock::now(), decisions_);
-    // No physical event is in hand, so nothing here can be native and no
-    // PhysicalRecord is produced -- a grace expiry is not a key the user just
-    // pressed, and reporting it as one would light a key twice.
-    translateDecisions(decisions_, KeyCode{}, KeyState::Down, *work_, &channel_);
-    republish();
 }
 
 }  // namespace kgn::win

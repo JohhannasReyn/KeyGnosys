@@ -408,11 +408,6 @@ void LayerEngine::onCapsLock(KeyState state, TimePoint now,
     }
 }
 
-// Retained until the hook pump stops calling them; nothing is timed any more.
-void LayerEngine::tick(TimePoint, DecisionBuffer&) {}
-
-std::optional<TimePoint> LayerEngine::nextDeadline() const { return std::nullopt; }
-
 // ---------------------------------------------------------------------------
 // Leaving the layer
 // ---------------------------------------------------------------------------
@@ -481,12 +476,6 @@ std::vector<Decision> LayerEngine::onKey(KeyCode code, KeyState state,
                                          TimePoint now) {
     DecisionBuffer buffer;
     onKey(code, state, now, buffer);
-    return collect(buffer);
-}
-
-std::vector<Decision> LayerEngine::tick(TimePoint now) {
-    DecisionBuffer buffer;
-    tick(now, buffer);
     return collect(buffer);
 }
 

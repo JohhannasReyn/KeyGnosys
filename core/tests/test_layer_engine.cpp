@@ -426,10 +426,6 @@ std::vector<Decision> randomSession(unsigned seed) {
         buffer.clear();
 
         switch (rng() % 16) {
-            case 0:
-                f.engine.tick(at(clock), buffer);
-                break;
-
             case 1:
                 f.engine.onKey(CAPS, capsDown ? KeyState::Up : KeyState::Down,
                                at(clock), buffer);

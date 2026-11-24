@@ -1201,10 +1201,9 @@ OwnResult Core::start() {
 void Core::step(TimePoint now) {
     if (!impl_->started || impl_->stopped) return;
 
-    // The layer engine is no longer ticked here. It is owned by whoever feeds
-    // it, and it wakes on its own grace deadline rather than at 60 Hz --
-    // expiring buffered presses is its only timed work. What remains on this
-    // beat is motion, which SPEC 6.4 does specify at 60 Hz.
+    // The layer engine is not ticked here. It is owned by whoever feeds it,
+    // and it has no timed work. What remains on this beat is motion, which
+    // SPEC 6.4 does specify at 60 Hz.
     impl_->drainPublication();
     impl_->drainWork();
     impl_->serviceDoubleClicks(now);
