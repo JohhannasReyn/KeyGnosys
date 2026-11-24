@@ -53,8 +53,6 @@ using BindingMap = std::unordered_map<KeyCode, BindingKind>;
 struct EngineConfig {
     ActivationMode activation = ActivationMode::Hybrid;
     std::chrono::milliseconds hybridTap{200};
-    // Unused by the engine; removed with the setting that still writes it.
-    std::chrono::milliseconds grace{50};
     // When true, CapsLock pressed while Shift is held produces a real
     // CapsLock instead of engaging the layer.
     bool shiftCapsIsRealCapsLock = true;

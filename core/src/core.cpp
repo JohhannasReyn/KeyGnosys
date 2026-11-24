@@ -1024,7 +1024,7 @@ struct Core::Impl {
             }
             return applyActivation(mode);
         }
-        if (path == "behavior.hybrid_tap_ms" || path == "behavior.grace_ms") {
+        if (path == "behavior.hybrid_tap_ms") {
             if (!value.isNumber()) {
                 return Reply::failure("config.invalid", "value must be a number");
             }
@@ -1038,11 +1038,7 @@ struct Core::Impl {
                      path + " was out of range and was clamped");
                 milliseconds = clamped;
             }
-            if (path == "behavior.hybrid_tap_ms") {
-                engineConfig.hybridTap = std::chrono::milliseconds(milliseconds);
-            } else {
-                engineConfig.grace = std::chrono::milliseconds(milliseconds);
-            }
+            engineConfig.hybridTap = std::chrono::milliseconds(milliseconds);
             return applyEngineConfig();
         }
         if (path == "behavior.real_capslock_gesture") {
