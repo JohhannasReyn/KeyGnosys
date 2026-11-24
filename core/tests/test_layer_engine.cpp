@@ -644,10 +644,6 @@ KGN_TEST(an_orphan_release_of_a_high_id_key_is_suppressed) {
 // bounded lists past capacity on purpose.
 // ---------------------------------------------------------------------------
 
-namespace {
-
-}  // namespace
-
 KGN_TEST(overflowing_the_forwarded_list_suppresses_rather_than_stranding) {
     // Past capacity the engine must refuse to create an obligation it cannot
     // record. A dropped keystroke is recoverable; a key the OS believes is
@@ -720,6 +716,58 @@ KGN_TEST(the_decision_buffer_holds_a_full_worst_case_unwind) {
     DecisionBuffer buffer;
     f.engine.releaseAll(buffer);
     KGN_CHECK(!buffer.overflowed());
+}
+
+KGN_TEST(the_decision_buffer_holds_the_full_forwarded_plus_held_unwind) {
+    // The true worst case for releaseAll(): kMaxHeld forwarded presses (made
+    // with the layer off) AND kMaxHeld held actions (made with it on), plus the
+    // one LayerExited. The two lists are independent, so 256 + 256 distinct
+    // keys are reachable; the result must fill 513 of the 520 slots exactly.
+    const auto fwd = syntheticKeys("WorstFwd", kMaxHeld);
+    const auto act = syntheticKeys("WorstAct", kMaxHeld);
+    BindingMap bindings;
+    for (KeyCode code : act) bindings[code] = BindingKind::Action;
+
+    Fixture f;
+    f.engine.setBindings(bindings);
+    for (KeyCode code : fwd) f.press(code, 0);          // layer off: forwarded
+    KGN_CHECK_EQ(f.engine.capacityDrops(), std::uint64_t{0});
+    f.press(CAPS, 10);
+    KGN_CHECK(f.engine.mode() == Mode::Cursor);
+    for (KeyCode code : act) f.press(code, 20);         // layer on: held actions
+    KGN_CHECK_EQ(f.engine.heldActions().size(), kMaxHeld);
+    KGN_CHECK_EQ(f.engine.capacityDrops(), std::uint64_t{0});
+
+    DecisionBuffer buffer;
+    f.engine.releaseAll(buffer);
+    KGN_CHECK(!buffer.overflowed());
+    KGN_CHECK_EQ(buffer.size(), 2 * kMaxHeld + 1);       // 513
+    KGN_CHECK(buffer.size() <= kDecisionCapacity);
+    std::size_t ups = 0, releases = 0, exits = 0;
+    for (const auto& d : buffer) {
+        if (d.kind == Decision::Kind::Forward && d.state == KeyState::Up) ++ups;
+        if (d.kind == Decision::Kind::ReleaseAction) ++releases;
+        if (d.kind == Decision::Kind::LayerExited) ++exits;
+    }
+    KGN_CHECK_EQ(ups, kMaxHeld);
+    KGN_CHECK_EQ(releases, kMaxHeld);
+    KGN_CHECK_EQ(exits, std::size_t{1});
+}
+
+KGN_TEST(a_forwarded_press_survives_a_reload_that_removes_its_binding) {
+    // SPEC section 13, Reload: the release owed for a forwarded press does not
+    // depend on the binding that was in force when it went down.
+    Fixture f;
+    KGN_CHECK(has(f.press(H, 0), Decision::Kind::Forward, H));   // layer off
+
+    const auto reloaded = f.engine.setBindings({{J, BindingKind::Action}});
+    for (const auto& d : reloaded) KGN_CHECK(d.code != H);
+
+    const auto& up = f.release(H, 10);
+    KGN_CHECK_EQ(up.size(), std::size_t{1});
+    KGN_CHECK(up[0].kind == Decision::Kind::Forward);
+    KGN_CHECK(up[0].code == H);
+    KGN_CHECK(up[0].state == KeyState::Up);
 }
 
 // ---------------------------------------------------------------------------
