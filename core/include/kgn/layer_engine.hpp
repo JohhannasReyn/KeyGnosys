@@ -53,9 +53,6 @@ using BindingMap = std::unordered_map<KeyCode, BindingKind>;
 struct EngineConfig {
     ActivationMode activation = ActivationMode::Hybrid;
     std::chrono::milliseconds hybridTap{200};
-    // How long an ambiguous press is buffered waiting to see whether CapsLock
-    // follows it. Inherited from the prototype's GRACE directive.
-    std::chrono::milliseconds grace{50};
     // When true, CapsLock pressed while Shift is held produces a real
     // CapsLock instead of engaging the layer.
     bool shiftCapsIsRealCapsLock = true;
@@ -76,7 +73,6 @@ struct Decision {
         Forward,         // pass it through unchanged
         RunAction,       // it is bound in the cursor layer
         ReleaseAction,   // a held cursor-layer binding was released
-        Buffer,          // ambiguous; held pending the grace window
         LayerExited,     // the cursor layer was just left; toggles must lift
     };
 
@@ -107,9 +103,6 @@ inline constexpr std::size_t kKeyIdSpace =
 static_assert(kKeyIdSpace == 0x10000,
               "per-key state must cover the whole KeyCode id domain");
 
-// Simultaneously buffered presses.
-inline constexpr std::size_t kMaxPending = 64;
-
 // Simultaneously held keys, in each of the two ordered lists. Comfortably
 // above the key count of any physical keyboard.
 inline constexpr std::size_t kMaxHeld = 256;
@@ -117,10 +110,10 @@ inline constexpr std::size_t kMaxHeld = 256;
 // Decisions from one call. Derived from the true worst case rather than
 // guessed: releaseAll() unwinding every held action and every forwarded press
 // at once, plus the single LayerExited that unwind emits when the layer was
-// engaged, plus a full pending sweep, plus slack. The exit costs one decision
-// however many toggles are set, so it fits inside the slack rather than
-// needing a term of its own -- 2 * 256 + 1 = 513 against a bound of 584.
-inline constexpr std::size_t kDecisionCapacity = 2 * kMaxHeld + kMaxPending + 8;
+// engaged, plus slack. The exit costs one decision however many toggles are
+// set, so it fits inside the slack rather than needing a term of its own --
+// 2 * 256 + 1 = 513 against a bound of 520.
+inline constexpr std::size_t kDecisionCapacity = 2 * kMaxHeld + 8;
 
 // A fixed-capacity decision sink.
 //
@@ -174,30 +167,22 @@ public:
     // produce a state where a key is passthrough but not bound, and a reload
     // that removes a binding cannot leave stale behaviour behind.
     //
-    // Emits decisions, because keys may be held or buffered when it is called.
-    // A reload never discards physical input the user has already committed:
-    // an action whose binding disappeared is released, and a buffered press
-    // whose key is no longer action-bound is resolved as the ordinary
-    // keystroke it turned out to be. Forwarded presses are untouched -- P7
-    // outranks a config reload.
+    // Emits decisions, because actions may be held when it is called. An
+    // action whose binding disappeared is released. Forwarded presses are
+    // untouched -- P7 outranks a config reload.
     void setBindings(const BindingMap& bindings, DecisionBuffer& out);
 
     // -- the event path, allocation-free ----------------------------------
 
     // Feed one physical key event.
     //
-    // One event can produce several decisions: resolving a buffered press
-    // emits both its press and its release, and a CapsLock press can promote
-    // several buffered keys at once.
+    // One event can produce several decisions: leaving the layer releases
+    // every held action and announces the exit.
     //
     // Performs no dynamic allocation. On Windows this runs inside
     // WH_KEYBOARD_LL, which must decide suppression synchronously and return
     // within LowLevelHooksTimeout or Windows silently unhooks it.
     void onKey(KeyCode code, KeyState state, TimePoint now, DecisionBuffer& out);
-
-    // Must be called regularly. Resolves buffered presses whose grace window
-    // has lapsed without CapsLock arriving. Allocation-free.
-    void tick(TimePoint now, DecisionBuffer& out);
 
     // Release everything, unconditionally. Every exit path calls this (P7).
     // Allocation-free.
@@ -207,23 +192,12 @@ public:
 
     std::vector<Decision> setBindings(const BindingMap& bindings);
     std::vector<Decision> onKey(KeyCode code, KeyState state, TimePoint now);
-    std::vector<Decision> tick(TimePoint now);
     std::vector<Decision> releaseAll();
 
     [[nodiscard]] Mode mode() const { return mode_; }
     [[nodiscard]] bool latched() const { return latched_; }
     // In press order.
     [[nodiscard]] std::vector<KeyCode> heldActions() const;
-
-    // When the next buffered press's grace window lapses, or nullopt when
-    // nothing is buffered.
-    //
-    // This is what lets the engine's owner wait on a deadline instead of
-    // polling: expiring these is the ONLY timed work the engine has, so a
-    // fixed-cadence tick would be a wakeup per period doing nothing. The
-    // hybrid tap threshold is not timed -- it is measured on the CapsLock
-    // release. Allocation-free and const.
-    [[nodiscard]] std::optional<TimePoint> nextDeadline() const;
 
     // Diagnostics. Non-zero means input was dropped because an obligation
     // could not be recorded -- unreachable from a physical keyboard, and worth
@@ -244,7 +218,6 @@ private:
             kHeldAction = 1u << 3,
             kModifierHeld = 1u << 4,
             kIsModifier = 1u << 5,
-            kPending = 1u << 6,
         };
 
         [[nodiscard]] bool has(std::uint8_t mask) const {
@@ -263,13 +236,7 @@ private:
         std::uint8_t bits = 0;
     };
 
-    struct Pending {
-        KeyCode code;
-        TimePoint pressedAt;
-    };
-
     void onCapsLock(KeyState state, TimePoint now, DecisionBuffer& out);
-    void promoteBuffered(TimePoint now, DecisionBuffer& out);
     void leaveCursorMode(DecisionBuffer& out);
 
     // The single path by which a press reaches the OS. Records the key so its
@@ -279,13 +246,7 @@ private:
     // Returns false, and emits a Suppress instead, when the obligation cannot
     // be recorded. Creating an obligation that cannot be discharged would be
     // strictly worse than dropping the keystroke.
-    //
-    // `suppressAs` is the state that Suppress reports. It is almost always the
-    // press being forwarded, but the grace-window tap replay forwards a Down
-    // while handling an Up -- and a Suppress must describe the event it
-    // suppressed, not the one it was trying to synthesise.
-    bool forwardPress(KeyCode code, KeyState state, DecisionBuffer& out,
-                      KeyState suppressAs = KeyState::Down);
+    bool forwardPress(KeyCode code, KeyState state, DecisionBuffer& out);
     void forgetForwarded(KeyCode code);
 
     Slot& slot(KeyCode code) { return slots_[code.id()]; }
@@ -298,11 +259,6 @@ private:
     // release is the P7 failure in a different currency.
     bool addHeldAction(KeyCode code);
     void removeHeldAction(KeyCode code);
-    bool addPending(KeyCode code, TimePoint now);
-    [[nodiscard]] bool isPending(KeyCode code) const;
-    bool takePending(KeyCode code);
-    void resolvePendingBefore(KeyCode code, DecisionBuffer& out);
-    void resolveOldestPending(std::size_t count, DecisionBuffer& out);
 
     EngineConfig config_;
     Mode mode_ = Mode::Normal;
@@ -344,9 +300,6 @@ private:
     // whatever order a hash table happens to hold. Input ordering is
     // observable -- it affects chords, shortcuts and reproducibility -- so it
     // must not be left to chance.
-    std::array<Pending, kMaxPending> pending_{};
-    std::size_t pendingCount_ = 0;
-
     std::array<KeyCode, kMaxHeld> heldOrder_{};
     std::size_t heldCount_ = 0;
 

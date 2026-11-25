@@ -2,7 +2,7 @@
 //
 // This backend is also the EngineOwner, and it has to be. Windows asks the
 // hook procedure a synchronous question -- suppress this event or not -- and
-// the answer is a function of mode, latch, grace and per-key state that only
+// the answer is a function of mode, latch and per-key state that only
 // the layer engine holds. There is no way to answer it from another thread
 // without making the hook wait, and a hook that waits past
 // LowLevelHooksTimeout is silently unhooked.
@@ -37,7 +37,6 @@
 #include "kgn/delivery_channel.hpp"
 #include "kgn/delivery_provenance.hpp"
 #include "kgn/physical.hpp"
-#include "grace_timer.hpp"
 #include "scancode_keymap.hpp"
 
 namespace kgn::win {
@@ -116,21 +115,12 @@ private:
     void install();
     void uninstall();
     void drainControl();
-    void expireGrace();
     void republish();
     void publishPhysical(KeyCode code, KeyState state, bool suppressed);
 
     // Wake the hook thread's message loop. Coalesced through doorbell_, so a
     // burst of controls costs one thread message, not one per control.
     void requestWake();
-    // Post a bare wake so the loop re-evaluates the grace timer. Called from
-    // the hook callback -- which runs on the hook thread, inside GetMessageW,
-    // so the loop cannot otherwise notice that a deadline just appeared.
-    void requestGraceSync();
-    // Arm, leave or kill the thread timer to match the engine's next deadline.
-    void syncGraceTimer();
-    void killGraceTimer();
-    void onGraceExpiry(std::uint32_t generation);
 
     // Only ever touched on the hook thread.
     ScancodeKeymap keymap_;
@@ -166,13 +156,6 @@ private:
     std::atomic<DWORD> threadId_{0};
     Doorbell doorbell_;
 
-    // Hook thread only. The timer is a wake source; every decision about the
-    // grace window still happens here.
-    GraceTimer graceTimer_;
-    bool graceTimerArmed_ = false;
-    // Bumped on every arm or cancel, so an expiry belonging to a window that
-    // has since been replaced can be discarded.
-    std::uint32_t graceGeneration_ = 0;
     std::atomic<std::uint32_t> appliedSeq_{0};
     std::atomic<bool> stopping_{false};
     std::atomic<bool> installed_{false};

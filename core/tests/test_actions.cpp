@@ -674,8 +674,7 @@ KGN_TEST(a_decision_that_is_not_a_dispatch_is_ignored) {
     EffectBuffer effects;
     dispatcher.setBindings({{key("KeyD"), click(MouseButton::Left)}}, effects);
     effects.clear();
-    for (const auto kind : {Decision::Kind::Suppress, Decision::Kind::Forward,
-                            Decision::Kind::Buffer}) {
+    for (const auto kind : {Decision::Kind::Suppress, Decision::Kind::Forward}) {
         dispatcher.onDecision(Decision{kind, key("KeyD"), KeyState::Down}, t0(),
                               effects);
     }

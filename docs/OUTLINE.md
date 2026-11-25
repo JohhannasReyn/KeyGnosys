@@ -124,9 +124,6 @@ A single state machine owning **mode** and **modifier** state.
   - `hybrid` — tap latches, hold is momentary. The default.
 - **Real CapsLock is not lost.** It moves to a configurable escape gesture
   (default `Shift+CapsLock`).
-- The **grace window** from the original prototype is preserved and generalised: a
-  mapped key pressed *just before* CapsLock registers is held in limbo for a few
-  milliseconds, so near-simultaneous presses resolve as intent rather than as typos.
 
 ### 4.3 Action dispatch
 
@@ -317,8 +314,8 @@ and a settings UI. Bundled app profiles with user override.
 
 `legacy/kbd_layer.c` is the origin of this project and is kept for reference. It
 established the ideas that survive into the spec: **grab-and-reinject**, the
-**CapsLock race grace window**, **live config reload**, and the
-**forwarded-release invariant** (P7) that stops keys sticking down.
+**live config reload**, and the **forwarded-release invariant** (P7) that stops
+keys sticking down.
 
 What changes: it is Linux-only, hold-only, and knows only four directions at a
 fixed speed with a compile-time key cap. The layer engine described above is its

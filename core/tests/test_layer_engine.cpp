@@ -1,9 +1,7 @@
 // The layer engine is pure: events and a clock in, decisions out. No OS, no
-// device, no thread. That is what makes the two invariants inherited from the
+// device, no thread. That is what makes the invariant inherited from the
 // original prototype testable at all --
 //
-//   the grace window   (SPEC 6.3): a mapped key pressed just before CapsLock
-//                      resolves as intent, not as a typo;
 //   P7                 every press forwarded to the OS gets its release
 //                      forwarded too, whatever the mode has become by then.
 
@@ -47,7 +45,6 @@ struct Fixture {
     explicit Fixture(ActivationMode mode = ActivationMode::Hybrid) {
         EngineConfig config;
         config.activation = mode;
-        config.grace = std::chrono::milliseconds(50);
         config.hybridTap = std::chrono::milliseconds(200);
         engine.setConfig(config);
         engine.setBindings(defaultBindings());
@@ -59,10 +56,6 @@ struct Fixture {
     }
     std::vector<Decision>& release(KeyCode code, int ms) {
         last = engine.onKey(code, KeyState::Up, at(ms));
-        return last;
-    }
-    std::vector<Decision>& tick(int ms) {
-        last = engine.tick(at(ms));
         return last;
     }
 };
@@ -138,134 +131,90 @@ KGN_TEST(modifiers_keep_working_inside_the_layer) {
 }
 
 // ---------------------------------------------------------------------------
-// The grace window -- the three resolutions of SPEC 6.3
+// Bound keys with the layer off: CapsLock first is the only way in
 // ---------------------------------------------------------------------------
 
-KGN_TEST(a_bound_key_pressed_with_the_layer_off_is_buffered_not_sent) {
-    Fixture f;
-    KGN_CHECK(has(f.press(H, 0), Decision::Kind::Buffer, H));
-    KGN_CHECK_EQ(countKind(f.last, Decision::Kind::Forward), std::size_t{0});
-}
-
-KGN_TEST(capslock_arriving_inside_the_window_promotes_the_press) {
-    // The user was a few milliseconds ahead of the CapsLock they meant to
-    // press first. Nothing reaches the OS.
+KGN_TEST(a_bound_key_is_forwarded_at_once_when_the_layer_is_off) {
     Fixture f;
     f.press(H, 0);
-    f.press(CAPS, 20);
-    KGN_CHECK(has(f.last, Decision::Kind::RunAction, H));
-    KGN_CHECK_EQ(countKind(f.last, Decision::Kind::Forward), std::size_t{0});
+    KGN_CHECK_EQ(f.last.size(), std::size_t{1});
+    KGN_CHECK(f.last[0].kind == Decision::Kind::Forward);
+    KGN_CHECK(f.last[0].code == H);
+    KGN_CHECK(f.last[0].state == KeyState::Down);
+
+    f.release(H, 10);
+    KGN_CHECK_EQ(f.last.size(), std::size_t{1});
+    KGN_CHECK(f.last[0].kind == Decision::Kind::Forward);
+    KGN_CHECK(f.last[0].code == H);
+    KGN_CHECK(f.last[0].state == KeyState::Up);
 }
 
-KGN_TEST(release_inside_the_window_is_an_ordinary_tap) {
+KGN_TEST(a_bound_key_just_before_capslock_types_then_the_layer_engages) {
+    // P7: the press already reached the OS, so its release must too, and the
+    // action never starts.
     Fixture f;
     f.press(H, 0);
+    KGN_CHECK_EQ(f.last.size(), std::size_t{1});
+    KGN_CHECK(f.last[0].kind == Decision::Kind::Forward);
+    KGN_CHECK(f.last[0].state == KeyState::Down);
+
+    f.press(CAPS, 5);
+    KGN_CHECK(f.engine.mode() == Mode::Cursor);
+    KGN_CHECK_EQ(countKind(f.last, Decision::Kind::RunAction), std::size_t{0});
+
     f.release(H, 20);
-    KGN_CHECK_EQ(f.last.size(), std::size_t{2});
-    KGN_CHECK(f.last[0].kind == Decision::Kind::Forward);
-    KGN_CHECK(f.last[0].state == KeyState::Down);
-    KGN_CHECK(f.last[1].kind == Decision::Kind::Forward);
-    KGN_CHECK(f.last[1].state == KeyState::Up);
-}
-
-KGN_TEST(a_quick_tap_cannot_overtake_an_earlier_buffered_press) {
-    // O-12: H is pressed and held; J is tapped inside H's window. The OS must
-    // see H go down before J -- press order -- not J first because it was
-    // released first. H, still physically held, resolves as an ordinary hold.
-    Fixture f;
-    f.press(H, 0);
-    f.press(J, 10);
-    f.release(J, 20);
-    KGN_CHECK_EQ(f.last.size(), std::size_t{3});
+    KGN_CHECK_EQ(f.last.size(), std::size_t{1});
     KGN_CHECK(f.last[0].kind == Decision::Kind::Forward);
     KGN_CHECK(f.last[0].code == H);
-    KGN_CHECK(f.last[0].state == KeyState::Down);
-    KGN_CHECK(f.last[1].code == J);
-    KGN_CHECK(f.last[1].state == KeyState::Down);
-    KGN_CHECK(f.last[2].code == J);
-    KGN_CHECK(f.last[2].state == KeyState::Up);
-
-    // H is no longer buffered: its window lapsing sends nothing more, and its
-    // release is forwarded (P7).
-    f.tick(60);
-    KGN_CHECK_EQ(f.last.size(), std::size_t{0});
-    f.release(H, 80);
-    KGN_CHECK(has(f.last, Decision::Kind::Forward, H));
+    KGN_CHECK(f.last[0].state == KeyState::Up);
+    KGN_CHECK(f.engine.heldActions().empty());
 }
 
-KGN_TEST(an_unbound_press_cannot_overtake_an_earlier_buffered_press) {
-    // O-12, "teh" for "the": H (bound) is buffered, then Q (unbound) is
-    // pressed. Q must not reach the OS ahead of H. H, still held, resolves
-    // first as an ordinary hold.
+KGN_TEST(a_bound_key_held_with_the_layer_off_repeats_natively) {
     Fixture f;
     f.press(H, 0);
-    f.press(Q, 10);
-    KGN_CHECK_EQ(f.last.size(), std::size_t{2});
-    KGN_CHECK(f.last[0].kind == Decision::Kind::Forward);
-    KGN_CHECK(f.last[0].code == H);
-    KGN_CHECK(f.last[0].state == KeyState::Down);
-    KGN_CHECK(f.last[1].kind == Decision::Kind::Forward);
-    KGN_CHECK(f.last[1].code == Q);
-    KGN_CHECK(f.last[1].state == KeyState::Down);
-
-    f.tick(60);
-    KGN_CHECK_EQ(f.last.size(), std::size_t{0});
-    f.release(H, 80);
-    KGN_CHECK(has(f.last, Decision::Kind::Forward, H));
+    for (int i = 1; i <= 3; ++i) {
+        f.last = f.engine.onKey(H, KeyState::Repeat, at(i * 30));
+        KGN_CHECK_EQ(f.last.size(), std::size_t{1});
+        KGN_CHECK(f.last[0].kind == Decision::Kind::Forward);
+        KGN_CHECK(f.last[0].state == KeyState::Repeat);
+    }
 }
 
-KGN_TEST(an_unbound_press_with_nothing_buffered_is_forwarded_alone) {
+KGN_TEST(a_bound_key_released_after_a_latch_is_still_forwarded) {
+    Fixture f;
+    f.press(H, 0);
+    f.press(CAPS, 10);
+    f.release(CAPS, 50);   // a hybrid tap: latches
+    KGN_CHECK(f.engine.latched());
+    f.release(H, 100);
+    KGN_CHECK_EQ(f.last.size(), std::size_t{1});
+    KGN_CHECK(f.last[0].kind == Decision::Kind::Forward);
+    KGN_CHECK(f.last[0].code == H);
+    KGN_CHECK(f.last[0].state == KeyState::Up);
+}
+
+KGN_TEST(a_reload_leaves_a_natively_held_bound_key_alone) {
+    Fixture f;
+    f.press(H, 0);
+    auto reload = f.engine.setBindings(defaultBindings());
+    KGN_CHECK(!has(reload, Decision::Kind::Forward, H));
+    KGN_CHECK(!has(reload, Decision::Kind::ReleaseAction, H));
+    f.release(H, 20);
+    KGN_CHECK_EQ(f.last.size(), std::size_t{1});
+    KGN_CHECK(f.last[0].kind == Decision::Kind::Forward);
+    KGN_CHECK(f.last[0].state == KeyState::Up);
+}
+
+// ---------------------------------------------------------------------------
+// Unbound keys, once more: nothing is ever held back
+// ---------------------------------------------------------------------------
+
+KGN_TEST(an_unbound_press_is_forwarded_alone) {
     Fixture f;
     f.press(Q, 0);
     KGN_CHECK_EQ(f.last.size(), std::size_t{1});
     KGN_CHECK(has(f.last, Decision::Kind::Forward, Q));
-}
-
-KGN_TEST(a_quick_tap_leaves_later_buffered_presses_buffered) {
-    // Only presses EARLIER than the tap are resolved. H, pressed after J, is
-    // still inside its own window and may yet be promoted by CapsLock.
-    Fixture f;
-    f.press(J, 0);
-    f.press(H, 10);
-    f.release(J, 20);
-    KGN_CHECK_EQ(f.last.size(), std::size_t{2});
-    KGN_CHECK(!has(f.last, Decision::Kind::Forward, H));
-    f.press(CAPS, 30);
-    KGN_CHECK(has(f.last, Decision::Kind::RunAction, H));
-}
-
-KGN_TEST(the_window_lapsing_makes_it_an_ordinary_hold) {
-    Fixture f;
-    f.press(H, 0);
-    f.tick(30);
-    KGN_CHECK_EQ(f.last.size(), std::size_t{0});   // not yet
-    f.tick(60);
-    KGN_CHECK(has(f.last, Decision::Kind::Forward, H));
-}
-
-KGN_TEST(capslock_after_the_window_lapsed_does_not_steal_the_keystroke) {
-    Fixture f;
-    f.press(H, 0);
-    f.press(CAPS, 200);
-    // Buffered far too long ago to have been meant as an action.
-    KGN_CHECK(has(f.last, Decision::Kind::Forward, H));
-    KGN_CHECK(!has(f.last, Decision::Kind::RunAction, H));
-}
-
-KGN_TEST(capslock_promotes_every_buffered_key_at_once) {
-    Fixture f;
-    f.press(H, 0);
-    f.press(J, 5);
-    f.press(CAPS, 20);
-    KGN_CHECK_EQ(countKind(f.last, Decision::Kind::RunAction), std::size_t{2});
-}
-
-KGN_TEST(only_bound_keys_are_ever_delayed) {
-    // Buffering costs latency, so it must never touch keys that could not
-    // possibly become actions.
-    Fixture f;
-    KGN_CHECK(has(f.press(Q, 0), Decision::Kind::Forward, Q));
-    KGN_CHECK_EQ(countKind(f.last, Decision::Kind::Buffer), std::size_t{0});
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +333,6 @@ KGN_TEST(a_forwarded_press_is_released_even_after_the_mode_changes) {
     // forever, because its press went to the OS and its release did not.
     Fixture f;
     f.press(H, 0);
-    f.tick(60);                        // grace lapses -> H forwarded
     KGN_CHECK(has(f.last, Decision::Kind::Forward, H));
     f.press(CAPS, 100);                // layer engages while H is still down
     KGN_CHECK(has(f.release(H, 200), Decision::Kind::Forward, H));
@@ -413,13 +361,16 @@ KGN_TEST(release_all_releases_held_actions_and_leaves_the_layer) {
     KGN_CHECK(f.engine.mode() == Mode::Normal);
 }
 
-KGN_TEST(release_all_does_not_type_buffered_keys) {
-    // A buffered press never reached the OS, so there is nothing to release --
-    // and replaying it would type a character the user never committed to.
+KGN_TEST(release_all_releases_a_forwarded_bound_key_without_retyping_it) {
+    // The press already reached the OS, so release_all owes it exactly one
+    // release -- and must not replay the press.
     Fixture f;
     f.press(H, 0);
     auto out = f.engine.releaseAll();
-    KGN_CHECK(!has(out, Decision::Kind::Forward, H));
+    KGN_CHECK_EQ(out.size(), std::size_t{1});
+    KGN_CHECK(out[0].kind == Decision::Kind::Forward);
+    KGN_CHECK(out[0].code == H);
+    KGN_CHECK(out[0].state == KeyState::Up);
 }
 
 KGN_TEST(release_all_is_idempotent) {
@@ -475,10 +426,6 @@ std::vector<Decision> randomSession(unsigned seed) {
         buffer.clear();
 
         switch (rng() % 16) {
-            case 0:
-                f.engine.tick(at(clock), buffer);
-                break;
-
             case 1:
                 f.engine.onKey(CAPS, capsDown ? KeyState::Up : KeyState::Down,
                                at(clock), buffer);
@@ -619,7 +566,7 @@ KGN_TEST(the_generator_actually_exercises_the_paths_it_claims) {
     // transitions would keep passing and prove nothing. Assert the event space
     // is not degenerate.
     std::size_t forwards = 0, suppressions = 0, actions = 0, releases = 0;
-    std::size_t buffers = 0, repeats = 0, exits = 0;
+    std::size_t repeats = 0, exits = 0;
     for (unsigned seed = 0; seed < 200; ++seed) {
         for (const auto& d : randomSession(seed)) {
             switch (d.kind) {
@@ -633,7 +580,6 @@ KGN_TEST(the_generator_actually_exercises_the_paths_it_claims) {
                     break;
                 case Decision::Kind::RunAction: ++actions; break;
                 case Decision::Kind::ReleaseAction: ++releases; break;
-                case Decision::Kind::Buffer: ++buffers; break;
                 case Decision::Kind::LayerExited: ++exits; break;
             }
         }
@@ -642,7 +588,6 @@ KGN_TEST(the_generator_actually_exercises_the_paths_it_claims) {
     KGN_CHECK(suppressions > 1000);
     KGN_CHECK(actions > 100);
     KGN_CHECK(releases > 100);
-    KGN_CHECK(buffers > 100);
     KGN_CHECK(repeats > 100);
     KGN_CHECK(exits > 100);
 }
@@ -698,10 +643,6 @@ KGN_TEST(an_orphan_release_of_a_high_id_key_is_suppressed) {
 // injected events and lost releases are in the threat model. These drive the
 // bounded lists past capacity on purpose.
 // ---------------------------------------------------------------------------
-
-namespace {
-
-}  // namespace
 
 KGN_TEST(overflowing_the_forwarded_list_suppresses_rather_than_stranding) {
     // Past capacity the engine must refuse to create an obligation it cannot
@@ -761,68 +702,6 @@ KGN_TEST(overflowing_the_held_action_list_emits_no_unreleasable_action) {
     }
 }
 
-KGN_TEST(overflowing_the_pending_list_degrades_to_no_grace_window) {
-    // Buffering is the optional part; delivering the keystroke is not.
-    const auto keys = syntheticKeys("OverflowPend", kMaxPending + 10);
-
-    BindingMap bindings;
-    for (KeyCode code : keys) bindings[code] = BindingKind::Action;
-
-    Fixture f;
-    f.engine.setBindings(bindings);
-
-    std::size_t forwarded = 0;
-    for (KeyCode code : keys) {
-        for (const auto& d : f.press(code, 0)) {
-            if (d.kind == Decision::Kind::Forward) ++forwarded;
-        }
-    }
-    KGN_CHECK(forwarded > 0);                  // the surplus was not dropped
-    KGN_CHECK(f.engine.capacityDrops() > 0);
-}
-
-KGN_TEST(a_suppressed_tap_replay_reports_the_release_it_suppressed) {
-    // The grace-window tap replay forwards a Down while handling an Up. If
-    // that press cannot be forwarded, the Suppress must describe the event it
-    // actually suppressed -- the release -- not the press it was trying to
-    // synthesise.
-    //
-    // A Suppress that misreports its own state is a trap for logging, tracing
-    // and any consumer reading the decision stream without the triggering
-    // event in hand.
-    const KeyCode tapped = KeyCode::fromString("TapReplayKey");
-
-    Fixture f;
-    f.engine.setBindings({{tapped, BindingKind::Action}});
-
-    // Saturate the forwarded list so the replay's press cannot be recorded.
-    for (KeyCode code : syntheticKeys("TapReplayFill", kMaxHeld + 4)) {
-        f.press(code, 0);
-    }
-    KGN_CHECK(f.engine.capacityDrops() > 0);
-
-    KGN_CHECK(has(f.press(tapped, 10), Decision::Kind::Buffer, tapped));
-
-    f.release(tapped, 20);                 // inside the grace window
-    KGN_CHECK_EQ(f.last.size(), std::size_t{1});
-    KGN_CHECK(f.last[0].kind == Decision::Kind::Suppress);
-    KGN_CHECK(f.last[0].code == tapped);
-    KGN_CHECK(f.last[0].state == KeyState::Up);
-    KGN_CHECK(!has(f.last, Decision::Kind::Forward, tapped));
-}
-
-KGN_TEST(a_successful_tap_replay_still_emits_the_matched_pair) {
-    // The unsaturated path, so the fix above cannot have changed it.
-    Fixture f;
-    f.press(H, 0);
-    f.release(H, 20);
-    KGN_CHECK_EQ(f.last.size(), std::size_t{2});
-    KGN_CHECK(f.last[0].kind == Decision::Kind::Forward);
-    KGN_CHECK(f.last[0].state == KeyState::Down);
-    KGN_CHECK(f.last[1].kind == Decision::Kind::Forward);
-    KGN_CHECK(f.last[1].state == KeyState::Up);
-}
-
 KGN_TEST(the_decision_buffer_holds_a_full_worst_case_unwind) {
     // The capacity is derived from this case, so assert the derivation.
     const auto keys = syntheticKeys("Unwind", kMaxHeld);
@@ -837,6 +716,58 @@ KGN_TEST(the_decision_buffer_holds_a_full_worst_case_unwind) {
     DecisionBuffer buffer;
     f.engine.releaseAll(buffer);
     KGN_CHECK(!buffer.overflowed());
+}
+
+KGN_TEST(the_decision_buffer_holds_the_full_forwarded_plus_held_unwind) {
+    // The true worst case for releaseAll(): kMaxHeld forwarded presses (made
+    // with the layer off) AND kMaxHeld held actions (made with it on), plus the
+    // one LayerExited. The two lists are independent, so 256 + 256 distinct
+    // keys are reachable; the result must fill 513 of the 520 slots exactly.
+    const auto fwd = syntheticKeys("WorstFwd", kMaxHeld);
+    const auto act = syntheticKeys("WorstAct", kMaxHeld);
+    BindingMap bindings;
+    for (KeyCode code : act) bindings[code] = BindingKind::Action;
+
+    Fixture f;
+    f.engine.setBindings(bindings);
+    for (KeyCode code : fwd) f.press(code, 0);          // layer off: forwarded
+    KGN_CHECK_EQ(f.engine.capacityDrops(), std::uint64_t{0});
+    f.press(CAPS, 10);
+    KGN_CHECK(f.engine.mode() == Mode::Cursor);
+    for (KeyCode code : act) f.press(code, 20);         // layer on: held actions
+    KGN_CHECK_EQ(f.engine.heldActions().size(), kMaxHeld);
+    KGN_CHECK_EQ(f.engine.capacityDrops(), std::uint64_t{0});
+
+    DecisionBuffer buffer;
+    f.engine.releaseAll(buffer);
+    KGN_CHECK(!buffer.overflowed());
+    KGN_CHECK_EQ(buffer.size(), 2 * kMaxHeld + 1);       // 513
+    KGN_CHECK(buffer.size() <= kDecisionCapacity);
+    std::size_t ups = 0, releases = 0, exits = 0;
+    for (const auto& d : buffer) {
+        if (d.kind == Decision::Kind::Forward && d.state == KeyState::Up) ++ups;
+        if (d.kind == Decision::Kind::ReleaseAction) ++releases;
+        if (d.kind == Decision::Kind::LayerExited) ++exits;
+    }
+    KGN_CHECK_EQ(ups, kMaxHeld);
+    KGN_CHECK_EQ(releases, kMaxHeld);
+    KGN_CHECK_EQ(exits, std::size_t{1});
+}
+
+KGN_TEST(a_forwarded_press_survives_a_reload_that_removes_its_binding) {
+    // SPEC section 13, Reload: the release owed for a forwarded press does not
+    // depend on the binding that was in force when it went down.
+    Fixture f;
+    KGN_CHECK(has(f.press(H, 0), Decision::Kind::Forward, H));   // layer off
+
+    const auto reloaded = f.engine.setBindings({{J, BindingKind::Action}});
+    for (const auto& d : reloaded) KGN_CHECK(d.code != H);
+
+    const auto& up = f.release(H, 10);
+    KGN_CHECK_EQ(up.size(), std::size_t{1});
+    KGN_CHECK(up[0].kind == Decision::Kind::Forward);
+    KGN_CHECK(up[0].code == H);
+    KGN_CHECK(up[0].state == KeyState::Up);
 }
 
 // ---------------------------------------------------------------------------
@@ -1105,14 +1036,6 @@ KGN_TEST(an_unbound_key_is_never_treated_as_passthrough) {
     KGN_CHECK(!has(f.last, Decision::Kind::Forward, Q));
 }
 
-KGN_TEST(a_passthrough_key_is_not_delayed_by_the_grace_window) {
-    // It does the same thing in both modes, so there is nothing to
-    // disambiguate and no reason to make the user wait for it.
-    Fixture f;
-    KGN_CHECK(has(f.press(BKSP, 0), Decision::Kind::Forward, BKSP));
-    KGN_CHECK_EQ(countKind(f.last, Decision::Kind::Buffer), std::size_t{0});
-}
-
 KGN_TEST(p7_covers_passthrough_keys_across_a_mode_change) {
     Fixture f(ActivationMode::Hold);
     f.press(CAPS, 0);
@@ -1228,50 +1151,6 @@ KGN_TEST(a_reload_that_changes_a_keys_kind_shows_no_intermediate_state) {
     KGN_CHECK(has(f.release(H, 20), Decision::Kind::Forward, H));
 }
 
-KGN_TEST(a_reload_keeps_a_pending_press_that_is_still_action_bound) {
-    // The press is physical input the user already committed to. It was
-    // delayed only to resolve layer intent, so an unrelated reload must not
-    // consume it.
-    Fixture f;
-    f.press(H, 0);
-    auto out = f.engine.setBindings({{H, BindingKind::Action}});
-    KGN_CHECK_EQ(out.size(), std::size_t{0});
-    f.tick(100);                                   // still waiting; now expires
-    KGN_CHECK(has(f.last, Decision::Kind::Forward, H));
-    KGN_CHECK(has(f.release(H, 110), Decision::Kind::Forward, H));
-}
-
-KGN_TEST(a_reload_preserves_the_original_press_time_of_a_kept_pending_key) {
-    // Keeping the press but restarting its clock would silently extend the
-    // grace window, which is the same defect as a duplicate press extending it.
-    Fixture f;
-    f.press(H, 0);
-    f.engine.setBindings({{H, BindingKind::Action}});
-    f.tick(60);                                    // 60ms > 50ms grace
-    KGN_CHECK(has(f.last, Decision::Kind::Forward, H));
-}
-
-KGN_TEST(a_reload_resolves_a_pending_press_that_lost_its_binding) {
-    // No longer action-bound, so there is nothing left to disambiguate: it was
-    // an ordinary keystroke all along. It must be delivered, not swallowed.
-    Fixture f;
-    f.press(H, 0);
-    auto out = f.engine.setBindings({{J, BindingKind::Action}});
-    KGN_CHECK(has(out, Decision::Kind::Forward, H));
-    // And having been forwarded, it now owes a release.
-    KGN_CHECK(has(f.release(H, 10), Decision::Kind::Forward, H));
-}
-
-KGN_TEST(a_reload_resolves_multiple_pending_keys_in_press_order) {
-    Fixture f;
-    f.press(J, 0);
-    f.press(H, 5);
-    auto out = f.engine.setBindings({});
-    KGN_CHECK_EQ(out.size(), std::size_t{2});
-    KGN_CHECK(out[0].code == J);
-    KGN_CHECK(out[1].code == H);
-}
-
 KGN_TEST(a_reload_releases_actions_in_press_order) {
     // SPEC 6.3.3 applies here too: multi-key decisions are emitted in press
     // order, not in whatever order the held list happens to be walked.
@@ -1295,54 +1174,8 @@ KGN_TEST(a_reload_leaves_forwarded_presses_alone) {
 }
 
 // ---------------------------------------------------------------------------
-// Ordering -- buffered events must resolve in press order
+// Ordering -- multi-key decisions come out in press order
 // ---------------------------------------------------------------------------
-
-KGN_TEST(expired_buffered_presses_are_forwarded_in_press_order) {
-    Fixture f;
-    f.press(H, 0);
-    f.press(J, 5);
-    f.tick(100);
-    KGN_CHECK_EQ(f.last.size(), std::size_t{2});
-    KGN_CHECK(f.last[0].code == H);
-    KGN_CHECK(f.last[1].code == J);
-}
-
-KGN_TEST(reversed_presses_expire_in_that_reversed_order) {
-    // The order comes from when the keys were pressed, not from anything
-    // intrinsic to the keys themselves.
-    Fixture f;
-    f.press(J, 0);
-    f.press(H, 5);
-    f.tick(100);
-    KGN_CHECK_EQ(f.last.size(), std::size_t{2});
-    KGN_CHECK(f.last[0].code == J);
-    KGN_CHECK(f.last[1].code == H);
-}
-
-KGN_TEST(capslock_promotes_buffered_keys_in_press_order) {
-    Fixture f;
-    f.press(J, 0);
-    f.press(H, 5);
-    f.press(CAPS, 20);
-    KGN_CHECK_EQ(countKind(f.last, Decision::Kind::RunAction), std::size_t{2});
-    KGN_CHECK(f.last[1].code == J);   // [0] is the CapsLock suppression
-    KGN_CHECK(f.last[2].code == H);
-}
-
-KGN_TEST(partial_expiry_preserves_the_order_of_what_remains) {
-    Fixture f;
-    f.press(H, 0);
-    f.press(J, 40);
-    // No unbound press here: since O-12 one resolves every buffered press
-    // ahead of itself (an_unbound_press_cannot_overtake_...).
-    f.tick(60);              // H has expired; J has not
-    KGN_CHECK_EQ(f.last.size(), std::size_t{1});
-    KGN_CHECK(f.last[0].code == H);
-    f.tick(120);
-    KGN_CHECK_EQ(f.last.size(), std::size_t{1});
-    KGN_CHECK(f.last[0].code == J);
-}
 
 KGN_TEST(held_actions_are_released_in_press_order) {
     Fixture f(ActivationMode::Hold);
@@ -1500,7 +1333,6 @@ KGN_TEST(the_same_input_always_produces_the_same_decisions) {
         for (KeyCode code : {H, J, Q, LCTRL}) {
             for (const auto& d : f.press(code, 0)) log.push_back(d);
         }
-        for (const auto& d : f.tick(100)) log.push_back(d);
         for (const auto& d : f.press(CAPS, 110)) log.push_back(d);
         for (const auto& d : f.engine.releaseAll()) log.push_back(d);
         return log;
@@ -1535,14 +1367,6 @@ KGN_TEST(a_release_with_no_press_is_suppressed) {
     KGN_CHECK(has(f.release(Q, 0), Decision::Kind::Suppress, Q));
 }
 
-KGN_TEST(a_duplicate_press_cannot_extend_the_grace_window) {
-    Fixture f;
-    f.press(H, 0);
-    f.press(H, 40);                  // must not reset the clock
-    f.tick(60);
-    KGN_CHECK(has(f.last, Decision::Kind::Forward, H));
-}
-
 KGN_TEST(repeat_events_follow_the_press_that_preceded_them) {
     Fixture f;
     f.press(Q, 0);
@@ -1570,37 +1394,11 @@ KGN_TEST(the_decision_buffer_never_reallocates) {
         f.engine.onKey(CAPS, KeyState::Down, at(i * 10 + 1), buffer);
         f.engine.onKey(H, KeyState::Up, at(i * 10 + 2), buffer);
         f.engine.onKey(CAPS, KeyState::Up, at(i * 10 + 3), buffer);
-        f.engine.tick(at(i * 10 + 4), buffer);
         KGN_CHECK(!buffer.overflowed());
     }
     buffer.clear();
     f.engine.releaseAll(buffer);
     KGN_CHECK(!buffer.overflowed());
-}
-
-KGN_TEST(the_engine_reports_when_its_next_grace_window_lapses) {
-    // The engine's only timed work is expiring buffered presses, so its owner
-    // should wait on that deadline rather than poll it at 60 Hz.
-    EngineConfig config;
-    config.grace = std::chrono::milliseconds(50);
-    LayerEngine engine(config);
-    engine.setBindings({{KeyCode::fromString("KeyD"), BindingKind::Action},
-                        {KeyCode::fromString("KeyF"), BindingKind::Action}});
-
-    KGN_CHECK(!engine.nextDeadline().has_value());
-
-    engine.onKey(KeyCode::fromString("KeyD"), KeyState::Down, at(100));
-    engine.onKey(KeyCode::fromString("KeyF"), KeyState::Down, at(120));
-
-    // The EARLIEST pending press governs, not the most recent.
-    KGN_CHECK(engine.nextDeadline().has_value());
-    KGN_CHECK(*engine.nextDeadline() == at(150));
-
-    engine.tick(at(150));
-    KGN_CHECK(*engine.nextDeadline() == at(170));
-
-    engine.tick(at(170));
-    KGN_CHECK(!engine.nextDeadline().has_value());
 }
 
 int main() {

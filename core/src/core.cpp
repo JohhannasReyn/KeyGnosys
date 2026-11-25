@@ -312,8 +312,8 @@ struct Core::Impl {
 
     // Stream B. ONE `key` event per PHYSICAL event -- never one per decision.
     //
-    // A grace replay is two decisions and one physical event; a release_all is
-    // many decisions and no physical event at all. Publishing per decision, as
+    // However many work items one physical event yields, it publishes exactly one
+    // `key` event; a release_all publishes none, since it has no physical event. Publishing per decision, as
     // this once did, reports keys the user never pressed.
     void drainPublication() {
         PhysicalRecord record{};
@@ -1024,7 +1024,7 @@ struct Core::Impl {
             }
             return applyActivation(mode);
         }
-        if (path == "behavior.hybrid_tap_ms" || path == "behavior.grace_ms") {
+        if (path == "behavior.hybrid_tap_ms") {
             if (!value.isNumber()) {
                 return Reply::failure("config.invalid", "value must be a number");
             }
@@ -1038,11 +1038,7 @@ struct Core::Impl {
                      path + " was out of range and was clamped");
                 milliseconds = clamped;
             }
-            if (path == "behavior.hybrid_tap_ms") {
-                engineConfig.hybridTap = std::chrono::milliseconds(milliseconds);
-            } else {
-                engineConfig.grace = std::chrono::milliseconds(milliseconds);
-            }
+            engineConfig.hybridTap = std::chrono::milliseconds(milliseconds);
             return applyEngineConfig();
         }
         if (path == "behavior.real_capslock_gesture") {
@@ -1201,10 +1197,9 @@ OwnResult Core::start() {
 void Core::step(TimePoint now) {
     if (!impl_->started || impl_->stopped) return;
 
-    // The layer engine is no longer ticked here. It is owned by whoever feeds
-    // it, and it wakes on its own grace deadline rather than at 60 Hz --
-    // expiring buffered presses is its only timed work. What remains on this
-    // beat is motion, which SPEC 6.4 does specify at 60 Hz.
+    // The layer engine is not ticked here. It is owned by whoever feeds it,
+    // and it has no timed work. What remains on this beat is motion, which
+    // SPEC 6.4 does specify at 60 Hz.
     impl_->drainPublication();
     impl_->drainWork();
     impl_->serviceDoubleClicks(now);

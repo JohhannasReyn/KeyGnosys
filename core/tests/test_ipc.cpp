@@ -293,11 +293,11 @@ KGN_TEST(commands_reach_the_handler_with_their_client_and_payload) {
         return Reply::success();
     });
     auto channel = harness.connect();
-    channel->fromClient += command("set_setting", "c1", R"({"path":"behavior.grace_ms","value":40})");
+    channel->fromClient += command("set_setting", "c1", R"({"path":"behavior.hybrid_tap_ms","value":40})");
     harness.server->poll();
 
     KGN_CHECK(seenClient != 0);
-    KGN_CHECK_EQ(seenData["path"].asString(), std::string("behavior.grace_ms"));
+    KGN_CHECK_EQ(seenData["path"].asString(), std::string("behavior.hybrid_tap_ms"));
     KGN_CHECK_EQ(seenData["value"].asInt(), std::int64_t{40});
 }
 

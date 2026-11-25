@@ -1,4 +1,5 @@
 # Measures the grace window from outside the core.
+# (historical: the grace window was removed on 2026-11-22; kept for reference.)
 #
 # The synthetic press the grace expiry emits is INJECTED, so it never appears in
 # the core's own key stream (the hook skips injected events by design). An

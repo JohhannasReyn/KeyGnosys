@@ -1,5 +1,7 @@
 """Judge chord attempts with strict ONE-TO-ONE pairing.
 
+(historical: the grace window was removed on 2026-11-22; kept for reference.)
+
 The earlier analysis let a single CapsLock press act as partner for several J
 presses, inventing 21 attempts out of 10. Here each CapsLock is consumed by at
 most one J, nearest-first, so an attempt is a genuine pair or it is not counted.

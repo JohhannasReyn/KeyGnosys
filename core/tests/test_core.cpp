@@ -572,7 +572,23 @@ KGN_TEST(an_unknown_setting_path_is_refused_rather_than_ignored) {
 }
 
 KGN_TEST(a_known_setting_is_applied) {
-    Fixture fixture("grace");
+    Fixture fixture("knownsetting");
+    KGN_CHECK(fixture.core.start().ok());
+    RawClient client;
+    KGN_CHECK(client.connect(fixture.address));
+    if (!client.valid()) return;
+    client.readLine(fixture.core);
+
+    client.send(
+        R"({"v":1,"t":"command","n":"set_setting","id":"c1","d":{"path":"behavior.hybrid_tap_ms","value":200}})"
+        "\n");
+    const Json reply = readReply(client, fixture.core);
+    KGN_CHECK(reply["ok"].asBool());
+    client.close();
+}
+
+KGN_TEST(the_retired_grace_setting_is_refused) {
+    Fixture fixture("retiredgrace");
     KGN_CHECK(fixture.core.start().ok());
     RawClient client;
     KGN_CHECK(client.connect(fixture.address));
@@ -583,7 +599,8 @@ KGN_TEST(a_known_setting_is_applied) {
         R"({"v":1,"t":"command","n":"set_setting","id":"c1","d":{"path":"behavior.grace_ms","value":40}})"
         "\n");
     const Json reply = readReply(client, fixture.core);
-    KGN_CHECK(reply["ok"].asBool());
+    KGN_CHECK(!reply["ok"].asBool());
+    KGN_CHECK_EQ(reply["e"]["code"].asString(), std::string("config.invalid"));
     client.close();
 }
 
@@ -695,7 +712,8 @@ KGN_TEST(stepping_with_no_input_backend_moves_nothing_and_does_not_spin) {
 }
 
 KGN_TEST(a_key_event_is_published_once_per_physical_event_not_once_per_decision) {
-    // A grace replay is ONE physical Up that produces TWO Forward decisions.
+    // One physical Up can yield several work items (here, two SendKeys) yet must
+    // publish exactly one `key` event; release_all publishes none.
     // Publishing per decision -- which is what the core did before the streams
     // were separated -- reports a key press the user never made.
     Fixture fixture("publish");

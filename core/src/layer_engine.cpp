@@ -19,10 +19,6 @@ Decision releaseAction(KeyCode code) {
     return {Decision::Kind::ReleaseAction, code, KeyState::Up};
 }
 
-Decision bufferPress(KeyCode code) {
-    return {Decision::Kind::Buffer, code, KeyState::Down};
-}
-
 Decision layerExited() {
     return {Decision::Kind::LayerExited, KeyCode{}, KeyState::Up};
 }
@@ -84,23 +80,6 @@ void LayerEngine::setBindings(const BindingMap& bindings, DecisionBuffer& out) {
     }
     heldCount_ = keptHeld;
 
-    // Buffered presses are physical input the user already committed to; they
-    // were delayed only to resolve layer intent, so a reload must not discard
-    // them. A key that is still action-bound keeps waiting, with its original
-    // press time. One that is not becomes the ordinary keystroke it turned out
-    // to be, tracked so its release is owed.
-    std::size_t keptPending = 0;
-    for (std::size_t i = 0; i < pendingCount_; ++i) {
-        const Pending entry = pending_[i];
-        if (isActionBound(bindings, entry.code)) {
-            pending_[keptPending++] = entry;
-            continue;
-        }
-        slot(entry.code).clear(Slot::kPending);
-        forwardPress(entry.code, KeyState::Down, out);
-    }
-    pendingCount_ = keptPending;
-
     // Swap the classification wholesale. Nothing observes the engine between
     // these two loops, so there is no window in which a key could be
     // passthrough but not bound.
@@ -121,7 +100,7 @@ void LayerEngine::setBindings(const BindingMap& bindings, DecisionBuffer& out) {
 // ---------------------------------------------------------------------------
 
 bool LayerEngine::forwardPress(KeyCode code, KeyState state,
-                               DecisionBuffer& out, KeyState suppressAs) {
+                               DecisionBuffer& out) {
     Slot& s = slot(code);
     if (!s.has(Slot::kForwarded)) {
         if (forwardedCount_ >= kMaxHeld) {
@@ -129,7 +108,7 @@ bool LayerEngine::forwardPress(KeyCode code, KeyState state,
             // A dropped keystroke is recoverable; a key the OS believes is
             // held forever is not.
             ++capacityDrops_;
-            out.push(suppress(code, suppressAs));
+            out.push(suppress(code, KeyState::Down));
             return false;
         }
         s.set(Slot::kForwarded);
@@ -155,7 +134,7 @@ void LayerEngine::forgetForwarded(KeyCode code) {
 }
 
 // ---------------------------------------------------------------------------
-// Ordered held-action and pending lists
+// Ordered held-action list
 // ---------------------------------------------------------------------------
 
 bool LayerEngine::addHeldAction(KeyCode code) {
@@ -185,65 +164,6 @@ void LayerEngine::removeHeldAction(KeyCode code) {
             return;
         }
     }
-}
-
-bool LayerEngine::addPending(KeyCode code, TimePoint now) {
-    if (pendingCount_ >= kMaxPending) return false;
-    slot(code).set(Slot::kPending);
-    pending_[pendingCount_++] = Pending{code, now};
-    return true;
-}
-
-bool LayerEngine::isPending(KeyCode code) const {
-    return slot(code).has(Slot::kPending);
-}
-
-bool LayerEngine::takePending(KeyCode code) {
-    if (!isPending(code)) return false;
-    slot(code).clear(Slot::kPending);
-    for (std::size_t i = 0; i < pendingCount_; ++i) {
-        if (pending_[i].code == code) {
-            for (std::size_t j = i + 1; j < pendingCount_; ++j) {
-                pending_[j - 1] = pending_[j];
-            }
-            --pendingCount_;
-            return true;
-        }
-    }
-    return false;
-}
-
-// A buffered key is about to resolve as a tap. Every press buffered BEFORE it
-// resolves first, as the ordinary hold it has turned out to be (the user is
-// typing, and those keys are still down), so the OS sees presses in the order
-// they were made -- not a quick tap overtaking a key pressed earlier (SPEC
-// 6.3.3). Presses buffered after it keep their own windows.
-void LayerEngine::resolvePendingBefore(KeyCode code, DecisionBuffer& out) {
-    std::size_t earlier = 0;
-    while (earlier < pendingCount_ && pending_[earlier].code != code) ++earlier;
-    if (earlier == pendingCount_) return;   // not buffered: nothing to order
-    resolveOldestPending(earlier, out);
-}
-
-// The oldest `count` buffered presses resolve as ordinary holds, in press
-// order. Used when a key that is NOT buffered is about to reach the OS: every
-// buffered press is older than it, so all of them go first.
-void LayerEngine::resolveOldestPending(std::size_t earlier, DecisionBuffer& out) {
-    for (std::size_t i = 0; i < earlier; ++i) {
-        slot(pending_[i].code).clear(Slot::kPending);
-        forwardPress(pending_[i].code, KeyState::Down, out);
-    }
-    for (std::size_t i = earlier; i < pendingCount_; ++i) {
-        pending_[i - earlier] = pending_[i];
-    }
-    pendingCount_ -= earlier;
-}
-
-std::optional<TimePoint> LayerEngine::nextDeadline() const {
-    if (pendingCount_ == 0) return std::nullopt;
-    // pending_ is kept in press order and `grace` is uniform across entries,
-    // so the head is always the first to lapse.
-    return pending_[0].pressedAt + config_.grace;
 }
 
 std::vector<KeyCode> LayerEngine::heldActions() const {
@@ -300,12 +220,6 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
                 out.push(suppress(code, state));
                 return;
             }
-            // And for one already buffered: keep the original press time, so a
-            // duplicate cannot extend the grace window indefinitely.
-            if (s.has(Slot::kPending)) {
-                out.push(bufferPress(code));
-                return;
-            }
 
             if (mode_ == Mode::Cursor) {
                 if (s.has(Slot::kBound) && s.has(Slot::kPassthrough)) {
@@ -336,28 +250,10 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
                 return;
             }
 
-            // A passthrough key does the same thing in both modes, so there is
-            // nothing for the grace window to disambiguate. Buffering it would
-            // cost latency and buy nothing.
-            if (!s.has(Slot::kBound) || s.has(Slot::kPassthrough)) {
-                // Not buffered, so it would overtake every buffered press,
-                // all of which were made before it. They go first (O-12).
-                resolveOldestPending(pendingCount_, out);
-                forwardPress(code, state, out);
-                return;
-            }
-
-            // Action-bound, but the layer is off: ambiguous. The user may be
-            // typing it, or may be a few milliseconds ahead of the CapsLock
-            // that was meant to precede it. Hold it and see.
-            if (!addPending(code, now)) {
-                // More simultaneous buffered keys than a hand can produce.
-                // Degrade to no grace window rather than drop the keystroke.
-                ++capacityDrops_;
-                forwardPress(code, state, out);
-                return;
-            }
-            out.push(bufferPress(code));
+            // Layer off: every key, bound or not, is ordinary typing. CapsLock
+            // first is the only way into the layer, so there is nothing to
+            // disambiguate and nothing to wait for.
+            forwardPress(code, state, out);
             return;
         }
 
@@ -369,29 +265,13 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
                 return;
             }
 
-            resolvePendingBefore(code, out);
-            if (takePending(code)) {
-                // Released before the grace window resolved: an ordinary quick
-                // tap. Send the whole press and release now, in order -- and
-                // only if the press can be tracked, so the pair stays matched.
-                //
-                // The event being handled is the release, so a suppression
-                // here reports Up even though the press was what could not be
-                // forwarded.
-                if (forwardPress(code, KeyState::Down, out, KeyState::Up)) {
-                    forgetForwarded(code);
-                    out.push(forward(code, KeyState::Up));
-                }
-                return;
-            }
-
             if (s.has(Slot::kHeldAction)) {
                 removeHeldAction(code);
                 out.push(releaseAction(code));
                 return;
             }
 
-            // Never forwarded, never buffered, never held. Its press did not
+            // Never forwarded, never held. Its press did not
             // reach the OS, so neither may its release: forwarding it would be
             // a key-up for a key the OS never saw go down.
             out.push(suppress(code, state));
@@ -403,8 +283,8 @@ void LayerEngine::onKey(KeyCode code, KeyState state, TimePoint now,
                 out.push(forward(code, state));
                 return;
             }
-            // Buffered and held keys handle repetition themselves -- the grace
-            // sweep resolves one, the motion integrator drives the other.
+            // Held action keys handle repetition themselves -- the motion
+            // integrator drives them.
             out.push(suppress(code, state));
             return;
         }
@@ -463,7 +343,6 @@ void LayerEngine::onCapsLock(KeyState state, TimePoint now,
                 } else {
                     mode_ = Mode::Cursor;
                     latched_ = true;
-                    promoteBuffered(now, out);
                 }
                 return;
             case ActivationMode::Hold:
@@ -472,7 +351,6 @@ void LayerEngine::onCapsLock(KeyState state, TimePoint now,
                 capsWasLatched_ = latched_;
                 mode_ = Mode::Cursor;
                 latched_ = false;
-                promoteBuffered(now, out);
                 return;
         }
         return;
@@ -531,54 +409,6 @@ void LayerEngine::onCapsLock(KeyState state, TimePoint now,
 }
 
 // ---------------------------------------------------------------------------
-// The grace window
-// ---------------------------------------------------------------------------
-
-void LayerEngine::promoteBuffered(TimePoint now, DecisionBuffer& out) {
-    // In press order. The keys were pressed in a particular sequence and the
-    // actions they become must start in that same sequence.
-    const std::size_t count = pendingCount_;
-    pendingCount_ = 0;
-    for (std::size_t i = 0; i < count; ++i) {
-        const KeyCode code = pending_[i].code;
-        const bool inWindow = since(pending_[i].pressedAt, now) <= config_.grace;
-        slot(code).clear(Slot::kPending);
-
-        if (inWindow) {
-            // Pressed just before CapsLock registered: the user meant the
-            // action, not the character. Nothing reaches the OS.
-            if (addHeldAction(code)) {
-                out.push(runAction(code));
-            } else {
-                out.push(suppress(code, KeyState::Down));
-            }
-        } else {
-            // The window had already lapsed when CapsLock arrived. Treat it as
-            // the ordinary keystroke it turned out to be.
-            forwardPress(code, KeyState::Down, out);
-        }
-    }
-}
-
-void LayerEngine::tick(TimePoint now, DecisionBuffer& out) {
-    // Entries are in press order, and expiry is monotonic in press time, so
-    // walking forwards and compacting preserves that order for both the keys
-    // that expire and the ones that stay.
-    std::size_t kept = 0;
-    for (std::size_t i = 0; i < pendingCount_; ++i) {
-        const Pending entry = pending_[i];
-        if (since(entry.pressedAt, now) < config_.grace) {
-            pending_[kept++] = entry;
-            continue;
-        }
-        // The window lapsed without CapsLock showing up: an ordinary hold.
-        slot(entry.code).clear(Slot::kPending);
-        forwardPress(entry.code, KeyState::Down, out);
-    }
-    pendingCount_ = kept;
-}
-
-// ---------------------------------------------------------------------------
 // Leaving the layer
 // ---------------------------------------------------------------------------
 
@@ -617,15 +447,6 @@ void LayerEngine::releaseAll(DecisionBuffer& out) {
     }
     forwardedCount_ = 0;
 
-    // Buffered presses never reached the OS, so there is nothing to release.
-    // Dropping them is right for a panic path: replaying them as keystrokes
-    // would type characters the user never committed to, and the mirror
-    // invariant then suppresses their eventual physical release.
-    for (std::size_t i = 0; i < pendingCount_; ++i) {
-        slot(pending_[i].code).clear(Slot::kPending);
-    }
-    pendingCount_ = 0;
-
     // Physical modifier state must be cleared for every modifier, not only the
     // ones that happened to be forwarded. A modifier bound to an action lives
     // in the held list instead, and leaving its flag set would make the next
@@ -655,12 +476,6 @@ std::vector<Decision> LayerEngine::onKey(KeyCode code, KeyState state,
                                          TimePoint now) {
     DecisionBuffer buffer;
     onKey(code, state, now, buffer);
-    return collect(buffer);
-}
-
-std::vector<Decision> LayerEngine::tick(TimePoint now) {
-    DecisionBuffer buffer;
-    tick(now, buffer);
     return collect(buffer);
 }
 

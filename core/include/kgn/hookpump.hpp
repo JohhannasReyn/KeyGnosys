@@ -1,23 +1,15 @@
-// The two decisions the hook thread's message loop has to make, extracted from
-// Win32 so they can be tested without a desktop, a message queue or a human.
+// The hook thread's core -> hook wakeup, extracted from Win32 so it can be
+// tested without a desktop, a message queue or a human.
 //
-// This file exists because of a defect found during live M3 validation. The
-// hook thread had been parking in MsgWaitForMultipleObjectsEx, whose timeout
-// doubled as the grace-window timer. That is a WAIT, not a message-RETRIEVAL
-// call, and WH_KEYBOARD_LL callbacks are only dispatched while the installing
-// thread is inside a retrieval call. The hook installed, reported healthy, and
-// never received a single callback. The automated suite did not catch it
-// because nothing in it depended on the thread retrieving messages.
+// The thread blocks in GetMessageW, because WH_KEYBOARD_LL callbacks are only
+// dispatched while the installing thread is inside a message-RETRIEVAL call. A
+// wait such as MsgWaitForMultipleObjectsEx is not one: the hook installed,
+// reported healthy, and never received a callback.
 //
-// The repair makes GetMessageW the blocking primitive. That fixes dispatch but
-// costs the timeout, so the two jobs it used to carry are now explicit:
+//   Doorbell -- core -> hook wakeups, coalesced, carrying no payload.
 //
-//   Doorbell        -- core -> hook wakeups, coalesced, carrying no payload.
-//   GraceTimerPlan  -- when the thread timer must be armed or killed.
-//
-// Both are pure. The Win32 calls they imply (PostThreadMessageW, SetTimer,
-// KillTimer) stay in the backend; the reasoning lives here where a test can
-// reach it.
+// It is pure. The Win32 call it implies (PostThreadMessageW) stays in the
+// backend; the reasoning lives here where a test can reach it.
 //
 // See docs/superpowers/specs/2026-08-28-m3-threading-design.md section 4.
 
@@ -25,9 +17,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <optional>
-
-#include "kgn/clock.hpp"
 
 namespace kgn {
 
@@ -80,90 +69,6 @@ public:
 
 private:
     std::atomic<bool> pending_{false};
-};
-
-// ---------------------------------------------------------------------------
-// GraceTimerPlan
-//
-// The engine's only timed work is expiring buffered presses, so the thread
-// needs a timer exactly when LayerEngine::nextDeadline() has a value. The
-// timer is treated as ONE-SHOT: the loop kills it when it fires and re-arms
-// from the deadline that remains. A periodic timer would be a poll, which is
-// the thing this design refuses to become.
-//
-// Because a fired timer is killed before the engine is consulted, a stale or
-// coalesced WM_TIMER is harmless by construction: the loop re-reads the clock,
-// finds nothing due, does nothing, and re-arms only if a deadline still
-// exists.
-//
-// pending_ is in press order and the grace window is uniform, so the head
-// entry is always the earliest deadline and an armed timer never needs to be
-// replaced with an earlier one. When the head is consumed the next deadline is
-// strictly later, so the armed timer merely fires early -- which the
-// not-yet-due path absorbs.
-class GraceTimerPlan {
-public:
-    enum class Action {
-        None,   // leave the timer as it is
-        Arm,    // SetTimer for `delayMs`
-        Kill,   // KillTimer; nothing is pending
-    };
-
-    struct Decision {
-        Action action = Action::None;
-        std::uint32_t delayMs = 0;
-
-        friend bool operator==(const Decision& a, const Decision& b) {
-            return a.action == b.action && a.delayMs == b.delayMs;
-        }
-    };
-
-    // `armed` is whether a timer is live right now. A timer that has just
-    // fired must be reported as NOT armed, because the loop kills it first.
-    //
-    // A deadline already in the past yields Arm with the floor delay rather
-    // than a zero-delay timer: the loop will run the expiry on the next turn,
-    // and asking Windows for a 0 ms timer is asking for a spin.
-    static Decision decide(bool armed, const std::optional<TimePoint>& deadline,
-                           TimePoint now) {
-        if (!deadline.has_value()) {
-            return armed ? Decision{Action::Kill, 0} : Decision{Action::None, 0};
-        }
-        if (armed) return Decision{Action::None, 0};
-
-        const auto remaining =
-            std::chrono::duration_cast<std::chrono::milliseconds>(*deadline - now)
-                .count();
-        // USER_TIMER_MINIMUM is 10 ms and Windows clamps below it anyway, so
-        // the floor is honest about what the OS will actually do.
-        const std::int64_t clamped =
-            remaining < kMinDelayMs ? kMinDelayMs
-                                    : (remaining > kMaxDelayMs ? kMaxDelayMs
-                                                               : remaining);
-        return Decision{Action::Arm, static_cast<std::uint32_t>(clamped)};
-    }
-
-    // Is an expiry that was armed for `armed` still worth acting on, given the
-    // deadline generation now current?
-    //
-    // This is defence, not the guarantee. The guarantee is that the expiry path
-    // re-reads the clock and does nothing unless a deadline has genuinely
-    // passed, so even an accepted stale wake cannot expire a window early. The
-    // generation check exists so an obsolete wake is discarded cheaply and so
-    // the intent is legible: a timer armed for a window that has since been
-    // replaced has no business being consulted about the new one.
-    static constexpr bool acceptExpiry(std::uint32_t armed, std::uint32_t current) {
-        return armed == current;
-    }
-
-    // Was 10 ms, because USER_TIMER_MINIMUM clamped SetTimer and asking for
-    // less was asking for a lie. The deadline is now served by a
-    // high-resolution waitable timer, so the floor exists only to keep a
-    // past-due deadline from arming a zero-delay timer, which would be a spin.
-    static constexpr std::int64_t kMinDelayMs = 1;
-    // A ceiling so a nonsensical deadline cannot arm a timer years out; the
-    // loop re-evaluates on every wake regardless.
-    static constexpr std::int64_t kMaxDelayMs = 1000;
 };
 
 }  // namespace kgn

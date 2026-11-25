@@ -60,9 +60,9 @@ bool translateDecisions(const DecisionBuffer& decisions, KeyCode code,
     // Native passthrough: the engine asked for exactly this event and nothing
     // else, so the cheapest way to make it true is to let the OS deliver it
     // itself. Anything more than one decision means something has to be
-    // ordered around it -- the grace replay's synthetic Down being the case
-    // that matters -- and then the physical event must be suppressed and
-    // re-synthesised so the order is ours to control.
+    // ordered around it (a physical event that yields several work items) and
+    // then the physical event must be suppressed and re-synthesised so the
+    // order is ours to control.
     //
     // The code and state must both match. A Forward for a different state is
     // the engine saying the OS should see a repeat rather than the second
@@ -108,9 +108,9 @@ bool translateDecisions(const DecisionBuffer& decisions, KeyCode code,
                 out.push(WorkItem{WorkItem::Kind::SendKey,
                                   decision.state != KeyState::Up,
                                   decision.code.id()});
-                // Committed per DECISION, not per event in hand: a grace expiry
-                // carries no physical event at all, and one physical event can
-                // resolve several keys.
+                // Committed per DECISION, not per event in hand: a release_all
+                // carries no physical event at all, and leaving the layer
+                // releases every forwarded press in one go.
                 if (channel != nullptr) {
                     if (decision.state == KeyState::Up) {
                         channel->release(decision.code);
@@ -131,7 +131,6 @@ bool translateDecisions(const DecisionBuffer& decisions, KeyCode code,
                 out.push(WorkItem{WorkItem::Kind::ReleaseToggles, false, 0});
                 break;
             case Decision::Kind::Suppress:
-            case Decision::Kind::Buffer:
                 // Nothing for the core to do, and -- load-bearing -- no ring
                 // capacity spent. The release-capacity proof in the header
                 // depends on this: an Up for a key with no obligation must

@@ -29,7 +29,6 @@ DEFAULTS: dict[str, Any] = {
     "behavior": {
         "activation_mode": "hybrid",
         "hybrid_tap_ms": 200,
-        "grace_ms": 50,
         "real_capslock_gesture": "Shift+CapsLock",
         "layout": "us-ansi-104",
         "bindings": "default",
@@ -47,7 +46,6 @@ RANGES = [
     ("appearance.scale", 0.4, 2.0),
     ("appearance.feedback_fade_ms", 0, 2000),
     ("behavior.hybrid_tap_ms", 50, 1000),
-    ("behavior.grace_ms", 0, 400),
 ]
 
 CHOICES = {

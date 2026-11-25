@@ -110,16 +110,11 @@ Run **unelevated** unless a row says otherwise.
 | 2.7 | ⚠ Engage the layer, hold a movement key, and press `CapsLock` to leave. | The pointer stops. No key or button remains held. |
 | 2.8 | Press `CapsLock` twice in quick succession. | The layer toggles **twice** — once per press. There is no debounce, by design. |
 
-## 3. The grace window
+## 3. Layer entry
 
 | # | Procedure | Expected |
 |---|---|---|
-| 3.1 | With the layer off, press an action-bound key (e.g. `J`) and release it quickly. | The character `j` is typed. |
-| 3.2 | Press `J` and, within the grace window (default 50 ms), press `CapsLock`. | No `j` is typed; the layer engages and `J`'s action runs. |
-| 3.3 | Press `J`, wait 200 ms, then press `CapsLock`. | `j` is typed, then the layer engages. |
-| 3.4 | Press `J` and hold it for a second without touching `CapsLock`. | `j` autorepeats normally after the grace window lapses. |
-| 3.5 | Press three action-bound keys in quick succession, then `CapsLock`. | Their actions start in press order, not in some other order. |
-| 3.6 | **Measure the grace timing.** Press `J` alone and time how long until `j` appears (a screen recording, or any input-latency tool). Repeat five times and record the observed delays in the log. | Never **shorter** than the configured `grace_ms` (default 50 ms) — an early expiry would resolve the race wrongly. Late by up to about one system tick (~15.6 ms) is expected and acceptable: the deadline is served by a thread timer, not a high-resolution one. Record the numbers; do not just tick the row. If the median exceeds roughly `grace_ms + 20 ms`, stop and report before anyone reaches for a helper thread or a high-resolution timer. |
+| 3.1 | With the layer off, type `h`, `j`, `k`, `l` quickly, and hold `J` for a second. Then press `J` and, while it is down, press `CapsLock`. | Letters appear instantly and autorepeat normally; no key waits on CapsLock. In the last step `j` is typed, then the layer engages, and `J`'s release reaches the OS (no stuck key). |
 
 ## 4. Pointer motion
 
@@ -263,7 +258,6 @@ Every row here is a P7 test. A failure leaves a key or a button held.
 | 11.4 | Stop the core with a client attached. | The client receives `shutdown` with a reason and reconnects cleanly when the core returns. |
 | 11.5 | Connect a client that stops reading and keeps sending commands. | The core does not block. No keystroke is delayed. The client is eventually disconnected rather than growing the core's memory. |
 | 11.6 | Watch the `key` event stream while typing. | Exactly one event per physical key event. **No duplicates**, and none for keys the core synthesised. |
-| 11.7 | Watch the stream during a grace replay (3.2). | One `key` event for the physical release. Not two. |
 | 11.8 | Watch `mode` and `modifiers` while engaging the layer with Shift held. | Both reflect reality. The `key` event for `CapsLock` precedes the `mode` change it caused. |
 | 11.9 | Confirm no `key` event ever contains a character. | Only positional codes (SPEC §12.4). |
 

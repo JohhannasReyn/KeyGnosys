@@ -2,9 +2,9 @@
 //
 // An engine DECISION is not a physical KEY EVENT, and conflating them is a bug
 // waiting for a backend to exist:
-//   - one physical event can produce several decisions (a grace replay, a
-//     CapsLock press promoting buffered keys);
-//   - grace expiry, release_all and config changes produce decisions with NO
+//   - one physical event can produce several decisions (leaving the layer
+//     releases every held action and announces the exit);
+//   - release_all and config changes produce decisions with NO
 //     physical event at all;
 //   - a decision satisfied by native passthrough needs publication but no
 //     synthesis, and re-synthesising it would deliver the key twice.
@@ -17,7 +17,7 @@
 //   impossible is below.
 //
 //   Stream B -- PhysicalRecord. Exactly one per physical hook callback, and
-//   none for timer or control work. This is what produces the `key` IPC event.
+//   none for control work. This is what produces the `key` IPC event.
 //   Losing one costs an overlay highlight and nothing else, so it may drop.
 //
 // Everything here is pure: no OS API, no thread, no allocation after
@@ -68,13 +68,15 @@ struct PhysicalRecord {
 //
 // The theorem the work ring's size comes from:
 //
-// Let U := heldActions + 2 * pendingPresses. Every Up path emits at most -dU
-// work items -- releasing a held action costs 1 item and drops U by 1;
-// resolving a buffered press costs at most 2 and drops U by 2 -- with ONE
-// exception: a CapsLock release that leaves the layer costs H + 1 items while
-// dropping U by only H. Every path that emits NO work item consumes no
-// capacity either, because Suppress and Buffer decisions never become work
-// items.
+// Let U := heldActions and F := the keys the engine has forwarded and not yet
+// released. A release is owed for each of them: an Up for a held action emits
+// ReleaseAction, and an Up for a forwarded press emits ONE SendKey whenever
+// that press went out on the Synthetic channel (a native Up emits none). So
+// every Up path emits at most -(dU + dF) work items -- releasing a held action
+// or a forwarded press costs 1 item and drops U + F by 1 -- with ONE exception:
+// a CapsLock release that leaves the layer costs H + 1 items while dropping U
+// by only H. Every path that emits NO work item consumes no capacity either,
+// because Suppress decisions never become work items.
 //
 // That extra item is the layer-exit signal (ReleaseToggles), and there is at
 // most one of it in any drain. It is emitted only when the layer was actually
@@ -84,12 +86,16 @@ struct PhysicalRecord {
 // exit attempt.
 //
 // So once no new obligation is admitted, ALL remaining Up events together emit
-// at most U + kMaxLayerExitWork <= kMaxReleaseWork items.
+// at most U + F + kMaxLayerExitWork items. Each list is bounded by kMaxHeld
+// (U <= kMaxHeld, F <= kMaxHeld), so that is at most
+//     kMaxHeld + kMaxHeld + kMaxLayerExitWork = 256 + 256 + 1 = 513
+// = kMaxReleaseWork. (Counting U alone, as an earlier version did, gives 257
+// and under-reserves by exactly the forwarded presses.)
 //
-// Admit an obligation-creating operation (a Down, a Repeat, tick(), any
-// control) only while free >= kWorkAdmissionGate. It then emits at most
-// kDecisionCapacity items, leaving free >= kMaxReleaseWork >= U. Up events are
-// never refused, and each one preserves free - U >= 0. Therefore the ring
+// Admit an obligation-creating operation (a Down, a Repeat, any control) only
+// while free >= kWorkAdmissionGate. It then emits at most kDecisionCapacity
+// items, leaving free >= kMaxReleaseWork >= U + F + kMaxLayerExitWork. Up
+// events are never refused, and each one preserves free - (U + F) >= 0. Therefore the ring
 // never overflows and no release is ever dropped.
 //
 // That rows emitting no work item also consume no capacity is exactly why mode
@@ -106,9 +112,9 @@ struct PhysicalRecord {
 //   - the gate above already counts a Repeat as obligation-creating, so every
 //     one is admitted only while free >= kWorkAdmissionGate and emits at most
 //     kDecisionCapacity items. That is exactly the step quoted above;
-//   - a repeat does not change U. It adds no held action and no pending press,
-//     so the release-capacity bound it must leave behind is the same one it
-//     found, and free - U >= 0 still holds across it;
+//   - a repeat does not change U or F. It adds no held action and no
+//     forwarded press, so the release-capacity bound it must leave behind is
+//     the same one it found, and free - (U + F) >= 0 still holds across it;
 //   - the stream is self-limiting rather than unbounded. If the core loop
 //     stalls, free() falls, and once it is below the gate the repeats are
 //     refused and suppressed (hook_input.cpp). Refusing a repeat is safe in a
@@ -122,13 +128,16 @@ struct PhysicalRecord {
 // on the core's side of the ring, where no capacity is at stake.
 inline constexpr std::size_t kMaxLayerExitWork = 1;
 
-// The worst case for the whole release drain.
+// The worst case for the whole release drain: every held action, every
+// forwarded press that may be on the Synthetic channel, and the layer exit.
 inline constexpr std::size_t kMaxReleaseWork =
-    kMaxHeld + 2 * kMaxPending + kMaxLayerExitWork;
-static_assert(kMaxReleaseWork == 385, "the capacity proof is stated for these bounds");
+    2 * kMaxHeld + kMaxLayerExitWork;
+static_assert(kMaxReleaseWork == 513, "the capacity proof is stated for these bounds");
 
-// Free slots required before an obligation-creating operation may run.
+// Free slots required before an obligation-creating operation may run:
+// 520 + 513 = 1033, which the 2048-slot ring below satisfies with room to spare.
 inline constexpr std::size_t kWorkAdmissionGate = kDecisionCapacity + kMaxReleaseWork;
+static_assert(kWorkAdmissionGate == 1033, "gate arithmetic stated in the proof");
 
 // Power of two so the ring masks instead of dividing. The proof needs only
 // kWorkAdmissionGate; the rest is slack so the gate is unreachable in practice.
@@ -298,8 +307,8 @@ public:
 // is about to receive the event itself and synthesising it too would deliver
 // it twice (INV-SYN).
 //
-// `code` and `state` describe the physical event in hand. The timer and
-// control paths have none: pass an invalid KeyCode and the result is always
+// `code` and `state` describe the physical event in hand. A decision with no
+// physical event behind it (release_all, a control) has none: pass an invalid KeyCode and the result is always
 // false.
 //
 // `channel` carries the O-5 rule: a press committed to synthetic delivery keeps

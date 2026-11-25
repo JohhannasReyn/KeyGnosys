@@ -24,7 +24,7 @@ something that merely looks like it is working.
 |---|---|
 | ✅ | `kgn_engine`: the platform-free library — key vocabulary, layer engine, motion, actions, config, IPC protocol |
 | ✅ | `src/keycode.cpp` — the key vocabulary, interning, modifier grouping |
-| ✅ | `src/layer_engine.cpp` — the CapsLock state machine, the grace window, and the P7 forwarded-release invariant with its mirror |
+| ✅ | `src/layer_engine.cpp` — the CapsLock state machine and the P7 forwarded-release invariant with its mirror |
 | ✅ | `src/motion.cpp` — the 60 Hz integrator: ramp, diagonal normalisation, fractional accumulation |
 | ✅ | `src/actions.cpp` — the action catalog and the dispatcher, with its fail-safe obligation rule |
 | ✅ | `src/config.cpp` — bindings documents, where a bad binding costs exactly that binding |
@@ -198,7 +198,7 @@ and reads two preallocated single-producer rings:
 - **work items** — what the core must *do*: synthesise a key, start or stop an
   action. Ordered, and provably never dropped. A lost release is a key or a
   mouse button held down forever.
-- **physical records** — one per hook callback, none for timer or control work.
+- **physical records** — one per hook callback, none for control work.
   These produce the `key` IPC event. Losing one costs an overlay highlight.
 
 Keeping them apart is not tidiness. It is what makes the queue bound provable:
