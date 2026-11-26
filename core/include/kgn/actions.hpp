@@ -262,6 +262,17 @@ public:
     // because only they outlive the key that set them.
     void releaseDragLocks(EffectBuffer& out);
 
+    // While not allowed, a drag-lock toggle that would engage does nothing
+    // and is counted as refused. Releasing is always permitted, and an
+    // already-held lock stays held.
+    void setDragLockAllowed(bool allowed) { dragLockAllowed_ = allowed; }
+    // Refusals since the last call; resets the count.
+    [[nodiscard]] std::uint32_t takeDragLockRefusals() {
+        const std::uint32_t n = dragLockRefusals_;
+        dragLockRefusals_ = 0;
+        return n;
+    }
+
     [[nodiscard]] bool dragLockActive(MouseButton button) const;
     [[nodiscard]] bool buttonDown(MouseButton button) const;
     [[nodiscard]] std::size_t heldCount() const { return heldCount_; }
@@ -308,6 +319,8 @@ private:
     // 4.2). Releasing one key must not stop what another still holds.
     std::array<int, kButtonCount> clickHolders_{};
     std::array<bool, kButtonCount> dragLock_{};
+    bool dragLockAllowed_ = true;
+    std::uint32_t dragLockRefusals_ = 0;
     std::array<bool, kButtonCount> buttonDown_{};
     std::array<int, 4> directionHolders_{};    // indexed by Direction
     std::array<int, 4> scrollHolders_{};

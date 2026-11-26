@@ -266,6 +266,8 @@ struct Core::Impl {
     // An elevated window has focus and this process is not elevated, so the
     // OS drops the core's input to it (SPEC 8.2).
     bool inert = false;
+    // What the output backend last said about crash protection.
+    ProtectionStatus protection;
 
     void note(DiagLevel level, std::string code, std::string message,
               std::string file = {}) {
@@ -448,6 +450,48 @@ struct Core::Impl {
                     break;
             }
         }
+        reportDragLockRefusals();
+    }
+
+    // A refused engage is otherwise silent, and the user would be left
+    // pressing a key that does nothing (P6).
+    void reportDragLockRefusals() {
+        for (std::uint32_t n = dispatcher.takeDragLockRefusals(); n > 0; --n) {
+            note(DiagLevel::Warn, "button.drag_lock_refused",
+                 "drag lock was not engaged: the crash-release guardian is not "
+                 "protecting this core (" +
+                     protection.reason + ")");
+        }
+    }
+
+    static const char* protectionName(Protection state) {
+        switch (state) {
+            case Protection::Protected: return "protected";
+            case Protection::Unprotected: return "unprotected";
+            case Protection::NotApplicable: break;
+        }
+        return "not_applicable";
+    }
+
+    // Poll the output backend once per tick and react to a change. The first
+    // look is taken in start(), where the hello carries the news instead.
+    void pollProtection() {
+        if (!backends.output) return;
+        const ProtectionStatus now = backends.output->protection();
+        if (now.state == protection.state && now.reason == protection.reason) return;
+        const Protection was = protection.state;
+        protection = now;
+        dispatcher.setDragLockAllowed(now.state != Protection::Unprotected);
+        if (now.state == Protection::Unprotected) {
+            note(DiagLevel::Warn, "output.unprotected",
+                 "the crash-release guardian is not protecting this core (" +
+                     now.reason + ")");
+        } else if (was == Protection::Unprotected &&
+                   now.state == Protection::Protected) {
+            note(DiagLevel::Info, "output.protected",
+                 "the crash-release guardian is protecting this core again");
+        }
+        publishState();
     }
 
     // -- warp and window actions ------------------------------------------
@@ -834,6 +878,8 @@ struct Core::Impl {
         mode.set("latched", Json(state.latched));
         mode.set("activation", Json(activationName(state.activation)));
         mode.set("inert", Json(inert));
+        mode.set("protection", Json(protectionName(protection.state)));
+        mode.set("protection_reason", Json(protection.reason));
         return mode;
     }
 
@@ -870,6 +916,8 @@ struct Core::Impl {
         snapshot.set("activation", Json(activationName(state.activation)));
         snapshot.set("enabled", Json(enabled));
         snapshot.set("inert", Json(inert));
+        snapshot.set("protection", Json(protectionName(protection.state)));
+        snapshot.set("protection_reason", Json(protection.reason));
         snapshot.set("modifiers", std::move(modifiers));
         snapshot.set("focus", focusJson());
         snapshot.set("windows", windowsJson());
@@ -1129,6 +1177,24 @@ OwnResult Core::start() {
         impl_->hello.windowBackend = std::string(impl_->backends.window->name());
         absorb(impl_->backends.window->capabilities());
     }
+    if (impl_->backends.output) {
+        // The first look. A transition note would fire before any client
+        // could hear it, so the hello says it instead.
+        impl_->protection = impl_->backends.output->protection();
+        impl_->dispatcher.setDragLockAllowed(
+            impl_->protection.state != Protection::Unprotected);
+        const std::string uncovered =
+            "Forced termination of the core (crash, taskkill /F) is not covered "
+            "on this build: a mouse button it is holding stays down until "
+            "clicked.";
+        if (impl_->protection.state == Protection::NotApplicable) {
+            impl_->hello.limitations.push_back(uncovered);
+        } else if (impl_->protection.state == Protection::Unprotected) {
+            impl_->hello.limitations.push_back(
+                "Crash-release guardian unavailable (" + impl_->protection.reason +
+                "): " + uncovered);
+        }
+    }
     if (!impl_->backends.input) {
         // Said plainly, in the one place a client is guaranteed to read.
         impl_->hello.limitations.emplace_back(
@@ -1215,6 +1281,7 @@ void Core::step(TimePoint now) {
     }
 
     impl_->drainBackendDiagnostics();
+    impl_->pollProtection();
     impl_->publishWindowState(now);
     impl_->publishPointer(now);
     impl_->server->poll();

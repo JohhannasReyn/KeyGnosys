@@ -10,6 +10,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -117,6 +118,16 @@ public:
 };
 
 // Synthesizes input: pointer motion, buttons, scroll, and replayed keys.
+// Whether a crash of the core would leave this backend's synthesised input
+// stuck. NotApplicable: this build has no guardian, so nothing is claimed.
+enum class Protection : std::uint8_t { NotApplicable, Protected, Unprotected };
+
+struct ProtectionStatus {
+    Protection state = Protection::NotApplicable;
+    // Why the state is Unprotected; empty when there is no reason.
+    std::string reason;
+};
+
 class OutputBackend {
 public:
     virtual ~OutputBackend() = default;
@@ -143,6 +154,9 @@ public:
     // them. Synthesis that the OS refused belongs here: silence would leave a
     // key held with nothing saying so (P6).
     virtual void drainDiagnostics(Diagnostics&) {}
+
+    // Polled once per core tick.
+    [[nodiscard]] virtual ProtectionStatus protection() { return {}; }
 
     [[nodiscard]] virtual Capabilities capabilities() const = 0;
     [[nodiscard]] virtual std::string_view name() const = 0;
