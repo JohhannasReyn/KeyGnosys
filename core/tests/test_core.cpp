@@ -1383,6 +1383,35 @@ KGN_TEST(an_unprotected_backend_gates_drag_lock_and_says_so) {
     KGN_CHECK(f.output->buttons.empty());
 }
 
+KGN_TEST(a_backend_unprotected_at_start_says_so_in_hello_and_gates_at_once) {
+    ProtectionFixture f("protst");
+    // Unprotected before the core ever starts, as after a failed guardian spawn.
+    f.output->status = {kgn::Protection::Unprotected, "spawn_failed"};
+    KGN_CHECK(f.open());
+
+    bool limitation = false;
+    for (const Json& message : f.greeting) {
+        if (message["n"].asString() != "hello") continue;
+        const Json& list = message["d"]["limitations"];
+        for (std::size_t i = 0; i < list.size(); ++i) {
+            if (list.at(i).asString().rfind(
+                    "Crash-release guardian unavailable (spawn_failed):", 0) == 0) {
+                limitation = true;
+            }
+        }
+    }
+    KGN_CHECK(limitation);
+    // The first look is the hello's: no transition note follows it.
+    KGN_CHECK_EQ(countDiagnostics(f.greeting, "output.unprotected"), 0);
+
+    // The very first tick refuses the lock.
+    const std::vector<Json> after = f.press();
+    KGN_CHECK_EQ(countDiagnostics(after, "button.drag_lock_refused"), 1);
+    KGN_CHECK_EQ(countDiagnostics(after, "output.unprotected"), 0);
+    KGN_CHECK_EQ(countEvents(after, "drag_lock"), 0);
+    KGN_CHECK(f.output->buttons.empty());
+}
+
 KGN_TEST(returning_to_protected_lifts_the_gate) {
     ProtectionFixture f("protre");
     KGN_CHECK(f.open());

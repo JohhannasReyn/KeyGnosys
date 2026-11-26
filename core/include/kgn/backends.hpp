@@ -117,7 +117,6 @@ public:
     }
 };
 
-// Synthesizes input: pointer motion, buttons, scroll, and replayed keys.
 // Whether a crash of the core would leave this backend's synthesised input
 // stuck. NotApplicable: this build has no guardian, so nothing is claimed.
 enum class Protection : std::uint8_t { NotApplicable, Protected, Unprotected };
@@ -128,6 +127,7 @@ struct ProtectionStatus {
     std::string reason;
 };
 
+// Synthesizes input: pointer motion, buttons, scroll, and replayed keys.
 class OutputBackend {
 public:
     virtual ~OutputBackend() = default;

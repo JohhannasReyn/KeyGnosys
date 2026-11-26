@@ -1631,7 +1631,11 @@ reach it. Command line:
 `keygnosys-guardian [--relay] --section <hex> --core <hex> --nonce <32 hex>`.
 The spawn ladder is: (1) `CREATE_BREAKAWAY_FROM_JOB`; (2) if breakaway is denied
 and the job lacks `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, spawn inside the job;
-(3) otherwise fail with `breakaway_denied`.
+(3) otherwise fail with `breakaway_denied`. The job query reads only the
+innermost job, so an outer job with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` can end
+the core and a guardian spawned inside the inner job together while the state
+says `protected`; like a job-wide termination, which ends both however they were
+spawned, that is not covered.
 
 **Journal.** An unnamed pagefile-backed section shared with the guardian: a
 header page and a slot page. The header carries magic `0x4B474A31` ("KGJ1"),
@@ -1650,9 +1654,13 @@ exits. Under swapped mouse buttons it checks the same virtual key the core sent
 (an injected left-down reports `VK_LBUTTON` with buttons swapped). A guardian
 acts only for the core whose pid, creation time and nonce match its header; a
 mismatch injects nothing. Exit codes: Clean 0, BadArgs 2, IdentityMismatch 3,
-ReleaseUnconfirmed 4, Relayed 5. It writes
-`%LOCALAPPDATA%\KeyGnosys\logs\guardian.log` one line on a mismatch or an
-unconfirmed release, and nothing on a clean exit.
+ReleaseUnconfirmed 4, Relayed 5. It appends one line to
+`%LOCALAPPDATA%\KeyGnosys\logs\guardian.log` on every failure: a bad command
+line, a relay that could not relaunch it, a journal it could not map or whose
+slot page it could not make read-only, a core it could not identify or whose
+header does not match, a failed wait on the core, and an unconfirmed release.
+It writes nothing on a clean exit, a recovery that confirmed every release, or a
+relayed exit.
 
 **Protection state (P6).** `not_applicable` (no guardian on this build),
 `protected`, or `unprotected`. The `unprotected` reasons are `spawn_failed`,
