@@ -1,9 +1,10 @@
 # Crash-release guardian — production design
 
-**Status:** drafted 2026-09-15. The operator's decisions were recorded on
-2026-11-25: build it before M3 closes, use approach 1, and use behaviour B while
-unprotected. The design now awaits the operator's approval. No guardian code
-exists outside the throwaway E6 spike.
+**Status:** implemented. Drafted 2026-09-15; the operator's decisions were
+recorded on 2026-11-25 (build it before M3 closes, approach 1, behaviour B while
+unprotected). Built under
+[`../plans/2026-11-25-crash-release-guardian.md`](../plans/2026-11-25-crash-release-guardian.md).
+Where this document and the code differ, SPEC §8.3.1 describes what was built.
 
 ## Decisions of 2026-11-25
 

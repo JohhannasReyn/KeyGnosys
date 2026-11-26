@@ -72,6 +72,11 @@ This is a contract for future work. It specifies no change to the core, the
 overlay, the IPC protocol, the configuration formats, or any current runtime
 behaviour, and it introduces no new commands or events.
 
+The contract stays launcher-only. The core may start a helper process of its
+own: on Windows it spawns `keygnosys-guardian.exe` (SPEC §8.3.1) to release a
+held mouse button if the core is forcibly terminated. The launcher neither
+starts nor addresses that helper.
+
 ---
 
 ## 2. The launcher surface
@@ -182,7 +187,10 @@ A launch proceeds in this order and stops at the first step that fails:
 
 The launcher **MUST NOT** start the overlay until the core is **ready**, where
 ready means: a client connection to the IPC endpoint succeeds and the core's
-`hello` event (SPEC §5.3) has been received.
+`hello` event (SPEC §5.3) has been received. The core spawns its guardian
+inside "start the core", before it installs the input hook, so the order of
+operations is unchanged. `hello` also reports the protection state through
+`limitations` (SPEC §5.3).
 
 This is stricter than checking that the endpoint exists, and deliberately so.
 The overlay chooses its backend exactly once, at startup: `_make_client` in
@@ -210,6 +218,9 @@ processes *it started*, in reverse order — overlay first, then core — when i
 exits or is interrupted. A `Ctrl-C` that leaves an orphaned core holding a
 keyboard grab is the single worst failure this contract can permit.
 
+The launcher stops the core it started and **MUST NOT** stop the guardian. The
+guardian is not a child of the core and exits by itself once the core is gone.
+
 **Ownership is what decides this.** If the launcher attached to a core that was
 already running (§5), it **MUST NOT** stop that core, on any exit path. It did
 not start it and does not know who depends on it.
@@ -217,7 +228,8 @@ not start it and does not know who depends on it.
 `--background` detaches the started processes from the invoking terminal,
 redirects their standard output and error to the log root of SPEC §3.1, and
 returns as soon as the outcome is known — exit **0** once both are up, or the
-appropriate failure code. Under `--background` the launcher does not own the
+appropriate failure code. The guardian is detached independently of this, so
+`--background` changes nothing about it. Under `--background` the launcher does not own the
 processes it started and **MUST NOT** stop them on exit; that is the point of
 detaching.
 
@@ -264,6 +276,9 @@ an endpoint left behind by a crashed core is the core's own responsibility at
 bind time — specified in [SPEC §5.1.3](SPEC.md#5-ipc-protocol), which also fixes
 the rule that a live endpoint is never stolen. The launcher connects and reads;
 that is the whole of its relationship with the endpoint.
+
+**The guardian is never an instance signal.** Its presence or absence says
+nothing about whether a core is live; only `hello` does.
 
 **Only the core is single-instance.** Two cores are harmful — two device grabs
 on Linux, two hooks on Windows — and the launcher's job is to make that
@@ -446,7 +461,7 @@ applicable:
 | Repository | Resolved root; current revision, read-only |
 | Python | Interpreter and version; virtual environment path and presence; whether `keygnosys` is importable; PySide6 version; `python-xlib` on Linux |
 | Native | CMake, Ninja and compiler versions; whether the build tree exists; whether `keygnosys-core` exists |
-| Core | Endpoint path; whether a core answered; and if it did, the `hello` payload — core version, protocol, backends, capabilities, limitations |
+| Core | Endpoint path; whether a core answered; and if it did, the `hello` payload — core version, protocol, backends, capabilities, limitations — and the protection state (`protection`, `protection_reason`) from `get_state` |
 | Paths | User configuration root and log root, and whether each exists |
 | Autostart | The same information `--autostart-status` reports (§9.4) |
 
@@ -526,6 +541,9 @@ The consequence is accepted deliberately: after a change that requires a
 rebuild, autostart stops working until the user runs the launcher once by hand.
 That is a visible, diagnosable failure — `--autostart-status` and
 `--diagnostics` both surface it — and is preferable to an invisible one.
+
+The registered command is unchanged by the guardian: it starts the core, and the
+core starts its guardian.
 
 ### 9.4 `--autostart-status`
 
@@ -643,4 +661,5 @@ Recorded so a later reader can tell an omission from an oversight.
 | **Overlay single-instance** | No IPC command enumerates connected clients, and a second overlay is harmless (§5). If wanted, it belongs in the overlay |
 | **macOS** | No backend exists (OUTLINE §8). The launcher does not pretend otherwise; it exits **3** |
 | **Wayland** | X11 is the supported Linux display environment for v1 (SPEC §8.5). The launcher exits **3** rather than starting something that will half-work |
+| **Guardian discovery** | Beyond "the same directory as the core", how the core finds `keygnosys-guardian.exe` is not specified. A missing binary is reported as `unprotected` (`spawn_failed`) |
 | **Packaged installation** | M7. An installer places files and system integration; the launcher prepares and starts a checkout (§1.1) |

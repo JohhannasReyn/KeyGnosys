@@ -989,7 +989,7 @@ events.
 | `hello` | `{core_version, protocol, platform, backends:{input,output,window}, capabilities:[…], limitations:[…]}` | Immediately on connect |
 | `key` | `{code, state:"down"\|"up"\|"repeat", suppressed:bool}` | Every physical key event, suppressed or not |
 | `modifiers` | `{shift, control, alt, meta, caps_layer}` — all bool | Any modifier state change |
-| `mode` | `{mode:"normal"\|"cursor", latched:bool, activation:"toggle"\|"hold"\|"hybrid", inert:bool}` | Layer engaged/released, `inert` changed, and on connect (sent to that client only, after `hello`) |
+| `mode` | `{mode:"normal"\|"cursor", latched:bool, activation:"toggle"\|"hold"\|"hybrid", inert:bool, protection:"not_applicable"\|"protected"\|"unprotected", protection_reason:string}` | Layer engaged/released, `inert` or `protection` changed, and on connect (sent to that client only, after `hello`) |
 | `focus` | `{app_id, process, wm_class, title, window_id}` | Focused window changes |
 | `windows` | `{slots:[{index, window_id, process, title, monitor}]}` | Window list changes (debounced ≥250 ms) |
 | `monitors` | `{monitors:[{index, x, y, w, h, primary, name}]}` | Monitor topology changes |
@@ -1004,6 +1004,18 @@ events.
 transitions inside a single tick produce one event carrying the final state. The
 overlay draws current state, so a superseded intermediate value has no reader.
 
+`protection` and `protection_reason` report whether a forcibly terminated core
+would leave a held mouse button down (§8.3.1). `protection_reason` is the empty
+string when there is nothing to say. Both ride on every `mode` event and on
+`get_state`, so a client that connects late still learns the state.
+
+`hello.limitations` states what the core cannot do on this build (P6). On a build
+whose `protection` is `not_applicable` it includes: "Forced termination of the
+core (crash, taskkill /F) is not covered on this build: a mouse button it is
+holding stays down until clicked." When the core starts `unprotected`, it
+includes the same sentence prefixed "Crash-release guardian unavailable
+(<reason>):".
+
 `key` events are emitted for **all** keys including suppressed ones — this is what
 makes visual feedback work in the cursor layer, where no character reaches the OS.
 
@@ -1014,7 +1026,7 @@ positional codes are transmitted. See §12.
 
 | `n` | Payload | Reply |
 |-----|---------|-------|
-| `get_state` | `{}` | Full snapshot: mode, latched, activation, enabled, inert, modifiers, focus, windows, monitors |
+| `get_state` | `{}` | Full snapshot: mode, latched, activation, enabled, inert, protection, protection_reason, modifiers, focus, windows, monitors |
 | `set_activation_mode` | `{mode}` | `{}` |
 | `set_enabled` | `{enabled:bool}` | `{}` — master switch; disables interception entirely |
 | `reload_config` | `{}` | `{loaded:{layouts:n, bindings:n, profiles:n}}` |
@@ -1415,7 +1427,7 @@ between bindings files, the dispatcher, and the overlay's legend renderer.
 |--------|--------|----------------|-----------|
 | `button.click` | `button`: `left`\|`right`\|`middle` | `Click` / `R-Click` / `M-Click` | Press on key-down, release on key-up (so click-and-hold works naturally) |
 | `button.double_click` | `button` | `Dbl Click` | Two press/release pairs, the second **within** the OS double-click interval |
-| `button.drag_lock` | `button` | `Drag` | Toggle. First press holds the button down; second releases. Emits `drag_lock`. **MUST** auto-release on layer exit (P7) |
+| `button.drag_lock` | `button` | `Drag` | Toggle. First press holds the button down; second releases. Emits `drag_lock`. **MUST** auto-release on layer exit (P7). While `protection` is `unprotected` (§8.3.1) a toggle that would engage the lock does nothing and emits one `button.drag_lock_refused` diagnostic; a toggle that releases is never refused |
 
 `button.double_click` is scheduled on the core loop and **MUST NOT** block it:
 the interval runs to hundreds of milliseconds — Windows reports 500 ms by
@@ -1602,6 +1614,72 @@ Windows absolute positioning across multiple monitors **MUST** use
 `MOUSEEVENTF_VIRTUALDESK` and normalise against `SM_XVIRTUALSCREEN` /
 `SM_CXVIRTUALSCREEN` — normalising against the primary monitor alone is the
 classic bug that makes warp land on the wrong screen.
+
+#### 8.3.1 Crash-release guardian
+
+P7 promises that the core releases everything it holds on every exit path,
+including a crash. No code in a forcibly terminated process can run, so on
+Windows a second process, `keygnosys-guardian.exe`, covers that path for **mouse
+buttons**. Keys need no cover: every synthesized key-down mirrors a physically
+held key (§15.10).
+
+**Placement and spawn.** The executable sits next to `keygnosys-core.exe`. The
+core spawns one guardian per core instance, before it installs the input hook.
+It starts it with `--relay`; the relay respawns the guardian detached and exits,
+so the guardian's parent is not the core and `taskkill /T` on the core does not
+reach it. Command line:
+`keygnosys-guardian [--relay] --section <hex> --core <hex> --nonce <32 hex>`.
+The spawn ladder is: (1) `CREATE_BREAKAWAY_FROM_JOB`; (2) if breakaway is denied
+and the job lacks `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, spawn inside the job;
+(3) otherwise fail with `breakaway_denied`.
+
+**Journal.** An unnamed pagefile-backed section shared with the guardian: a
+header page and a slot page. The header carries magic `0x4B474A31` ("KGJ1"),
+`layout_version` 1, the core's pid and creation time, a 128-bit nonce, the
+guardian's pid, and flags `ATTACHED` (1) and `CLEAN_EXIT` (2). Each of the three
+buttons (left, right, middle) has a slot with a generation counter and one of
+four states: `UP` (0), `DOWN_INTENT` (1), `DOWN` (2), `UP_INTENT` (3). The core
+writes the intent **before** `SendInput` and the result after. The guardian maps
+the whole section and makes the slot page read-only with `VirtualProtect` (view
+offsets are 64 KB-aligned).
+
+**Recovery.** On the death of its core without `CLEAN_EXIT`, the guardian lifts
+only buttons that the journal records as not `UP` **and** that Windows reports
+down. It sends button Up events and nothing else, retries for at most 1 s, then
+exits. Under swapped mouse buttons it checks the same virtual key the core sent
+(an injected left-down reports `VK_LBUTTON` with buttons swapped). A guardian
+acts only for the core whose pid, creation time and nonce match its header; a
+mismatch injects nothing. Exit codes: Clean 0, BadArgs 2, IdentityMismatch 3,
+ReleaseUnconfirmed 4, Relayed 5. It writes
+`%LOCALAPPDATA%\KeyGnosys\logs\guardian.log` one line on a mismatch or an
+unconfirmed release, and nothing on a clean exit.
+
+**Protection state (P6).** `not_applicable` (no guardian on this build),
+`protected`, or `unprotected`. The `unprotected` reasons are `spawn_failed`,
+`breakaway_denied`, `attach_timeout`, `guardian_identity_mismatch`,
+`guardian_lost` and `restart_exhausted`. The attach timeout is 2 s; a guardian
+that rejects the journal header surfaces as `attach_timeout`. A failed initial
+start is not retried: the core stays `unprotected` until it restarts. After a
+guardian is lost the core restarts it with backoff of 1 s, 5 s and 30 s, at most
+3 attempts per 10 minutes, then reports `restart_exhausted`; between the loss
+and the reattach the state is `unprotected` (`guardian_lost`). A guardian that
+attaches late is adopted, and a second one is terminated: never two per core.
+
+**Behaviour while unprotected.** A `button.drag_lock` toggle that would engage
+does nothing and emits one `button.drag_lock_refused` diagnostic (§7.2). A lock
+that is already engaged can still be toggled off, and losing protection does not
+release it. Momentary clicks and click-and-hold keep working. `not_applicable`
+never gates. The core emits `output.unprotected` (the reason in the message) and
+`output.protected` on transitions (§11).
+
+**Overlay.** While `unprotected` the overlay shows the banner "Unprotected —
+drag lock off", whose tooltip names the reason, and it shows the same text for
+2 s when `button.drag_lock_refused` arrives. The inert banner takes precedence.
+`not_applicable` and `protected` show nothing.
+
+**Fault tool.** `kgn_guardian_fault --button left|right|middle --die
+before-down|after-down|held|before-up|after-up` kills itself at the named
+journal transition. It is run by the operator and is not part of ctest.
 
 ### 8.4 Window management
 
@@ -2047,6 +2125,9 @@ Every diagnostic carries a stable machine-readable `code`.
 | `ipc.bad_message` | warn | A malformed line, a message that is not a command, or a line past the size limit |
 | `input.queue_overflow` | error | The input thread could not hand work to the core loop; interception degraded and `release_all` issued |
 | `input.publication_dropped` | info | Key-event publication fell behind; overlay feedback may have missed a key |
+| `output.unprotected` | warn | The core is not covered by the crash-release guardian (§8.3.1); the reason is in the message. Drag lock will not engage |
+| `output.protected` | info | The guardian is attached and the core is covered again |
+| `button.drag_lock_refused` | warn | A `button.drag_lock` toggle that would engage was refused because the core is unprotected (§7.2) |
 | `output.send_failed` | error/warn | The OS refused a synthetic key or button. A refused RELEASE is an error: something may still be held, and is retried on the next `release_all` |
 
 **The governing rule (P6):** one bad file never prevents the rest from loading,
