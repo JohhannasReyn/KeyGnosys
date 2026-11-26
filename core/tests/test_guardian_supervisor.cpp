@@ -558,6 +558,39 @@ KGN_TEST(a_second_guardian_is_terminated_and_the_held_one_restored) {
     KGN_CHECK_EQ(heldGuardian.exitCode(3000ms), 0L);
 }
 
+KGN_TEST(a_pid_in_the_header_that_is_not_a_guardian_is_never_terminated) {
+    auto journal = ObligationJournal::create();
+    StandIn child;
+    GuardianSupervisor supervisor(*journal, kGuardianExe, {child.handle(), false});
+    KGN_CHECK(supervisor.start().state == Protection::Protected);
+    const DWORD held = supervisor.guardianPid();
+    Watched heldGuardian(held);
+
+    // What a reused pid looks like: the header names a live process that is
+    // not keygnosys-guardian.exe.
+    StandIn stranger;
+    KGN_CHECK(stranger.handle() != nullptr);
+    journal->restoreAttachment(GetProcessId(stranger.handle()));
+
+    KGN_CHECK(supervisor.poll(Clock::now()).state == Protection::Protected);
+    KGN_CHECK(WaitForSingleObject(stranger.handle(), 300) == WAIT_TIMEOUT);   // still alive
+    KGN_CHECK_EQ(journal->guardianPid(), held);
+    KGN_CHECK_EQ(supervisor.guardianPid(), held);
+
+    supervisor.markCleanExit();
+    child.end();
+    KGN_CHECK_EQ(heldGuardian.exitCode(3000ms), 0L);
+}
+
+KGN_TEST(an_empty_guardian_path_reports_spawn_failed) {
+    auto journal = ObligationJournal::create();
+    StandIn child;
+    GuardianSupervisor supervisor(*journal, L"", {child.handle(), false});
+    const ProtectionStatus st = supervisor.start();
+    KGN_CHECK(st.state == Protection::Unprotected);
+    KGN_CHECK(st.reason == "spawn_failed");
+}
+
 // --- The output backend reports what its supervisor sees -----------------------
 
 KGN_TEST(the_output_backend_without_a_guardian_reports_not_applicable) {

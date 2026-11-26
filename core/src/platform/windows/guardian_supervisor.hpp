@@ -85,8 +85,12 @@ private:
     // True once the header shows ATTACHED and a pid whose handle opened.
     bool tryAdopt();
     // While Protected: a second guardian wrote its pid over the held one's.
-    // Terminates it and restores the header (R14: never two guardians).
+    // Terminates it and restores the header (R14: never two guardians). A
+    // process whose image is not the guardian's (a reused pid) is never
+    // terminated.
     void evictNewcomer();
+    // True when `process` runs guardianPath_ (full path, case-insensitive).
+    [[nodiscard]] bool isGuardianImage(HANDLE process) const;
     void closeRelay();
     void closeGuardian();
     // A loss or a failed respawn at `now`: schedule the next attempt or give up.
@@ -108,7 +112,9 @@ private:
     Clock::time_point attachDeadline_{};
 };
 
-// `keygnosys-guardian.exe` in the directory of the running executable.
+// `keygnosys-guardian.exe` in the directory of the running executable, or an
+// empty string when that directory cannot be read (spawn then fails with
+// spawn_failed rather than launching whatever a relative name would find).
 std::wstring guardianPathBesideThisExecutable();
 
 }  // namespace kgn::win

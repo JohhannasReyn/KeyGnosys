@@ -199,6 +199,8 @@ void GuardianSupervisor::markCleanExit() { journal_.markCleanExit(); }
 
 GuardianSupervisor::SpawnResult GuardianSupervisor::spawn() {
     closeRelay();
+    // No path (this executable's own could not be read): nothing to launch.
+    if (guardianPath_.empty()) return SpawnResult::SpawnFailed;
     HANDLE guarded = seams_.guarded ? seams_.guarded : GetCurrentProcess();
 
     // An inheritable handle the guardian can wait on and identify the core by.
@@ -288,14 +290,35 @@ bool GuardianSupervisor::tryAdopt() {
 void GuardianSupervisor::evictNewcomer() {
     const DWORD pid = journal_.guardianPid();
     if (pid == 0 || pid == guardianPid_) return;
-    // The newcomer wrote its pid and is waiting on the core: it is alive, so
-    // the pid is still its own.
-    if (HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid)) {
-        TerminateProcess(h, kEvictedExitCode);
-        WaitForSingleObject(h, 100);
+    // A newcomer that wrote its pid is normally alive and waiting on the core,
+    // but the pid may have been reused by a stranger since. Terminate only a
+    // process whose image is the guardian's; anything else, or anything whose
+    // image cannot be read, is left alone and only the header is restored.
+    if (HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE |
+                                   PROCESS_QUERY_LIMITED_INFORMATION,
+                               FALSE, pid)) {
+        if (isGuardianImage(h)) {
+            TerminateProcess(h, kEvictedExitCode);
+            WaitForSingleObject(h, 100);
+        }
         CloseHandle(h);
     }
     journal_.restoreAttachment(guardianPid_);
+}
+
+bool GuardianSupervisor::isGuardianImage(HANDLE process) const {
+    if (guardianPath_.empty()) return false;
+    std::vector<wchar_t> buf(32768);
+    DWORD size = static_cast<DWORD>(buf.size());
+    if (!QueryFullProcessImageNameW(process, 0, buf.data(), &size)) return false;
+    // The image name comes back as a full Win32 path with backslashes; bring
+    // the configured path to the same form (separators, `..`) first.
+    std::vector<wchar_t> full(32768);
+    const DWORD n = GetFullPathNameW(guardianPath_.c_str(), static_cast<DWORD>(full.size()),
+                                     full.data(), nullptr);
+    if (n == 0 || n >= full.size()) return false;
+    return CompareStringOrdinal(buf.data(), static_cast<int>(size), full.data(),
+                                static_cast<int>(n), TRUE) == CSTR_EQUAL;
 }
 
 void GuardianSupervisor::closeRelay() {
@@ -338,10 +361,13 @@ ProtectionStatus GuardianSupervisor::status() const {
 std::wstring guardianPathBesideThisExecutable() {
     std::vector<wchar_t> buf(32768);
     const DWORD n = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
-    if (n == 0 || n >= buf.size()) return L"keygnosys-guardian.exe";
+    // No module path: no guardian path. A bare relative name would be
+    // resolved against the current directory, where anything could sit.
+    if (n == 0 || n >= buf.size()) return {};
     std::wstring path(buf.data(), n);
     const auto slash = path.find_last_of(L"\\/");
-    path.erase(slash == std::wstring::npos ? 0 : slash + 1);
+    if (slash == std::wstring::npos) return {};
+    path.erase(slash + 1);
     return path + L"keygnosys-guardian.exe";
 }
 

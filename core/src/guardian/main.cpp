@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #include "guardian/guardian_logic.hpp"
 
@@ -20,17 +21,20 @@ using namespace kgn::guardian;
 
 namespace {
 
+// Wide APIs for every path: a profile or install directory need not be
+// representable in the ANSI code page.
 void logLine(const char* text) {
-    char base[MAX_PATH];
-    const DWORD n = GetEnvironmentVariableA("LOCALAPPDATA", base, sizeof base);
-    if (n == 0 || n >= sizeof base) return;
-    std::string dir = base;
-    dir += "\\KeyGnosys";
-    CreateDirectoryA(dir.c_str(), nullptr);
-    dir += "\\logs";
-    CreateDirectoryA(dir.c_str(), nullptr);
-    const std::string path = dir + "\\guardian.log";
-    HANDLE f = CreateFileA(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+    std::wstring base(32768, L'\0');
+    const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base.data(),
+                                            static_cast<DWORD>(base.size()));
+    if (n == 0 || n >= base.size()) return;
+    base.resize(n);
+    std::wstring dir = base + L"\\KeyGnosys";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    dir += L"\\logs";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    const std::wstring path = dir + L"\\guardian.log";
+    HANDLE f = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
                            nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) return;
     SYSTEMTIME st;
@@ -53,23 +57,29 @@ int finish(GuardianExit code, const char* logMessage = nullptr) {
 // Re-launch this executable without --relay, detached, inheriting exactly the
 // two handles, then return so the caller can exit at once.
 int relay(const GuardianArgs& a) {
-    char exe[MAX_PATH];
-    const DWORD n = GetModuleFileNameA(nullptr, exe, sizeof exe);
-    if (n == 0 || n >= sizeof exe) return finish(GuardianExit::BadArgs, "relay: no module path");
+    std::wstring exe(32768, L'\0');
+    const DWORD n = GetModuleFileNameW(nullptr, exe.data(), static_cast<DWORD>(exe.size()));
+    if (n == 0 || n >= exe.size()) return finish(GuardianExit::BadArgs, "relay: no module path");
+    exe.resize(n);
 
     HANDLE handles[2] = {reinterpret_cast<HANDLE>(a.section),
                          reinterpret_cast<HANDLE>(a.coreProcess)};
     // HANDLE_LIST requires the handles to be inheritable.
     for (HANDLE h : handles) SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
 
-    char nonce[33];
+    // The arguments are hex; only the executable path needs to be wide.
+    char args[128];
+    int len = std::snprintf(args, sizeof args, " --section %llx --core %llx --nonce ",
+                            static_cast<unsigned long long>(a.section),
+                            static_cast<unsigned long long>(a.coreProcess));
+    if (len <= 0 || len + 33 > static_cast<int>(sizeof args))
+        return finish(GuardianExit::BadArgs, "relay: command line too long");
     for (std::size_t i = 0; i < 16; ++i)
-        std::snprintf(nonce + 2 * i, 3, "%02x", static_cast<unsigned>(a.nonce[i]));
-
-    char cmd[512];
-    std::snprintf(cmd, sizeof cmd, "\"%s\" --section %llx --core %llx --nonce %s", exe,
-                  static_cast<unsigned long long>(a.section),
-                  static_cast<unsigned long long>(a.coreProcess), nonce);
+        std::snprintf(args + len + 2 * i, 3, "%02x", static_cast<unsigned>(a.nonce[i]));
+    std::wstring cmd = L"\"" + exe + L"\"";
+    for (const char* c = args; *c; ++c) cmd += static_cast<wchar_t>(*c);
+    std::vector<wchar_t> line(cmd.begin(), cmd.end());   // CreateProcessW may write to it
+    line.push_back(L'\0');
 
     SIZE_T size = 0;
     InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
@@ -83,11 +93,11 @@ int relay(const GuardianArgs& a) {
         return finish(GuardianExit::BadArgs, "relay: handle list failed");
     }
 
-    STARTUPINFOEXA si{};
+    STARTUPINFOEXW si{};
     si.StartupInfo.cb = sizeof si;
     si.lpAttributeList = attrs;
     PROCESS_INFORMATION pi{};
-    const BOOL ok = CreateProcessA(exe, cmd, nullptr, nullptr, TRUE,
+    const BOOL ok = CreateProcessW(exe.c_str(), line.data(), nullptr, nullptr, TRUE,
                                    DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
                                        EXTENDED_STARTUPINFO_PRESENT,
                                    nullptr, nullptr, &si.StartupInfo, &pi);
