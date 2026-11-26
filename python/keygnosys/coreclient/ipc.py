@@ -110,6 +110,9 @@ class IpcClient(CoreClient):
             self.modeChanged.emit(data.get("mode") == "cursor",
                                   bool(data.get("latched")))
             self.inertChanged.emit(bool(data.get("inert")))
+            self.protectionChanged.emit(
+                str(data.get("protection") or "not_applicable"),
+                str(data.get("protection_reason") or ""))
         elif name == "focus":
             self.focusChanged.emit(data)
         elif name == "windows":

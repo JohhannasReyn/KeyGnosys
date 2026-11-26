@@ -14,7 +14,7 @@ from .. import paths
 from ..coreclient.base import CoreClient
 from ..documents import Registry
 from ..settings import Settings
-from ..state import AppState
+from ..state import PROTECTION_FLASH_S, AppState
 from .control_bar import ControlBar
 from .keyboard_view import KeyboardView
 from .platform import clickthrough
@@ -157,6 +157,8 @@ class Overlay:
         self.client.keyEvent.connect(self._on_key)
         self.client.modeChanged.connect(self._on_mode)
         self.client.inertChanged.connect(self._on_inert)
+        self.client.protectionChanged.connect(self._on_protection)
+        self.client.diagnostic.connect(self._on_diagnostic)
         self.client.focusChanged.connect(self._on_focus)
         self.client.windowsChanged.connect(self._on_windows)
         self.client.overlayToggleRequested.connect(self._on_hide)
@@ -184,6 +186,21 @@ class Overlay:
         self._update_status()
         self.window.view.update()
 
+    def _on_protection(self, protection: str, reason: str) -> None:
+        self.state.protection = protection
+        self.state.protection_reason = reason
+        self._update_status()
+        self.window.view.update()
+
+    def _on_diagnostic(self, payload: dict) -> None:
+        if payload.get("code") != "button.drag_lock_refused":
+            return
+        self.state.flash_protection()
+        self.window.view.update()
+        # Nothing else may arrive to repaint, so schedule the clearing one.
+        QTimer.singleShot(int(PROTECTION_FLASH_S * 1000) + 50,
+                          self.window.view.update)
+
     def _on_focus(self, payload: dict) -> None:
         self.state.focus_process = payload.get("process")
         self.state.focus_wm_class = payload.get("wm_class")
@@ -207,6 +224,9 @@ class Overlay:
     def _on_disconnected(self, _reason: str) -> None:
         self.state.connected = False
         self.state.inert = False
+        self.state.protection = "not_applicable"
+        self.state.protection_reason = ""
+        self.state.flash_until = 0.0
         self.state.release_all()
         self.window.view.update()
         self._update_status()

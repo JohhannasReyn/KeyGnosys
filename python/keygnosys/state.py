@@ -9,6 +9,7 @@ Legend resolution follows docs/SPEC.md section 9.4.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -47,6 +48,11 @@ class KeyRender:
 SHORTCUT_LIMIT = 22
 SLOT_NAME_LIMIT = 16
 
+#: How long the unprotected banner flashes after a refused drag lock.
+PROTECTION_FLASH_S = 2.0
+
+UNPROTECTED_BANNER = "Unprotected — drag lock off"
+
 MODIFIER_CODES = {
     "ShiftLeft": "Shift", "ShiftRight": "Shift",
     "ControlLeft": "Control", "ControlRight": "Control",
@@ -66,6 +72,11 @@ class AppState:
     cursor_layer: bool = False
     #: The core cannot see keys because an elevated window has focus.
     inert: bool = False
+    #: "not_applicable" | "protected" | "unprotected" (crash-release guardian).
+    protection: str = "not_applicable"
+    protection_reason: str = ""
+    #: time.monotonic() deadline of a refused-drag-lock flash; 0 = none.
+    flash_until: float = 0.0
     caps_lock_led: bool = False
     num_lock_led: bool = True
     scroll_lock_led: bool = False
@@ -226,20 +237,37 @@ class AppState:
 
     def status_text(self) -> tuple[str, str] | None:
         """(status, tooltip) overriding the connection status, or None."""
-        if not self.inert:
-            return None
-        return (
-            "layer inactive: admin window has focus",
-            "Windows does not let a non-elevated program read keys typed into "
-            "an elevated (administrator) window. The layer resumes when an "
-            "ordinary window has focus.",
-        )
+        if self.inert:
+            return (
+                "layer inactive: admin window has focus",
+                "Windows does not let a non-elevated program read keys typed "
+                "into an elevated (administrator) window. The layer resumes "
+                "when an ordinary window has focus.",
+            )
+        if self.protection == "unprotected":
+            reason = self.protection_reason or "unknown"
+            return (
+                "unprotected: drag lock off",
+                "Nothing will lift a held mouse button if the core crashes, "
+                f"so drag lock is disabled. Reason: {reason}.",
+            )
+        return None
 
-    def banner_text(self) -> str | None:
-        """Large on-keyboard notice, shown whenever the layer is inert."""
-        if not self.inert:
-            return None
-        return "Layer inactive: admin window has focus"
+    def flash_protection(self, now: float | None = None) -> None:
+        """Show the unprotected banner briefly (a drag lock was refused)."""
+        now = time.monotonic() if now is None else now
+        self.flash_until = now + PROTECTION_FLASH_S
+
+    def banner_text(self, now: float | None = None) -> str | None:
+        """Large on-keyboard notice. Inert wins over unprotected."""
+        if self.inert:
+            return "Layer inactive: admin window has focus"
+        if self.protection == "unprotected":
+            return UNPROTECTED_BANNER
+        now = time.monotonic() if now is None else now
+        if now < self.flash_until:
+            return UNPROTECTED_BANNER
+        return None
 
     # -- mutation ---------------------------------------------------------
 

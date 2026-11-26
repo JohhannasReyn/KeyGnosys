@@ -278,3 +278,44 @@ def test_an_app_without_bare_shortcuts_is_unchanged(state: AppState) -> None:
     assert render(state, "KeyG", "G").text == "G"
     state.press("ShiftLeft")
     assert render(state, "KeyA", "A").text == "A"
+
+
+# -- protection (crash-release guardian) -------------------------------------
+
+UNPROTECTED_BANNER = "Unprotected \u2014 drag lock off"
+
+
+def test_banner_text_while_unprotected(state: AppState) -> None:
+    state.protection = "unprotected"
+    assert state.banner_text() == UNPROTECTED_BANNER
+
+
+def test_inert_banner_takes_precedence_over_unprotected(state: AppState) -> None:
+    state.protection = "unprotected"
+    state.inert = True
+    assert state.banner_text() == "Layer inactive: admin window has focus"
+
+
+def test_not_applicable_shows_no_banner(state: AppState) -> None:
+    state.protection = "not_applicable"
+    assert state.banner_text() is None
+    state.protection = "protected"
+    assert state.banner_text() is None
+
+
+def test_refused_drag_lock_flashes_the_banner_briefly(state: AppState) -> None:
+    from keygnosys.state import PROTECTION_FLASH_S
+    assert PROTECTION_FLASH_S == 2.0
+    state.flash_protection(now=100.0)
+    assert state.flash_until == 100.0 + PROTECTION_FLASH_S
+    assert state.banner_text(now=101.9) == UNPROTECTED_BANNER
+    assert state.banner_text(now=102.0) is None
+    assert state.banner_text(now=200.0) is None
+
+
+def test_unprotected_status_names_the_reason(state: AppState) -> None:
+    state.protection = "unprotected"
+    state.protection_reason = "spawn_failed"
+    text, tip = state.status_text()
+    assert "unprotected" in text.lower()
+    assert "spawn_failed" in tip

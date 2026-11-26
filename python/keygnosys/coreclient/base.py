@@ -36,6 +36,9 @@ class CoreClient(QObject):
     #: only on change); True while an elevated window has focus and the
     #: layer cannot act
     inertChanged = Signal(bool)
+    #: (state, reason) carried on every `mode` event: state is "not_applicable",
+    #: "protected" or "unprotected"; reason is "" or a guardian failure code
+    protectionChanged = Signal(str, str)
     #: (payload with process / wm_class / title)
     focusChanged = Signal(dict)
     #: (list of slot payloads)
