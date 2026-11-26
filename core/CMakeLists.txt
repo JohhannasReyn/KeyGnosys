@@ -151,6 +151,32 @@ add_executable(keygnosys-core src/main.cpp)
 target_link_libraries(keygnosys-core PRIVATE kgn_ipc kgn_platform kgn_warnings)
 
 # ---------------------------------------------------------------------------
+# keygnosys-guardian -- the crash-release guardian (Windows only)
+#
+# A separate, tiny process: it waits for the core to die and, if the core did
+# not mark a clean exit, lifts mouse buttons the journal says it held. It links
+# NO kgn library -- only the header-only journal layout and keycode headers --
+# and imports only kernel32, user32 and advapi32.
+# ---------------------------------------------------------------------------
+
+if(WIN32)
+    add_library(kgn_guardian_logic src/guardian/guardian_logic.cpp)
+    target_include_directories(kgn_guardian_logic PUBLIC src include)
+    target_link_libraries(kgn_guardian_logic PRIVATE kgn_warnings)
+
+    add_executable(keygnosys-guardian src/guardian/main.cpp)
+    target_link_libraries(keygnosys-guardian PRIVATE
+        kgn_guardian_logic kgn_warnings kernel32 user32 advapi32)
+    if(NOT MSVC)
+        # No MinGW runtime DLLs: the guardian must start even if the install's
+        # PATH is broken.
+        target_link_options(keygnosys-guardian PRIVATE -static)
+    endif()
+    set_target_properties(keygnosys-guardian PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:keygnosys-core>)
+endif()
+
+# ---------------------------------------------------------------------------
 # Tests
 #
 # These need no display, no privileges and no hardware -- that is a design
@@ -198,6 +224,7 @@ if(KGN_BUILD_TESTS)
         kgn_add_test_with(test_obligation_journal kgn_platform)
         kgn_add_test_with(test_dpi_awareness kgn_platform)
         kgn_add_test_with(test_window_move kgn_platform)
+        kgn_add_test_with(test_guardian kgn_guardian_logic)
 
         # Built, deliberately NOT registered with ctest. It installs a real
         # low-level hook and waits for a real keystroke, so a CI run that
