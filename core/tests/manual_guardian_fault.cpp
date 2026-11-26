@@ -18,6 +18,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 
 using namespace kgn;
@@ -88,6 +89,8 @@ int parse(int argc, char** argv, Args& args) {
 
 constexpr DWORD kDownMask =
     MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_MIDDLEDOWN;
+constexpr DWORD kUpMask =
+    MOUSEEVENTF_LEFTUP | MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_MIDDLEUP;
 
 class FaultOutput final : public SendInputOutput {
 public:
@@ -95,12 +98,15 @@ public:
 
 protected:
     bool dispatch(const INPUT& input) override {
+        // Classify by the button flags only: the cursor placement also comes
+        // through here (MOVE|ABSOLUTE) and must pass untouched.
         const bool down = (input.mi.dwFlags & kDownMask) != 0;
+        const bool up = (input.mi.dwFlags & kUpMask) != 0;
         if (down && dieAt == DieAt::BeforeDown) die();
-        if (!down && dieAt == DieAt::BeforeUp) die();
+        if (up && dieAt == DieAt::BeforeUp) die();
         const bool ok = SendInputOutput::dispatch(input);
         if (down && dieAt == DieAt::AfterDown) die();
-        if (!down && dieAt == DieAt::AfterUp) die();
+        if (up && dieAt == DieAt::AfterUp) die();
         return ok;
     }
 };
@@ -174,6 +180,13 @@ int main(int argc, char** argv) {
     pump(std::chrono::milliseconds(200));
     output.moveCursorTo(x + w / 2, y + h / 2);
     pump(std::chrono::milliseconds(300));
+
+    const Point at = output.cursorPosition();
+    if (std::abs(at.x - (x + w / 2)) > 2 || std::abs(at.y - (y + h / 2)) > 2) {
+        std::fprintf(stderr, "FAIL: cursor is at (%d,%d), not the window centre. "
+                             "Nothing was pressed.\n", at.x, at.y);
+        return 5;
+    }
 
     std::fprintf(stderr, "protected; will die at %s\n", args.dieName.c_str());
     std::fflush(stderr);
