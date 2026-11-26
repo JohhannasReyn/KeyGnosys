@@ -243,6 +243,13 @@ if(KGN_BUILD_TESTS)
         add_executable(kgn_hook_smoke tests/manual_hook_smoke.cpp)
         target_link_libraries(kgn_hook_smoke
             PRIVATE kgn_engine kgn_test_main kgn_warnings kgn_platform)
+
+        # Built, deliberately NOT registered with ctest (ruling R4). It
+        # injects a real mouse press and then kills itself at a chosen point
+        # so the guardian can be watched. Run by hand; see its header.
+        add_executable(kgn_guardian_fault tests/manual_guardian_fault.cpp)
+        target_link_libraries(kgn_guardian_fault PRIVATE kgn_warnings kgn_platform)
+        add_dependencies(kgn_guardian_fault keygnosys-guardian)
     endif()
     kgn_add_test_with(test_endpoint kgn_ipc)
     kgn_add_test_with(test_core kgn_ipc)
