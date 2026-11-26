@@ -38,6 +38,7 @@
 
 #include "kgn/backends.hpp"
 #include "kgn/diagnostics.hpp"
+#include "obligation_journal.hpp"
 #include "scancode_keymap.hpp"
 
 namespace kgn::win {
@@ -62,6 +63,10 @@ public:
 
     void drainDiagnostics(Diagnostics& out) override;
 
+    // Non-owning; null means no journaling. Every mouse-button transition is
+    // recorded write-ahead: intent before dispatch, result after.
+    void setJournal(ObligationJournal* journal) { journal_ = journal; }
+
 protected:
     // The single point where an INPUT reaches the OS. Virtual so a test can
     // make it fail on demand: provoking a real SendInput failure needs a
@@ -76,6 +81,7 @@ private:
     // One flag per key id: what this backend believes it is holding down.
     std::vector<bool> heldKeys_;
     std::array<bool, 3> heldButtons_{};
+    ObligationJournal* journal_ = nullptr;
 };
 
 }  // namespace kgn::win
