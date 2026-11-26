@@ -1621,7 +1621,7 @@ P7 promises that the core releases everything it holds on every exit path,
 including a crash. No code in a forcibly terminated process can run, so on
 Windows a second process, `keygnosys-guardian.exe`, covers that path for **mouse
 buttons**. Keys need no cover: every synthesized key-down mirrors a physically
-held key (§15.10).
+held key, and the forwarded-release invariant (§6.3) releases it with that key.
 
 **Placement and spawn.** The executable sits next to `keygnosys-core.exe`. The
 core spawns one guardian per core instance, before it installs the input hook.
