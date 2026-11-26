@@ -125,8 +125,8 @@ bool anyButtonDown() {
            (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
 }
 
-// Launches the guardian directly (no relay), so its exit code is ours to read.
-long runGuardianDirectly(ObligationJournal& journal, HANDLE guarded, const char* nonceHex) {
+// Launches the guardian directly (no relay) and returns its process handle.
+HANDLE launchGuardianDirectly(ObligationJournal& journal, HANDLE guarded, const char* nonceHex) {
     HANDLE core = nullptr;
     DuplicateHandle(GetCurrentProcess(), guarded, GetCurrentProcess(), &core,
                     SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, TRUE, 0);
@@ -153,8 +153,16 @@ long runGuardianDirectly(ObligationJournal& journal, HANDLE guarded, const char*
                                    nullptr, &si.StartupInfo, &pi);
     DeleteProcThreadAttributeList(attrs);
     CloseHandle(core);
-    if (!ok) return -2;
+    if (!ok) return nullptr;
     CloseHandle(pi.hThread);
+    return pi.hProcess;
+}
+
+// Runs the guardian directly, so its exit code is ours to read.
+long runGuardianDirectly(ObligationJournal& journal, HANDLE guarded, const char* nonceHex) {
+    PROCESS_INFORMATION pi{};
+    pi.hProcess = launchGuardianDirectly(journal, guarded, nonceHex);
+    if (!pi.hProcess) return -2;
     long code = -1;
     if (WaitForSingleObject(pi.hProcess, 5000) == WAIT_OBJECT_0) {
         DWORD c = 0;
@@ -165,6 +173,26 @@ long runGuardianDirectly(ObligationJournal& journal, HANDLE guarded, const char*
     }
     CloseHandle(pi.hProcess);
     return code;
+}
+
+std::string hex(const std::array<std::uint8_t, 16>& bytes) {
+    char out[33];
+    for (std::size_t i = 0; i < bytes.size(); ++i)
+        std::snprintf(out + 2 * i, 3, "%02x", static_cast<unsigned>(bytes[i]));
+    return std::string(out, 32);
+}
+
+// Live keygnosys-guardian.exe processes on the machine.
+int liveGuardians() {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return -1;
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof entry;
+    int n = 0;
+    for (BOOL ok = Process32FirstW(snap, &entry); ok; ok = Process32NextW(snap, &entry))
+        if (_wcsicmp(entry.szExeFile, L"keygnosys-guardian.exe") == 0) ++n;
+    CloseHandle(snap);
+    return n;
 }
 
 // Polls with the real clock until `done` or `within` elapses.
@@ -379,6 +407,85 @@ KGN_TEST(a_restarted_guardian_reattaches_to_the_same_journal) {
     supervisor.markCleanExit();
     child.end();
     KGN_CHECK_EQ(second.exitCode(3000ms), 0L);
+}
+
+KGN_TEST(a_respawn_that_attaches_after_its_window_is_adopted_not_doubled) {
+    const int before = liveGuardians();   // a real core may have its own
+    auto journal = ObligationJournal::create();
+    StandIn child;
+    GuardianSupervisor supervisor(*journal, kGuardianExe, {child.handle(), false});
+    KGN_CHECK(supervisor.start().state == Protection::Protected);
+    {
+        Watched first(journal->guardianPid());
+        first.kill();
+    }
+    // A made-up clock drives the schedule; the guardians run in real time.
+    const auto t = Clock::now();
+    KGN_CHECK(supervisor.poll(t).reason == "guardian_lost");
+    KGN_CHECK(supervisor.poll(t + 1s).reason == "guardian_lost");   // respawn now
+    // Microseconds later by the real clock, but 3 s by the passed one: the
+    // window is counted failed before the guardian can have attached.
+    KGN_CHECK(supervisor.poll(t + 4s).reason == "guardian_lost");
+    // The next attempt is due at t + 9 s; stay before it while it attaches.
+    const auto deadline = Clock::now() + 3s;
+    ProtectionStatus st = supervisor.poll(t + 5s);
+    while (st.state != Protection::Protected && Clock::now() < deadline) {
+        std::this_thread::sleep_for(10ms);
+        st = supervisor.poll(t + 5s);
+    }
+    KGN_CHECK(st.state == Protection::Protected);
+    const DWORD adopted = supervisor.guardianPid();
+    KGN_CHECK(adopted != 0 && adopted == journal->guardianPid());
+    Watched late(adopted);
+
+    // The pending respawn was cancelled: past its due time, nothing new.
+    KGN_CHECK(supervisor.poll(t + 60s).state == Protection::Protected);
+    std::this_thread::sleep_for(300ms);
+    KGN_CHECK(supervisor.poll(t + 61s).state == Protection::Protected);
+    KGN_CHECK_EQ(liveGuardians(), before + 1);
+    KGN_CHECK_EQ(supervisor.guardianPid(), adopted);
+
+    supervisor.markCleanExit();
+    child.end();
+    KGN_CHECK_EQ(late.exitCode(3000ms), 0L);
+}
+
+KGN_TEST(a_second_guardian_is_terminated_and_the_held_one_restored) {
+    const int before = liveGuardians();   // a real core may have its own
+    auto journal = ObligationJournal::create();
+    StandIn child;
+    GuardianSupervisor supervisor(*journal, kGuardianExe, {child.handle(), false});
+    KGN_CHECK(supervisor.start().state == Protection::Protected);
+    const DWORD held = supervisor.guardianPid();
+    Watched heldGuardian(held);
+
+    // An otherwise valid guardian for the same core and journal.
+    HANDLE second = launchGuardianDirectly(*journal, child.handle(),
+                                           hex(supervisor.nonceForTests()).c_str());
+    KGN_CHECK(second != nullptr);
+    const DWORD secondPid = second ? GetProcessId(second) : 0;
+    const auto deadline = Clock::now() + 3s;
+    while (journal->guardianPid() != secondPid && Clock::now() < deadline)
+        std::this_thread::sleep_for(5ms);
+    KGN_CHECK_EQ(journal->guardianPid(), secondPid);   // it attached over the held one
+
+    KGN_CHECK(supervisor.poll(Clock::now()).state == Protection::Protected);
+    if (second) {
+        KGN_CHECK(WaitForSingleObject(second, 2000) == WAIT_OBJECT_0);
+        DWORD code = 0;
+        GetExitCodeProcess(second, &code);
+        KGN_CHECK_EQ(code, static_cast<DWORD>(GuardianSupervisor::kEvictedExitCode));
+        if (WaitForSingleObject(second, 0) == WAIT_TIMEOUT) TerminateProcess(second, 99);
+        CloseHandle(second);
+    }
+    KGN_CHECK_EQ(journal->guardianPid(), held);
+    KGN_CHECK(journal->attached());
+    KGN_CHECK_EQ(supervisor.guardianPid(), held);
+    KGN_CHECK_EQ(liveGuardians(), before + 1);
+
+    supervisor.markCleanExit();
+    child.end();
+    KGN_CHECK_EQ(heldGuardian.exitCode(3000ms), 0L);
 }
 
 // --- The output backend reports what its supervisor sees -----------------------

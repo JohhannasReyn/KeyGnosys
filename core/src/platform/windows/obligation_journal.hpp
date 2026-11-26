@@ -38,6 +38,10 @@ public:
     // for the new one's.
     void clearAttachment();
 
+    // Writes `pid` back as the attached guardian and keeps ATTACHED set; used
+    // after evicting a second guardian that overwrote the held one's pid.
+    void restoreAttachment(DWORD pid);
+
 private:
     ObligationJournal() = default;
 

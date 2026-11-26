@@ -35,6 +35,8 @@ public:
     using Clock = std::chrono::steady_clock;
 
     static constexpr Clock::duration kAttachTimeout = std::chrono::seconds(2);
+    // The exit code given to a second guardian the supervisor terminates.
+    static constexpr UINT kEvictedExitCode = 0xE5;
 
     // TEST-ONLY seams (ruling R8). Production code uses the two-argument
     // constructor, which guards the current process with an honest nonce.
@@ -66,14 +68,23 @@ public:
     // The pid of the guardian currently supervised, 0 when there is none.
     [[nodiscard]] DWORD guardianPid() const { return guardianPid_; }
 
+    // TEST-ONLY: the nonce written to the header, so a test can launch a
+    // second, otherwise valid guardian with the same arguments.
+    [[nodiscard]] const std::array<std::uint8_t, 16>& nonceForTests() const { return nonce_; }
+
 private:
-    enum class Phase { Idle, Protected, Lost, Pending, Failed };
+    // Failed: start() failed; terminal (R13). Exhausted: the restart policy
+    // gave up, but a late guardian may still be adopted (R14).
+    enum class Phase { Idle, Protected, Lost, Pending, Failed, Exhausted };
 
     enum class SpawnResult { Ok, SpawnFailed, BreakawayDenied };
 
     SpawnResult spawn();
     // True once the header shows ATTACHED and a pid whose handle opened.
     bool tryAdopt();
+    // While Protected: a second guardian wrote its pid over the held one's.
+    // Terminates it and restores the header (R14: never two guardians).
+    void evictNewcomer();
     void closeRelay();
     void closeGuardian();
     // A loss or a failed respawn at `now`: schedule the next attempt or give up.

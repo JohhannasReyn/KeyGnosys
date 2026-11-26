@@ -124,15 +124,30 @@ ProtectionStatus GuardianSupervisor::start() {
 ProtectionStatus GuardianSupervisor::poll(Clock::time_point now) {
     switch (phase_) {
         case Phase::Protected:
-            if (WaitForSingleObject(guardian_, 0) == WAIT_TIMEOUT) return status();
+            if (WaitForSingleObject(guardian_, 0) == WAIT_TIMEOUT) {
+                evictNewcomer();
+                return status();
+            }
             closeGuardian();
+            // The dead guardian's pid must never be adopted: a reused pid
+            // would make a stranger pass for it.
+            journal_.clearAttachment();
             return scheduleRestart(now);
 
         case Phase::Lost:
+            // A respawn counted as failed may still attach late. With no live
+            // guardian held, adopt it and cancel the pending respawn (R14).
+            if (tryAdopt()) {
+                phase_ = Phase::Protected;
+                reason_.clear();
+                return status();
+            }
             if (now < nextAttemptAt_) return status();
             policy_.attemptMade(now);
-            // The dead guardian's ATTACHED must not pass for the new one's.
-            journal_.clearAttachment();
+            // No clearAttachment() here: the header was cleared when the loss
+            // was detected, so anything in it now is a late guardian, which
+            // tryAdopt() above would have taken. Clearing again could erase
+            // one that attached a moment ago and leave it unsupervised.
             if (spawn() != SpawnResult::Ok) return scheduleRestart(now);
             phase_ = Phase::Pending;
             attachDeadline_ = now + kAttachTimeout;
@@ -154,6 +169,13 @@ ProtectionStatus GuardianSupervisor::poll(Clock::time_point now) {
             }
             return status();
         }
+
+        case Phase::Exhausted:
+            if (tryAdopt()) {
+                phase_ = Phase::Protected;
+                reason_.clear();
+            }
+            break;
 
         case Phase::Idle:
         case Phase::Failed:
@@ -252,6 +274,19 @@ bool GuardianSupervisor::tryAdopt() {
     return true;
 }
 
+void GuardianSupervisor::evictNewcomer() {
+    const DWORD pid = journal_.guardianPid();
+    if (pid == 0 || pid == guardianPid_) return;
+    // The newcomer wrote its pid and is waiting on the core: it is alive, so
+    // the pid is still its own.
+    if (HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid)) {
+        TerminateProcess(h, kEvictedExitCode);
+        WaitForSingleObject(h, 100);
+        CloseHandle(h);
+    }
+    journal_.restoreAttachment(guardianPid_);
+}
+
 void GuardianSupervisor::closeRelay() {
     if (relay_) CloseHandle(relay_);
     relay_ = nullptr;
@@ -266,7 +301,7 @@ void GuardianSupervisor::closeGuardian() {
 ProtectionStatus GuardianSupervisor::scheduleRestart(Clock::time_point now) {
     const auto next = policy_.nextAttempt(now);
     if (!next) {
-        phase_ = Phase::Failed;
+        phase_ = Phase::Exhausted;
         reason_ = "restart_exhausted";
     } else {
         phase_ = Phase::Lost;
@@ -281,7 +316,8 @@ ProtectionStatus GuardianSupervisor::status() const {
         case Phase::Protected: return {Protection::Protected, ""};
         case Phase::Lost:
         case Phase::Pending: return {Protection::Unprotected, "guardian_lost"};
-        case Phase::Failed: return {Protection::Unprotected, reason_};
+        case Phase::Failed:
+        case Phase::Exhausted: return {Protection::Unprotected, reason_};
         case Phase::Idle: break;
     }
     // Not started: nothing has been spawned, so nothing protects.

@@ -75,4 +75,9 @@ void ObligationJournal::clearAttachment() {
     header_->guardian_pid.store(0, std::memory_order_release);
 }
 
+void ObligationJournal::restoreAttachment(DWORD pid) {
+    header_->guardian_pid.store(static_cast<std::uint32_t>(pid), std::memory_order_release);
+    header_->flags.fetch_or(kFlagAttached, std::memory_order_acq_rel);
+}
+
 }  // namespace kgn::win
