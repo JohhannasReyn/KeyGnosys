@@ -1659,11 +1659,15 @@ unconfirmed release, and nothing on a clean exit.
 `breakaway_denied`, `attach_timeout`, `guardian_identity_mismatch`,
 `guardian_lost` and `restart_exhausted`. The attach timeout is 2 s; a guardian
 that rejects the journal header surfaces as `attach_timeout`. A failed initial
-start is not retried: the core stays `unprotected` until it restarts. After a
-guardian is lost the core restarts it with backoff of 1 s, 5 s and 30 s, at most
-3 attempts per 10 minutes, then reports `restart_exhausted`; between the loss
-and the reattach the state is `unprotected` (`guardian_lost`). A guardian that
-attaches late is adopted, and a second one is terminated: never two per core.
+start is not retried: no guardian is spawned again, and the core stays
+`unprotected` until it restarts or, after an `attach_timeout`, until the slow
+guardian attaches. After a guardian is lost the core restarts it with backoff of
+1 s, 5 s and 30 s, at most 3 attempts per 10 minutes, then reports
+`restart_exhausted`; between the loss and the reattach the state is
+`unprotected` (`guardian_lost`). A guardian that attaches late — after the
+initial `attach_timeout`, after a respawn's window, or after `restart_exhausted`
+— is adopted and the state returns to `protected`; a second one is terminated:
+never two per core.
 
 **Behaviour while unprotected.** A `button.drag_lock` toggle that would engage
 does nothing and emits one `button.drag_lock_refused` diagnostic (§7.2). A lock

@@ -177,8 +177,19 @@ ProtectionStatus GuardianSupervisor::poll(Clock::time_point now) {
             }
             break;
 
-        case Phase::Idle:
         case Phase::Failed:
+            // A timed-out start may yet attach: a slow guardian is adopted
+            // (R17). Never a respawn: a failed start is not retried (R13).
+            // spawn_failed and breakaway_denied launched nothing that could
+            // attach, and a guardian that refused the header never sets
+            // ATTACHED.
+            if (reason_ == "attach_timeout" && tryAdopt()) {
+                phase_ = Phase::Protected;
+                reason_.clear();
+            }
+            break;
+
+        case Phase::Idle:
             break;
     }
     return status();

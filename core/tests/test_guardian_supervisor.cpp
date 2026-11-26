@@ -450,6 +450,76 @@ KGN_TEST(a_respawn_that_attaches_after_its_window_is_adopted_not_doubled) {
     KGN_CHECK_EQ(late.exitCode(3000ms), 0L);
 }
 
+KGN_TEST(a_guardian_that_attaches_after_the_initial_timeout_is_adopted) {
+    const int before = liveGuardians();   // a real core may have its own
+    auto journal = ObligationJournal::create();
+    StandIn child;
+    // The spawned guardian is given a wrong nonce and refuses, so start()
+    // runs out its 2 s and reports attach_timeout.
+    GuardianSupervisor supervisor(*journal, kGuardianExe, {child.handle(), true});
+    const ProtectionStatus st = supervisor.start();
+    KGN_CHECK(st.state == Protection::Unprotected);
+    KGN_CHECK(st.reason == "attach_timeout");
+    KGN_CHECK(supervisor.poll(Clock::now()).reason == "attach_timeout");
+
+    // A slow guardian for the same header, attaching after the window.
+    HANDLE late = launchGuardianDirectly(*journal, child.handle(),
+                                         hex(supervisor.nonceForTests()).c_str());
+    KGN_CHECK(late != nullptr);
+    const DWORD latePid = late ? GetProcessId(late) : 0;
+    const ProtectionStatus adopted = pollUntil(supervisor, 3000ms, [](const ProtectionStatus& s) {
+        return s.state == Protection::Protected;
+    });
+    KGN_CHECK(adopted.state == Protection::Protected);
+    KGN_CHECK(adopted.reason.empty());
+    KGN_CHECK_EQ(supervisor.guardianPid(), latePid);
+
+    // Adopted, not retried: long past any schedule, still one guardian.
+    KGN_CHECK(supervisor.poll(Clock::now() + 60s).state == Protection::Protected);
+    std::this_thread::sleep_for(300ms);
+    KGN_CHECK(supervisor.poll(Clock::now() + 61s).state == Protection::Protected);
+    KGN_CHECK_EQ(liveGuardians(), before + 1);
+
+    supervisor.markCleanExit();
+    child.end();
+    if (late) {
+        KGN_CHECK(WaitForSingleObject(late, 3000) == WAIT_OBJECT_0);
+        DWORD code = 99;
+        GetExitCodeProcess(late, &code);
+        KGN_CHECK_EQ(code, 0u);
+        if (WaitForSingleObject(late, 0) == WAIT_TIMEOUT) TerminateProcess(late, 99);
+        CloseHandle(late);
+    }
+}
+
+KGN_TEST(a_failed_start_other_than_a_timeout_adopts_nothing) {
+    auto journal = ObligationJournal::create();
+    StandIn child;
+    GuardianSupervisor supervisor(*journal, L"C:\\nonexistent-kgn\\keygnosys-guardian.exe",
+                                  {child.handle(), false});
+    KGN_CHECK(supervisor.start().reason == "spawn_failed");
+
+    HANDLE stray = launchGuardianDirectly(*journal, child.handle(),
+                                          hex(supervisor.nonceForTests()).c_str());
+    KGN_CHECK(stray != nullptr);
+    const auto deadline = Clock::now() + 3s;
+    while (!journal->attached() && Clock::now() < deadline) std::this_thread::sleep_for(5ms);
+    KGN_CHECK(journal->attached());
+    // Only an attach_timeout can be a late attach; spawn_failed stays failed.
+    const ProtectionStatus st = supervisor.poll(Clock::now());
+    KGN_CHECK(st.state == Protection::Unprotected);
+    KGN_CHECK(st.reason == "spawn_failed");
+    KGN_CHECK_EQ(supervisor.guardianPid(), 0u);
+
+    supervisor.markCleanExit();
+    child.end();
+    if (stray) {
+        WaitForSingleObject(stray, 3000);
+        if (WaitForSingleObject(stray, 0) == WAIT_TIMEOUT) TerminateProcess(stray, 99);
+        CloseHandle(stray);
+    }
+}
+
 KGN_TEST(a_second_guardian_is_terminated_and_the_held_one_restored) {
     const int before = liveGuardians();   // a real core may have its own
     auto journal = ObligationJournal::create();

@@ -73,8 +73,10 @@ public:
     [[nodiscard]] const std::array<std::uint8_t, 16>& nonceForTests() const { return nonce_; }
 
 private:
-    // Failed: start() failed; terminal (R13). Exhausted: the restart policy
-    // gave up, but a late guardian may still be adopted (R14).
+    // Failed: start() failed and is never retried (R13), but after an
+    // attach_timeout a late guardian may still be adopted (R17). Exhausted:
+    // the restart policy gave up, but a late guardian may still be adopted
+    // (R14).
     enum class Phase { Idle, Protected, Lost, Pending, Failed, Exhausted };
 
     enum class SpawnResult { Ok, SpawnFailed, BreakawayDenied };
