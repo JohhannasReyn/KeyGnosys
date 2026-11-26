@@ -160,7 +160,9 @@ public:
 
     // Called once on the shutdown path, after releaseAll(): everything this
     // backend synthesised is up and the core is ending. A crash-release
-    // guardian that sees the mark injects nothing.
+    // guardian that sees the mark injects nothing. A backend still holding
+    // something whose release was refused does not mark: the guardian is then
+    // the last thing that can lift it.
     virtual void markCleanExit() {}
 
     [[nodiscard]] virtual Capabilities capabilities() const = 0;

@@ -80,6 +80,7 @@ public:
 
     // Polls the supervisor: a non-blocking liveness check plus restarts.
     [[nodiscard]] ProtectionStatus protection() override;
+    // Sets CLEAN_EXIT only when no button is still held.
     void markCleanExit() override;
 
 protected:

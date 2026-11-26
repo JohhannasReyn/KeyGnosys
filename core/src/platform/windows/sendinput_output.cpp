@@ -201,6 +201,13 @@ ProtectionStatus SendInputOutput::protection() {
 }
 
 void SendInputOutput::markCleanExit() {
+    // CLEAN_EXIT tells the guardian there is nothing to lift. While a button
+    // is still held -- its release was refused, so its slot is DOWN again --
+    // that would be false, and the guardian is the last thing that can lift
+    // it. Leave the mark off and let it act.
+    for (const bool held : heldButtons_) {
+        if (held) return;
+    }
     if (supervisor_) {
         supervisor_->markCleanExit();
     } else if (ownedJournal_) {

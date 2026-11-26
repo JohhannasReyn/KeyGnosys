@@ -172,6 +172,48 @@ KGN_TEST(clearing_the_attachment_resets_attached_and_the_guardian_pid) {
     ::UnmapViewOfFile(view);
 }
 
+namespace {
+
+bool cleanExitFlag(const ObligationJournal& journal) {
+    void* view = ::MapViewOfFile(journal.sectionHandle(), FILE_MAP_READ, 0, 0, kJournalPageSize);
+    if (!view) return false;
+    const bool set =
+        (static_cast<const JournalHeader*>(view)->flags.load() & kFlagCleanExit) != 0;
+    ::UnmapViewOfFile(view);
+    return set;
+}
+
+}  // namespace
+
+KGN_TEST(a_clean_exit_is_marked_once_everything_is_released) {
+    auto owned = ObligationJournal::create();
+    ObligationJournal* journal = owned.get();
+    JournalProbe output;
+    output.adoptGuardian(std::move(owned), nullptr);
+
+    output.button(MouseButton::Left, true);
+    output.releaseAll();
+    KGN_CHECK(journal->slot(MouseButton::Left) == SlotState::UP);
+    output.markCleanExit();
+    KGN_CHECK(cleanExitFlag(*journal));
+}
+
+KGN_TEST(a_clean_exit_is_not_marked_while_a_release_was_refused) {
+    auto owned = ObligationJournal::create();
+    ObligationJournal* journal = owned.get();
+    JournalProbe output;
+    output.adoptGuardian(std::move(owned), nullptr);
+
+    output.button(MouseButton::Left, true);
+    // The shutdown path's release is refused: the button is still down, and
+    // the guardian is the only thing left that can lift it.
+    output.refuse = true;
+    output.releaseAll();
+    KGN_CHECK(journal->slot(MouseButton::Left) == SlotState::DOWN);
+    output.markCleanExit();
+    KGN_CHECK(!cleanExitFlag(*journal));
+}
+
 int main() { return kgn::test::runAll(); }
 
 #else
