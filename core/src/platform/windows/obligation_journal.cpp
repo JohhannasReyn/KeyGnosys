@@ -70,4 +70,9 @@ void ObligationJournal::markCleanExit() {
     header_->flags.fetch_or(kFlagCleanExit, std::memory_order_release);
 }
 
+void ObligationJournal::clearAttachment() {
+    header_->flags.fetch_and(~kFlagAttached, std::memory_order_acq_rel);
+    header_->guardian_pid.store(0, std::memory_order_release);
+}
+
 }  // namespace kgn::win

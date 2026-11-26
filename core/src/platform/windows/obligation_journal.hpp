@@ -33,6 +33,11 @@ public:
     [[nodiscard]] DWORD guardianPid() const;
     void markCleanExit();
 
+    // Clears ATTACHED and guardian_pid. The supervisor calls it before
+    // respawning a lost guardian, so the dead one's marker is never mistaken
+    // for the new one's.
+    void clearAttachment();
+
 private:
     ObligationJournal() = default;
 

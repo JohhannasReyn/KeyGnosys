@@ -187,4 +187,25 @@ Capabilities SendInputOutput::capabilities() const {
     return capabilities;
 }
 
+void SendInputOutput::adoptGuardian(std::unique_ptr<ObligationJournal> journal,
+                                    std::unique_ptr<GuardianSupervisor> supervisor) {
+    supervisor_.reset();
+    ownedJournal_ = std::move(journal);
+    supervisor_ = std::move(supervisor);
+    setJournal(ownedJournal_.get());
+}
+
+ProtectionStatus SendInputOutput::protection() {
+    if (!supervisor_) return fallback_;
+    return supervisor_->poll(std::chrono::steady_clock::now());
+}
+
+void SendInputOutput::markCleanExit() {
+    if (supervisor_) {
+        supervisor_->markCleanExit();
+    } else if (ownedJournal_) {
+        ownedJournal_->markCleanExit();
+    }
+}
+
 }  // namespace kgn::win

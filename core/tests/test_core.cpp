@@ -250,6 +250,12 @@ public:
         ++releaseAllCalls;
         if (clock) releaseAllOrder = ++(*clock);
     }
+    int markCleanExitCalls = 0;
+    int markCleanExitOrder = 0;
+    void markCleanExit() override {
+        ++markCleanExitCalls;
+        if (clock) markCleanExitOrder = ++(*clock);
+    }
     kgn::ProtectionStatus status;
     kgn::ProtectionStatus protection() override { return status; }
     std::chrono::milliseconds doubleClickInterval() const override {
@@ -809,6 +815,27 @@ KGN_TEST(shutdown_releases_everything_even_when_the_engine_owner_never_answers) 
     // released, or new work can arrive after the drain.
     KGN_CHECK(recordedInput->stopOrder > 0);
     KGN_CHECK(recordedOutput->releaseAllOrder > recordedInput->stopOrder);
+}
+
+KGN_TEST(stop_marks_a_clean_exit_once_and_only_after_releasing_everything) {
+    // The guardian treats CLEAN_EXIT as "nothing left to lift", so the mark
+    // must come after the last release, never before.
+    int clock = 0;
+    auto output = std::make_unique<RecordingOutput>();
+    RecordingOutput* recorded = output.get();
+    recorded->clock = &clock;
+    kgn::Backends backends;
+    backends.output = std::move(output);
+    {
+        Fixture fixture("clean-exit", std::move(backends));
+        KGN_CHECK(fixture.core.start().ok());
+        fixture.core.step(kgn::Clock::now());
+        KGN_CHECK_EQ(recorded->markCleanExitCalls, 0);
+        fixture.core.stop("test finished");
+        KGN_CHECK_EQ(recorded->markCleanExitCalls, 1);
+        KGN_CHECK(recorded->releaseAllOrder > 0);
+        KGN_CHECK(recorded->markCleanExitOrder > recorded->releaseAllOrder);
+    }
 }
 
 KGN_TEST(a_setting_change_the_engine_never_applied_is_refused_not_reported_ok) {

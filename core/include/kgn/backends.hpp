@@ -158,6 +158,11 @@ public:
     // Polled once per core tick.
     [[nodiscard]] virtual ProtectionStatus protection() { return {}; }
 
+    // Called once on the shutdown path, after releaseAll(): everything this
+    // backend synthesised is up and the core is ending. A crash-release
+    // guardian that sees the mark injects nothing.
+    virtual void markCleanExit() {}
+
     [[nodiscard]] virtual Capabilities capabilities() const = 0;
     [[nodiscard]] virtual std::string_view name() const = 0;
 };

@@ -1347,7 +1347,12 @@ void Core::stop(const std::string& reason) {
         }
     }
     impl_->effects.clear();
-    if (impl_->backends.output) impl_->backends.output->releaseAll();
+    if (impl_->backends.output) {
+        impl_->backends.output->releaseAll();
+        // Only now, with everything released: the crash-release guardian
+        // reads the mark as "nothing to lift" and injects nothing.
+        impl_->backends.output->markCleanExit();
+    }
 
     if (impl_->server) impl_->server->shutdown(reason);
     impl_->owner.release();

@@ -106,6 +106,7 @@ if(WIN32)
         src/platform/windows/hook_input.cpp
         src/platform/windows/sendinput_output.cpp
         src/platform/windows/obligation_journal.cpp
+        src/platform/windows/guardian_supervisor.cpp
         src/platform/windows/win32_window.cpp
         src/platform/windows/dpi_awareness.cpp
         src/platform/windows/platform_windows.cpp)
@@ -131,7 +132,8 @@ target_link_libraries(kgn_platform PUBLIC kgn_engine PRIVATE kgn_warnings)
 
 if(NOT KGN_PLATFORM_STUB)
     if(WIN32)
-        target_link_libraries(kgn_platform PRIVATE user32 dwmapi shcore)
+        # bcrypt: BCryptGenRandom for the guardian's instance nonce.
+        target_link_libraries(kgn_platform PRIVATE user32 dwmapi shcore bcrypt)
     else()
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(EVDEV REQUIRED IMPORTED_TARGET libevdev)
@@ -225,6 +227,12 @@ if(KGN_BUILD_TESTS)
         kgn_add_test_with(test_dpi_awareness kgn_platform)
         kgn_add_test_with(test_window_move kgn_platform)
         kgn_add_test_with(test_guardian kgn_guardian_logic)
+        # Runs the real guardian binary against throwaway stand-in processes
+        # (ruling R3: the path comes from the build, not a guess).
+        kgn_add_test_with(test_guardian_supervisor kgn_platform)
+        target_compile_definitions(test_guardian_supervisor PRIVATE
+            KGN_GUARDIAN_EXE="$<TARGET_FILE:keygnosys-guardian>")
+        add_dependencies(test_guardian_supervisor keygnosys-guardian)
 
         # Built, deliberately NOT registered with ctest. It installs a real
         # low-level hook and waits for a real keystroke, so a CI run that

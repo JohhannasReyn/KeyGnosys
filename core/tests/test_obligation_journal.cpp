@@ -153,6 +153,25 @@ KGN_TEST(the_header_round_trips_and_the_slots_sit_on_their_own_page) {
     ::UnmapViewOfFile(view);
 }
 
+KGN_TEST(clearing_the_attachment_resets_attached_and_the_guardian_pid) {
+    auto journal = ObligationJournal::create();
+    void* view = ::MapViewOfFile(journal->sectionHandle(), FILE_MAP_ALL_ACCESS, 0, 0,
+                                 kJournalSectionSize);
+    KGN_CHECK(view != nullptr);
+    auto* header = static_cast<JournalHeader*>(view);
+    // What an attaching guardian writes.
+    header->guardian_pid.store(777);
+    header->flags.fetch_or(kFlagAttached | kFlagCleanExit);
+    KGN_CHECK(journal->attached());
+
+    journal->clearAttachment();
+    KGN_CHECK(!journal->attached());
+    KGN_CHECK_EQ(journal->guardianPid(), 0u);
+    // CLEAN_EXIT is the core's, not the guardian's: left alone.
+    KGN_CHECK((header->flags.load() & kFlagCleanExit) != 0);
+    ::UnmapViewOfFile(view);
+}
+
 int main() { return kgn::test::runAll(); }
 
 #else
