@@ -313,6 +313,24 @@ def test_refused_drag_lock_flashes_the_banner_briefly(state: AppState) -> None:
     assert state.banner_text(now=200.0) is None
 
 
+def test_a_refusal_while_unprotected_visibly_flashes_the_standing_banner(state: AppState) -> None:
+    # The banner is already up for as long as the core is unprotected, and a
+    # refusal only happens then, so the flash must change how it looks.
+    state.protection = "unprotected"
+    assert state.banner_flashing(now=100.0) is False
+    state.flash_protection(now=100.0)
+    assert state.banner_text(now=101.0) == UNPROTECTED_BANNER
+    assert state.banner_flashing(now=101.9) is True
+    assert state.banner_flashing(now=102.0) is False
+
+
+def test_the_inert_banner_never_flashes(state: AppState) -> None:
+    state.protection = "unprotected"
+    state.inert = True
+    state.flash_protection(now=100.0)
+    assert state.banner_flashing(now=100.5) is False
+
+
 def test_unprotected_status_names_the_reason(state: AppState) -> None:
     state.protection = "unprotected"
     state.protection_reason = "spawn_failed"

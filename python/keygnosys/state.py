@@ -258,6 +258,15 @@ class AppState:
         now = time.monotonic() if now is None else now
         self.flash_until = now + PROTECTION_FLASH_S
 
+    def banner_flashing(self, now: float | None = None) -> bool:
+        """True while a refused drag lock is being signalled. The unprotected
+        banner is already standing whenever a refusal can happen, so the view
+        must draw it differently for the flash to be seen at all."""
+        if self.inert:
+            return False
+        now = time.monotonic() if now is None else now
+        return now < self.flash_until
+
     def banner_text(self, now: float | None = None) -> str | None:
         """Large on-keyboard notice. Inert wins over unprotected."""
         if self.inert:
