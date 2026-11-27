@@ -780,6 +780,30 @@ KGN_TEST(work_items_reach_the_output_backend_and_publication_does_not) {
     KGN_CHECK(recorded->keys[0].second);
 }
 
+KGN_TEST(a_client_disconnect_releases_nothing) {
+    // SPEC 15.11 (O-4): clients are viewers. A closed or crashed client must
+    // not lift what the user is holding.
+    auto output = std::make_unique<RecordingOutput>();
+    RecordingOutput* recorded = output.get();
+    kgn::Backends backends;
+    backends.output = std::move(output);
+    Fixture fixture("disconnect", std::move(backends));
+    KGN_CHECK(fixture.core.start().ok());
+    for (int i = 0; i < 5; ++i) fixture.core.step(kgn::Clock::now());
+    const int before = recorded->releaseAllCalls;
+    {
+        RawClient client;
+        KGN_CHECK(client.connect(fixture.address));
+        if (client.valid()) {
+            client.readLine(fixture.core);
+            client.close();
+        }
+    }
+    for (int i = 0; i < 20; ++i) fixture.core.step(kgn::Clock::now());
+    KGN_CHECK(fixture.core.running());
+    KGN_CHECK_EQ(recorded->releaseAllCalls, before);
+}
+
 KGN_TEST(shutdown_releases_everything_even_when_the_engine_owner_never_answers) {
     // The formal fallback. Obligations partition into three sets and only the
     // first involves the engine's owner at all -- and that one is discharged
