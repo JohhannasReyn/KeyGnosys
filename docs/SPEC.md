@@ -1195,8 +1195,15 @@ CapsLock. See §15.10.
 OS is flagged. Its release **MUST** also be forwarded, unconditionally,
 regardless of what the mode has become in the meantime. Violating this leaves a
 key stuck down in the compositor. The invariant applies equally to mode changes,
-config reloads, `release_all`, client disconnects, and process shutdown — every
-exit path **MUST** run `OutputBackend::releaseAll()`.
+config reloads, `release_all` and process shutdown — every exit path **MUST** run
+`OutputBackend::releaseAll()`.
+
+**A client disconnecting is not an exit path.** It **MUST NOT** release anything:
+the core keeps every held key, button and drag lock exactly as it was. Clients
+are viewers (P4: killing the overlay must not disturb typing), so a closed,
+crashed or flaky overlay connection must not lift a key the user is physically
+holding or drop a drag they engaged on purpose. A client that wants a release
+asks for it with `release_all`. See §15.11.
 
 It covers **every** press that reaches the OS:
 
@@ -2422,3 +2429,20 @@ the only way into the layer (§6.3), the engine has no timed work, and the
 calibration plan that existed to tune the window is gone with it.
 
 Design record: `docs/superpowers/specs/2026-11-22-remove-grace-window-design.md`.
+
+### 15.11 A client disconnect does not release
+
+Decided 2026-11-27, closing finding O-4. Earlier text listed "client
+disconnects" among the exit paths that must run `releaseAll()`. The core never
+did that, and row 10.8 observed it. The SPEC was wrong, not the code.
+
+- **Why:** clients are viewers (P4). The core owns the output and its releases.
+  Releasing on disconnect would let any client's crash, or a dropped
+  connection, lift keys the user is physically holding and end deliberate
+  drags.
+- **What still covers a disappearing process:** the core's own exits run
+  `releaseAll()` (§6.3). The crash-release guardian (§8.3.1) lifts mouse
+  buttons if the core itself dies. A client can still ask for a release
+  with `release_all`.
+- **Rejected alternative:** releasing on every disconnect. It would make a
+  flaky overlay connection drop the user's drags.

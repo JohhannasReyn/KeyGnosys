@@ -231,7 +231,7 @@ Every row here is a P7 test. A failure leaves a key or a button held.
 | 10.5 | Hold an action key and send `reload_config`. | The action is released. No stuck button. |
 | 10.6 | Hold an action key and send `set_bindings` for a document that does not bind it. | The action is released rather than left held by a binding that no longer exists. |
 | 10.7 | Hold several keys and send `release_all`. | Everything lifts. The reply is `ok`. |
-| 10.8 | Engage the layer, hold a key, and disconnect the overlay client abruptly. | The core keeps working. Nothing is stranded. |
+| 10.8 | Engage the layer, hold a key, and disconnect the overlay client abruptly. | The core keeps working. Nothing is stranded, and nothing is released: held keys, buttons and a drag lock stay exactly as they were (§15.11). |
 | 10.9 | After every row in this section, check the modifier state (open an on-screen keyboard). | No modifier is stuck down. |
 | 10.10 | Engage a left drag lock, then close the core by every clean path (`Ctrl+C` substitute, console close, Windows Terminal close). | The button is released by the core's own unwind. The guardian sends no Up, Windows reports the button up, and the guardian exits 0. |
 | 10.11 | Engage a left drag lock, then `taskkill /F` the core. | Windows reports the button up within the 1 s retry window, with no rescue click. |

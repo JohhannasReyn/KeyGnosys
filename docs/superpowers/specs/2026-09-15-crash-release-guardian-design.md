@@ -546,6 +546,11 @@ behaviour on a failure path and is a product call, not an engineering one.
 
 ## 10. OPEN DEPENDENCY: O-4 / client disconnect semantics
 
+> **Resolved 2026-11-27 (SPEC §15.11).** No IPC client is an owner of synthetic
+> input; a client disconnect releases nothing. The provisional rule below stands
+> as final: the guardian's only trigger is loss of the guarded core instance.
+> The text below is kept as written for the record.
+
 SPEC.md:1179-1181 says the P7 invariant applies to "client disconnects" and that
 every such exit path MUST run `releaseAll()`. The implementation does not
 (`Server::dropClosed`), and row 10.8 observed held obligations surviving a
