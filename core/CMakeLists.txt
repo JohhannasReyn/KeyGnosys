@@ -105,6 +105,8 @@ if(WIN32)
         src/platform/windows/scancode_keymap.cpp
         src/platform/windows/hook_input.cpp
         src/platform/windows/sendinput_output.cpp
+        src/platform/windows/obligation_journal.cpp
+        src/platform/windows/guardian_supervisor.cpp
         src/platform/windows/win32_window.cpp
         src/platform/windows/dpi_awareness.cpp
         src/platform/windows/platform_windows.cpp)
@@ -130,7 +132,8 @@ target_link_libraries(kgn_platform PUBLIC kgn_engine PRIVATE kgn_warnings)
 
 if(NOT KGN_PLATFORM_STUB)
     if(WIN32)
-        target_link_libraries(kgn_platform PRIVATE user32 dwmapi shcore)
+        # bcrypt: BCryptGenRandom for the guardian's instance nonce.
+        target_link_libraries(kgn_platform PRIVATE user32 dwmapi shcore bcrypt)
     else()
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(EVDEV REQUIRED IMPORTED_TARGET libevdev)
@@ -148,6 +151,32 @@ endif()
 
 add_executable(keygnosys-core src/main.cpp)
 target_link_libraries(keygnosys-core PRIVATE kgn_ipc kgn_platform kgn_warnings)
+
+# ---------------------------------------------------------------------------
+# keygnosys-guardian -- the crash-release guardian (Windows only)
+#
+# A separate, tiny process: it waits for the core to die and, if the core did
+# not mark a clean exit, lifts mouse buttons the journal says it held. It links
+# NO kgn library -- only the header-only journal layout and keycode headers --
+# and imports only kernel32, user32 and advapi32.
+# ---------------------------------------------------------------------------
+
+if(WIN32)
+    add_library(kgn_guardian_logic src/guardian/guardian_logic.cpp)
+    target_include_directories(kgn_guardian_logic PUBLIC src include)
+    target_link_libraries(kgn_guardian_logic PRIVATE kgn_warnings)
+
+    add_executable(keygnosys-guardian src/guardian/main.cpp)
+    target_link_libraries(keygnosys-guardian PRIVATE
+        kgn_guardian_logic kgn_warnings kernel32 user32 advapi32)
+    if(NOT MSVC)
+        # No MinGW runtime DLLs: the guardian must start even if the install's
+        # PATH is broken.
+        target_link_options(keygnosys-guardian PRIVATE -static)
+    endif()
+    set_target_properties(keygnosys-guardian PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:keygnosys-core>)
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -194,8 +223,16 @@ if(KGN_BUILD_TESTS)
         kgn_add_test_with(test_scancode_keymap kgn_platform)
         kgn_add_test_with(test_hook_input kgn_platform)
         kgn_add_test_with(test_sendinput_output kgn_platform)
+        kgn_add_test_with(test_obligation_journal kgn_platform)
         kgn_add_test_with(test_dpi_awareness kgn_platform)
         kgn_add_test_with(test_window_move kgn_platform)
+        kgn_add_test_with(test_guardian kgn_guardian_logic)
+        # Runs the real guardian binary against throwaway stand-in processes
+        # (ruling R3: the path comes from the build, not a guess).
+        kgn_add_test_with(test_guardian_supervisor kgn_platform)
+        target_compile_definitions(test_guardian_supervisor PRIVATE
+            KGN_GUARDIAN_EXE="$<TARGET_FILE:keygnosys-guardian>")
+        add_dependencies(test_guardian_supervisor keygnosys-guardian)
 
         # Built, deliberately NOT registered with ctest. It installs a real
         # low-level hook and waits for a real keystroke, so a CI run that
@@ -206,6 +243,13 @@ if(KGN_BUILD_TESTS)
         add_executable(kgn_hook_smoke tests/manual_hook_smoke.cpp)
         target_link_libraries(kgn_hook_smoke
             PRIVATE kgn_engine kgn_test_main kgn_warnings kgn_platform)
+
+        # Built, deliberately NOT registered with ctest (ruling R4). It
+        # injects a real mouse press and then kills itself at a chosen point
+        # so the guardian can be watched. Run by hand; see its header.
+        add_executable(kgn_guardian_fault tests/manual_guardian_fault.cpp)
+        target_link_libraries(kgn_guardian_fault PRIVATE kgn_warnings kgn_platform)
+        add_dependencies(kgn_guardian_fault keygnosys-guardian)
     endif()
     kgn_add_test_with(test_endpoint kgn_ipc)
     kgn_add_test_with(test_core kgn_ipc)

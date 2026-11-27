@@ -27,3 +27,27 @@ def test_mode_event_without_inert_reads_as_not_inert(qtbot):
     _mode(client, mode="cursor", latched=True, activation="hybrid")
 
     assert seen == [False]
+
+
+def test_mode_event_drives_protection_changed(qtbot):
+    client = IpcClient("keygnosys-test-unused")
+    seen = []
+    client.protectionChanged.connect(lambda s, r: seen.append((s, r)))
+
+    _mode(client, mode="normal", latched=False, activation="hybrid",
+          protection="unprotected", protection_reason="spawn_failed")
+    _mode(client, mode="normal", latched=False, activation="hybrid",
+          protection="protected", protection_reason="")
+
+    assert seen == [("unprotected", "spawn_failed"), ("protected", "")]
+
+
+def test_mode_event_without_protection_reads_as_not_applicable(qtbot):
+    # A core older than the guardian does not send the fields.
+    client = IpcClient("keygnosys-test-unused")
+    seen = []
+    client.protectionChanged.connect(lambda s, r: seen.append((s, r)))
+
+    _mode(client, mode="cursor", latched=True, activation="hybrid")
+
+    assert seen == [("not_applicable", "")]

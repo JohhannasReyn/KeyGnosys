@@ -396,6 +396,12 @@ void Dispatcher::onDecision(const Decision& decision, TimePoint now,
 
         case ActionId::ButtonDragLock: {
             const std::size_t i = buttonIndex(action.button);
+            if (!dragLock_[i] && !dragLockAllowed_) {
+                // Engaging is refused while the core cannot promise the
+                // button comes back up after a crash. Releasing never is.
+                ++dragLockRefusals_;
+                break;
+            }
             dragLock_[i] = !dragLock_[i];
             effect.kind = Effect::Kind::DragLock;
             effect.button = action.button;

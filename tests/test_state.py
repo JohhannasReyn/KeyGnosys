@@ -278,3 +278,95 @@ def test_an_app_without_bare_shortcuts_is_unchanged(state: AppState) -> None:
     assert render(state, "KeyG", "G").text == "G"
     state.press("ShiftLeft")
     assert render(state, "KeyA", "A").text == "A"
+
+
+# -- protection (crash-release guardian) -------------------------------------
+
+UNPROTECTED_BANNER = "Unprotected \u2014 drag lock off"
+
+
+def test_banner_text_while_unprotected(state: AppState) -> None:
+    state.protection = "unprotected"
+    assert state.banner_text() == UNPROTECTED_BANNER
+
+
+def test_inert_banner_takes_precedence_over_unprotected(state: AppState) -> None:
+    state.protection = "unprotected"
+    state.inert = True
+    assert state.banner_text() == "Layer inactive: admin window has focus"
+
+
+def test_not_applicable_shows_no_banner(state: AppState) -> None:
+    state.protection = "not_applicable"
+    assert state.banner_text() is None
+    state.protection = "protected"
+    assert state.banner_text() is None
+
+
+def test_refused_drag_lock_flashes_the_banner_briefly(state: AppState) -> None:
+    from keygnosys.state import PROTECTION_FLASH_S
+    assert PROTECTION_FLASH_S == 2.0
+    state.flash_protection(now=100.0)
+    assert state.flash_until == 100.0 + PROTECTION_FLASH_S
+    assert state.banner_text(now=101.9) == UNPROTECTED_BANNER
+    assert state.banner_text(now=102.0) is None
+    assert state.banner_text(now=200.0) is None
+
+
+def test_a_refusal_while_unprotected_visibly_flashes_the_standing_banner(state: AppState) -> None:
+    # The banner is already up for as long as the core is unprotected, and a
+    # refusal only happens then, so the flash must change how it looks.
+    state.protection = "unprotected"
+    assert state.banner_flashing(now=100.0) is False
+    state.flash_protection(now=100.0)
+    assert state.banner_text(now=101.0) == UNPROTECTED_BANNER
+    assert state.banner_flashing(now=101.9) is True
+    assert state.banner_flashing(now=102.0) is False
+
+
+def test_the_inert_banner_never_flashes(state: AppState) -> None:
+    state.protection = "unprotected"
+    state.inert = True
+    state.flash_protection(now=100.0)
+    assert state.banner_flashing(now=100.5) is False
+
+
+def test_a_refused_drag_lock_raises_a_notice_naming_what_and_why(state: AppState) -> None:
+    from keygnosys.state import NOTICE_S
+    assert NOTICE_S == 4.0
+    state.protection = "unprotected"
+    state.protection_reason = "spawn_failed"
+    assert state.notice_text(now=100.0) is None
+    assert state.note_blocked({"code": "button.drag_lock_refused"}, now=100.0) is True
+    assert state.notice_text(now=100.0) == \
+        "Drag lock refused — crash-release guardian unavailable (spawn_failed)"
+    assert state.notice_text(now=103.9) is not None
+    assert state.notice_text(now=104.0) is None
+
+
+def test_a_new_refusal_restarts_the_notice_instead_of_stacking(state: AppState) -> None:
+    state.protection = "unprotected"
+    state.protection_reason = "guardian_lost"
+    state.note_blocked({"code": "button.drag_lock_refused"}, now=100.0)
+    state.note_blocked({"code": "button.drag_lock_refused"}, now=103.0)
+    assert state.notice_text(now=106.5) is not None
+    assert state.notice_text(now=107.0) is None
+
+
+def test_other_diagnostics_raise_no_notice(state: AppState) -> None:
+    assert state.note_blocked({"code": "output.unprotected"}, now=100.0) is False
+    assert state.notice_text(now=100.0) is None
+
+
+def test_a_refused_drag_lock_also_flashes_the_banner(state: AppState) -> None:
+    state.protection = "unprotected"
+    state.note_blocked({"code": "button.drag_lock_refused"}, now=100.0)
+    assert state.banner_flashing(now=101.0) is True
+
+
+def test_unprotected_status_names_the_reason(state: AppState) -> None:
+    state.protection = "unprotected"
+    state.protection_reason = "spawn_failed"
+    text, tip = state.status_text()
+    assert "unprotected" in text.lower()
+    assert "spawn_failed" in tip

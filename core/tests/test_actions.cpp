@@ -471,6 +471,56 @@ KGN_TEST(drag_lock_toggles_and_reports_before_the_button_moves) {
     KGN_CHECK(!dispatcher.buttonDown(MouseButton::Left));
 }
 
+KGN_TEST(drag_lock_refuses_to_engage_when_not_allowed) {
+    Dispatcher dispatcher;
+    EffectBuffer effects;
+    dispatcher.setBindings({{key("KeyG"), dragLock(MouseButton::Left)}}, effects);
+    dispatcher.setDragLockAllowed(false);
+
+    effects.clear();
+    dispatcher.onDecision(run(key("KeyG")), t0(), effects);
+    for (const Effect& effect : effects) {
+        KGN_CHECK(effect.kind != Effect::Kind::DragLock);
+        KGN_CHECK(effect.kind != Effect::Kind::Button);
+    }
+    KGN_CHECK(!dispatcher.dragLockActive(MouseButton::Left));
+    KGN_CHECK(!dispatcher.buttonDown(MouseButton::Left));
+    KGN_CHECK_EQ(dispatcher.takeDragLockRefusals(), std::uint32_t{1});
+    KGN_CHECK_EQ(dispatcher.takeDragLockRefusals(), std::uint32_t{0});
+}
+
+KGN_TEST(an_engaged_drag_lock_can_still_be_released_when_not_allowed) {
+    Dispatcher dispatcher;
+    EffectBuffer effects;
+    dispatcher.setBindings({{key("KeyG"), dragLock(MouseButton::Left)}}, effects);
+    dispatcher.onDecision(run(key("KeyG")), t0(), effects);
+    KGN_CHECK(dispatcher.dragLockActive(MouseButton::Left));
+
+    dispatcher.setDragLockAllowed(false);
+    effects.clear();
+    dispatcher.onDecision(run(key("KeyG")), at(60), effects);
+    KGN_CHECK_EQ(effects.size(), std::size_t{2});
+    KGN_CHECK(effects[0].kind == Effect::Kind::DragLock);
+    KGN_CHECK(!effects[0].down);
+    KGN_CHECK(effects[1].kind == Effect::Kind::Button);
+    KGN_CHECK(effects[1].button == MouseButton::Left);
+    KGN_CHECK(!effects[1].down);
+    KGN_CHECK_EQ(dispatcher.takeDragLockRefusals(), std::uint32_t{0});
+}
+
+KGN_TEST(disallowing_drag_lock_leaves_an_engaged_lock_held) {
+    Dispatcher dispatcher;
+    EffectBuffer effects;
+    dispatcher.setBindings({{key("KeyG"), dragLock(MouseButton::Left)}}, effects);
+    dispatcher.onDecision(run(key("KeyG")), t0(), effects);
+
+    effects.clear();
+    dispatcher.setDragLockAllowed(false);
+    KGN_CHECK(effects.empty());
+    KGN_CHECK(dispatcher.dragLockActive(MouseButton::Left));
+    KGN_CHECK(dispatcher.buttonDown(MouseButton::Left));
+}
+
 KGN_TEST(a_click_over_a_drag_lock_does_not_release_the_drag) {
     // The button is down because of the lock; a click on the same button that
     // comes and goes must not lift it.

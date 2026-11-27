@@ -76,10 +76,21 @@ void SendInputOutput::button(MouseButton button, bool down) {
     INPUT input{};
     input.type = INPUT_MOUSE;
     input.mi.dwFlags = buttonFlag(button, down);
+    // Write-ahead: the intent is recorded BEFORE the OS can see the event, so a
+    // crash between the two leaves the guardian a record to act on.
+    const SlotState prior = journal_ ? journal_->slot(button) : SlotState::UP;
+    if (journal_) {
+        journal_->setSlot(button, down ? SlotState::DOWN_INTENT
+                                       : SlotState::UP_INTENT);
+    }
     if (dispatch(input)) {
         heldButtons_[index] = down;
+        if (journal_) {
+            journal_->setSlot(button, down ? SlotState::DOWN : SlotState::UP);
+        }
         return;
     }
+    if (journal_) journal_->setSlot(button, prior);
     // A press the OS refused is not held, and a release it refused has NOT
     // released anything -- so the record stays, and releaseAll() keeps a
     // button it can still try to lift.
@@ -174,6 +185,34 @@ Capabilities SendInputOutput::capabilities() const {
     Capabilities capabilities;
     capabilities.canWarpAbsolute = true;
     return capabilities;
+}
+
+void SendInputOutput::adoptGuardian(std::unique_ptr<ObligationJournal> journal,
+                                    std::unique_ptr<GuardianSupervisor> supervisor) {
+    supervisor_.reset();
+    ownedJournal_ = std::move(journal);
+    supervisor_ = std::move(supervisor);
+    setJournal(ownedJournal_.get());
+}
+
+ProtectionStatus SendInputOutput::protection() {
+    if (!supervisor_) return fallback_;
+    return supervisor_->poll(std::chrono::steady_clock::now());
+}
+
+void SendInputOutput::markCleanExit() {
+    // CLEAN_EXIT tells the guardian there is nothing to lift. While a button
+    // is still held -- its release was refused, so its slot is DOWN again --
+    // that would be false, and the guardian is the last thing that can lift
+    // it. Leave the mark off and let it act.
+    for (const bool held : heldButtons_) {
+        if (held) return;
+    }
+    if (supervisor_) {
+        supervisor_->markCleanExit();
+    } else if (ownedJournal_) {
+        ownedJournal_->markCleanExit();
+    }
 }
 
 }  // namespace kgn::win

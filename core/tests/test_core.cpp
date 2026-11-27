@@ -250,6 +250,14 @@ public:
         ++releaseAllCalls;
         if (clock) releaseAllOrder = ++(*clock);
     }
+    int markCleanExitCalls = 0;
+    int markCleanExitOrder = 0;
+    void markCleanExit() override {
+        ++markCleanExitCalls;
+        if (clock) markCleanExitOrder = ++(*clock);
+    }
+    kgn::ProtectionStatus status;
+    kgn::ProtectionStatus protection() override { return status; }
     std::chrono::milliseconds doubleClickInterval() const override {
         return std::chrono::milliseconds(50);
     }
@@ -809,6 +817,27 @@ KGN_TEST(shutdown_releases_everything_even_when_the_engine_owner_never_answers) 
     KGN_CHECK(recordedOutput->releaseAllOrder > recordedInput->stopOrder);
 }
 
+KGN_TEST(stop_marks_a_clean_exit_once_and_only_after_releasing_everything) {
+    // The guardian treats CLEAN_EXIT as "nothing left to lift", so the mark
+    // must come after the last release, never before.
+    int clock = 0;
+    auto output = std::make_unique<RecordingOutput>();
+    RecordingOutput* recorded = output.get();
+    recorded->clock = &clock;
+    kgn::Backends backends;
+    backends.output = std::move(output);
+    {
+        Fixture fixture("clean-exit", std::move(backends));
+        KGN_CHECK(fixture.core.start().ok());
+        fixture.core.step(kgn::Clock::now());
+        KGN_CHECK_EQ(recorded->markCleanExitCalls, 0);
+        fixture.core.stop("test finished");
+        KGN_CHECK_EQ(recorded->markCleanExitCalls, 1);
+        KGN_CHECK(recorded->releaseAllOrder > 0);
+        KGN_CHECK(recorded->markCleanExitOrder > recorded->releaseAllOrder);
+    }
+}
+
 KGN_TEST(a_setting_change_the_engine_never_applied_is_refused_not_reported_ok) {
     // P6 in the reply path: a core that says "applied" for a change the engine
     // never saw is worse than one that refuses.
@@ -1225,6 +1254,177 @@ KGN_TEST(leaving_the_layer_lifts_a_drag_lock_without_another_key_press) {
     core.stop("test finished");
     removeEndpoint(address);
     std::remove(bindingsPath.c_str());
+}
+
+// A core with a drag-lock binding on KeyG, a recording output, and one client.
+struct ProtectionFixture {
+    std::string bindingsPath;
+    RecordingOutput* output = nullptr;
+    std::unique_ptr<kgn::Core> core;
+    std::string address;
+    RawClient client;
+    std::vector<Json> greeting;
+
+    explicit ProtectionFixture(const char* suffix) {
+        bindingsPath = std::string("kgn-test-protection-") + suffix + ".json";
+        {
+            std::ofstream file(bindingsPath, std::ios::binary | std::ios::trunc);
+            file << R"({"schema":"keygnosys/bindings/2","id":"p","name":"P",)"
+                    R"("bindings":{"KeyG":{"action":"button.drag_lock",)"
+                    R"("params":{"button":"left"}}}})";
+        }
+        auto out = std::make_unique<RecordingOutput>();
+        output = out.get();
+        kgn::Backends backends;
+        backends.output = std::move(out);
+        address = uniqueEndpoint(suffix);
+        kgn::CoreOptions opts = Fixture::options(address);
+        opts.bindingsFile = bindingsPath;
+        core = std::make_unique<kgn::Core>(opts, std::move(backends));
+    }
+
+    bool open() {
+        if (!core->start().ok()) return false;
+        if (!client.connect(address)) return false;
+        greeting = drainMessages(client, *core);
+        return true;
+    }
+
+    std::vector<Json> press() {
+        kgn::WorkItem item{};
+        item.kind = kgn::WorkItem::Kind::RunAction;
+        item.code = kgn::KeyCode::fromString("KeyG").id();
+        core->pushWorkForTests(item);
+        core->step(kgn::Clock::now());
+        return drainMessages(client, *core);
+    }
+
+    std::vector<Json> step() {
+        core->step(kgn::Clock::now());
+        return drainMessages(client, *core);
+    }
+
+    ~ProtectionFixture() {
+        client.close();
+        core->stop("test finished");
+        removeEndpoint(address);
+        std::remove(bindingsPath.c_str());
+    }
+};
+
+int countDiagnostics(const std::vector<Json>& messages, const char* code) {
+    int count = 0;
+    for (const Json& message : messages) {
+        if (message["n"].asString() == "diagnostic" &&
+            message["d"]["code"].asString() == code) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+KGN_TEST(a_build_without_a_guardian_reports_not_applicable) {
+    ProtectionFixture f("protna");
+    KGN_CHECK(f.open());
+
+    bool limitation = false;
+    for (const Json& message : f.greeting) {
+        if (message["n"].asString() != "hello") continue;
+        const Json& list = message["d"]["limitations"];
+        for (std::size_t i = 0; i < list.size(); ++i) {
+            if (list.at(i).asString().find("Forced termination") != std::string::npos) {
+                limitation = true;
+            }
+        }
+    }
+    KGN_CHECK(limitation);
+
+    f.client.send(R"({"v":1,"t":"command","n":"get_state","id":"s","d":{}})" "\n");
+    Json state;
+    for (const Json& message : drainMessages(f.client, *f.core)) {
+        if (message["t"].asString() == "reply") state = message["d"];
+    }
+    KGN_CHECK_EQ(state["protection"].asString(), std::string("not_applicable"));
+    KGN_CHECK_EQ(state["protection_reason"].asString(), std::string(""));
+
+    const std::vector<Json> after = f.press();
+    KGN_CHECK_EQ(countEvents(after, "drag_lock"), 1);
+    KGN_CHECK_EQ(countDiagnostics(after, "button.drag_lock_refused"), 0);
+}
+
+KGN_TEST(an_unprotected_backend_gates_drag_lock_and_says_so) {
+    ProtectionFixture f("protun");
+    KGN_CHECK(f.open());
+
+    f.output->status = {kgn::Protection::Unprotected, "guardian_lost"};
+    const std::vector<Json> stepped = f.step();
+    KGN_CHECK_EQ(countDiagnostics(stepped, "output.unprotected"), 1);
+    bool messageNamesReason = false;
+    bool modeSaysUnprotected = false;
+    for (const Json& message : stepped) {
+        if (message["n"].asString() == "diagnostic" &&
+            message["d"]["code"].asString() == "output.unprotected" &&
+            message["d"]["message"].asString().find("guardian_lost") !=
+                std::string::npos) {
+            messageNamesReason = true;
+        }
+        if (message["n"].asString() == "mode" &&
+            message["d"]["protection"].asString() == "unprotected" &&
+            message["d"]["protection_reason"].asString() == "guardian_lost") {
+            modeSaysUnprotected = true;
+        }
+    }
+    KGN_CHECK(messageNamesReason);
+    KGN_CHECK(modeSaysUnprotected);
+
+    const std::vector<Json> after = f.press();
+    KGN_CHECK_EQ(countDiagnostics(after, "button.drag_lock_refused"), 1);
+    KGN_CHECK_EQ(countEvents(after, "drag_lock"), 0);
+    KGN_CHECK(f.output->buttons.empty());
+}
+
+KGN_TEST(a_backend_unprotected_at_start_says_so_in_hello_and_gates_at_once) {
+    ProtectionFixture f("protst");
+    // Unprotected before the core ever starts, as after a failed guardian spawn.
+    f.output->status = {kgn::Protection::Unprotected, "spawn_failed"};
+    KGN_CHECK(f.open());
+
+    bool limitation = false;
+    for (const Json& message : f.greeting) {
+        if (message["n"].asString() != "hello") continue;
+        const Json& list = message["d"]["limitations"];
+        for (std::size_t i = 0; i < list.size(); ++i) {
+            if (list.at(i).asString().rfind(
+                    "Crash-release guardian unavailable (spawn_failed):", 0) == 0) {
+                limitation = true;
+            }
+        }
+    }
+    KGN_CHECK(limitation);
+    // The first look is the hello's: no transition note follows it.
+    KGN_CHECK_EQ(countDiagnostics(f.greeting, "output.unprotected"), 0);
+
+    // The very first tick refuses the lock.
+    const std::vector<Json> after = f.press();
+    KGN_CHECK_EQ(countDiagnostics(after, "button.drag_lock_refused"), 1);
+    KGN_CHECK_EQ(countDiagnostics(after, "output.unprotected"), 0);
+    KGN_CHECK_EQ(countEvents(after, "drag_lock"), 0);
+    KGN_CHECK(f.output->buttons.empty());
+}
+
+KGN_TEST(returning_to_protected_lifts_the_gate) {
+    ProtectionFixture f("protre");
+    KGN_CHECK(f.open());
+
+    f.output->status = {kgn::Protection::Unprotected, "guardian_lost"};
+    f.step();
+    f.output->status = {kgn::Protection::Protected, ""};
+    const std::vector<Json> stepped = f.step();
+    KGN_CHECK_EQ(countDiagnostics(stepped, "output.protected"), 1);
+
+    const std::vector<Json> after = f.press();
+    KGN_CHECK_EQ(countEvents(after, "drag_lock"), 1);
+    KGN_CHECK_EQ(countDiagnostics(after, "button.drag_lock_refused"), 0);
 }
 
 KGN_TEST(a_search_path_that_does_not_exist_is_a_miss_not_an_empty_document) {

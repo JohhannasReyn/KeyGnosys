@@ -262,7 +262,9 @@ class KeyboardView(QWidget):
         plate = QRectF((self.width() - w) / 2, (self.height() - h) / 2, w, h)
         painter.setFont(font)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 190))
+        # A refused drag lock turns the standing plate red for the flash.
+        flashing = self._state.banner_flashing()
+        painter.setBrush(QColor(200, 30, 30, 235) if flashing else QColor(0, 0, 0, 190))
         painter.drawRoundedRect(plate, h * 0.25, h * 0.25)
         painter.setPen(QColor(255, 255, 255))
         painter.drawText(plate, Qt.AlignCenter, text)

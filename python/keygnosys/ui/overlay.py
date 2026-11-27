@@ -14,9 +14,10 @@ from .. import paths
 from ..coreclient.base import CoreClient
 from ..documents import Registry
 from ..settings import Settings
-from ..state import AppState
+from ..state import NOTICE_S, PROTECTION_FLASH_S, AppState
 from .control_bar import ControlBar
 from .keyboard_view import KeyboardView
+from .notice_tray import NoticeTray
 from .platform import clickthrough
 from .theme import ResolvedTheme, system_is_dark
 
@@ -60,6 +61,7 @@ class Overlay:
 
         self.window = KeyboardWindow(self.state)
         self.bar = ControlBar()
+        self.tray = NoticeTray()
 
         self._apply_documents()
         self._populate_bar()
@@ -157,6 +159,8 @@ class Overlay:
         self.client.keyEvent.connect(self._on_key)
         self.client.modeChanged.connect(self._on_mode)
         self.client.inertChanged.connect(self._on_inert)
+        self.client.protectionChanged.connect(self._on_protection)
+        self.client.diagnostic.connect(self._on_diagnostic)
         self.client.focusChanged.connect(self._on_focus)
         self.client.windowsChanged.connect(self._on_windows)
         self.client.overlayToggleRequested.connect(self._on_hide)
@@ -184,6 +188,23 @@ class Overlay:
         self._update_status()
         self.window.view.update()
 
+    def _on_protection(self, protection: str, reason: str) -> None:
+        self.state.protection = protection
+        self.state.protection_reason = reason
+        self._update_status()
+        self.window.view.update()
+
+    def _on_diagnostic(self, payload: dict) -> None:
+        if not self.state.note_blocked(payload):
+            return
+        # Say what was blocked and why, unasked: a tooltip needs a hover,
+        # and in click-through mode a click first.
+        self.tray.show_notice(self.state.notice, self.window.frameGeometry(), NOTICE_S)
+        self.window.view.update()
+        # Nothing else may arrive to repaint, so schedule the clearing one.
+        QTimer.singleShot(int(PROTECTION_FLASH_S * 1000) + 50,
+                          self.window.view.update)
+
     def _on_focus(self, payload: dict) -> None:
         self.state.focus_process = payload.get("process")
         self.state.focus_wm_class = payload.get("wm_class")
@@ -207,6 +228,11 @@ class Overlay:
     def _on_disconnected(self, _reason: str) -> None:
         self.state.connected = False
         self.state.inert = False
+        self.state.protection = "not_applicable"
+        self.state.protection_reason = ""
+        self.state.flash_until = 0.0
+        self.state.notice_until = 0.0
+        self.tray.hide()
         self.state.release_all()
         self.window.view.update()
         self._update_status()
@@ -267,6 +293,7 @@ class Overlay:
         self.bar.move(top_left)
         self.window.move(top_left.x(),
                          top_left.y() + self.bar.height() + DOCK_GAP)
+        self.tray.dock_under(self.window.frameGeometry())
         self._save_soon()
 
     # -- lifecycle --------------------------------------------------------
@@ -306,6 +333,7 @@ class Overlay:
         self.bar.move(top_left)
         self.window.move(top_left.x(),
                          top_left.y() + self.bar.height() + DOCK_GAP)
+        self.tray.dock_under(self.window.frameGeometry())
 
     def _save_soon(self) -> None:
         """Debounce writes so dragging does not hammer the disk."""

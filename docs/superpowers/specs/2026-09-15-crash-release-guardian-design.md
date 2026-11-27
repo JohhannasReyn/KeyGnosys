@@ -1,8 +1,169 @@
-# Crash-release guardian — production design (draft for review)
+# Crash-release guardian — production design
 
-**Status:** design only. No guardian code exists outside the throwaway E6 spike.
-No SPEC, P7 wording, launcher contract or production behaviour is changed by
-this document. Implementation waits for review **and** for finding O-4 (§4).
+**Status:** implemented. Drafted 2026-09-15; the operator's decisions were
+recorded on 2026-11-25 (build it before M3 closes, approach 1, behaviour B while
+unprotected). Built under
+[`../plans/2026-11-25-crash-release-guardian.md`](../plans/2026-11-25-crash-release-guardian.md).
+Where this document and the code differ, SPEC §8.3.1 describes what was built.
+
+## Decisions of 2026-11-25
+
+**Intent.** P7 promises that the core releases everything it holds "on every
+exit path — including crash". Row 10.2 shows the promise broken for forced
+termination. The operator chose to keep the promise and make the code meet it,
+rather than narrow P7, and to do it before M3 is promoted. **Success:** row 10.2
+passes live, and the §12.3 matrix passes.
+
+**Goals.**
+
+- A synthesized mouse button held by a core that is forcibly terminated is
+  lifted within the retry window.
+- Clean exits, and buttons the core never held, are left alone.
+- The core never claims protection it lacks (P6).
+
+**Non-goals.**
+
+- Keys. The grace window was removed on 2026-11-24, so every synthesized
+  key-down now mirrors a physically held key (§1).
+- Logoff and shutdown.
+- Linux.
+- O-4.
+
+**Anti-goals.**
+
+- A guardian that sends anything but a button Up.
+- A guardian that acts for any core but its own.
+- A guardian that lifts a button the core did not hold, on any exit.
+
+**Approaches considered.**
+
+1. **Guardian with an obligation journal. Chosen.** The core write-ahead
+   journals each button transition in shared memory (§5). On core death the
+   guardian lifts only journaled buttons that Windows also reports down (§6).
+   - **For it:** it is exact, the hardest race was already proven by E6, and
+     every death point is designed (§7).
+   - **Costs:** the journal, the write order, and identity checks.
+2. **Stateless guardian.** On core death, lift every mouse button Windows
+   reports down. **Rejected:** it cannot tell a physical hold from a synthesized
+   one. It would interrupt the user's own held button whenever the core exits,
+   clean exits included unless it guesses from exit codes, and it never knows
+   what the core actually owned.
+3. **Narrow P7 to observable exits and defer.** **Rejected** by the operator.
+   It is recorded here only because it was the recommended alternative.
+
+**Behaviour while unprotected (§8): option B.** While unprotected,
+`button.drag_lock` refuses to engage and emits a diagnostic. Momentary clicks
+and click-and-hold keep working.
+
+**Resolved open questions (§13).** Each item marked *my call* is the designer's
+decision. The operator can overturn any of them at review.
+
+- **O-4: not a dependency.** The guardian's only trigger is the death of its
+  core instance (§10), so it is independent of what a client disconnect means.
+  O-4 stays open and untouched.
+- **Spawner: the core** (§3.1). The launcher is unbuilt, and the core is present
+  on every start path. *My call.*
+- **Intermediate spawn process: accepted** (§3.3), conditional on measurement M1
+  below. *My call.*
+- **Numbers, as proposed.** *My call.*
+  - 2 s attach timeout;
+  - restart backoff of 1 s, 5 s and 30 s, at most 3 attempts per 10 minutes;
+  - recovery retry window of at most 1 s.
+- **Drag lock already engaged when protection is lost: it stays engaged** until
+  the user toggles it off. Only new engagements are refused. Dropping a lock
+  mid-drag would end the user's gesture with no input from them. *My call.*
+- **Measurements come first,** as the plan's opening tasks, before any
+  production code depends on them:
+  - **M1, job-object breakaway** under Windows Terminal, conhost, VS Code's
+    terminal and a detached start. Where breakaway is denied, the outcome is
+    **Unprotected `breakaway_denied`**, and the work is not blocked.
+  - **M2, `GetAsyncKeyState` under swapped buttons.** If it reports physical
+    buttons, recovery maps logical to physical through
+    `GetSystemMetrics(SM_SWAPBUTTON)`.
+
+**Answers to the builder check.** Each answer is *my call*.
+
+- **Where row 10.2 must pass.** It must pass **Protected** in every host the
+  operator actually uses: Windows Terminal, a conhost console and a detached
+  start. Spawning follows a ladder:
+  1. Try `CREATE_BREAKAWAY_FROM_JOB`.
+  2. If breakaway is denied, query the job. If it lacks
+     `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, spawn inside the job without the
+     flag. A job that does not kill on close cannot take the guardian down with
+     the core, and `taskkill /F` does not act through jobs.
+  3. Only a job that kills on close and denies breakaway yields **Unprotected
+     `breakaway_denied`**. That is an acceptable 10.2 result only in such a
+     host, and only if it is reported correctly.
+
+  A broker process is not built. For §12.3's hosts row, Protected is expected
+  in each host above, and a correct report elsewhere.
+- **Builds with no guardian** (Linux/M4, the backend-less build, tests with a
+  fake output backend). They report a third protection state,
+  **`not_applicable`**, with a `hello.limitations` line saying forced
+  termination is not covered.
+  - The option B gate applies only to `unprotected`. Drag lock keeps working on
+    those builds, as SPEC §7.2 lists it.
+  - The state lives in the platform-free core. The Windows backend is the only
+    source of `protected` and `unprotected`.
+- **Pending windows count as unprotected** (P6: never claim protection that is
+  not there). Two windows exist:
+  - **Startup attach (≤ 2 s).** The guardian is spawned and attached before the
+    hook is installed (§3.1), so no input, and so no drag lock, can arrive
+    during it. `hello` reports the state that results.
+  - **Restart gaps** (1 s / 5 s / 30 s). The state is `unprotected
+    {guardian_lost}`, and drag lock is refused until a guardian reattaches.
+    Guardian death is itself the rare event.
+  - No separate `attaching` or `restarting` state is exposed.
+- **A refused drag lock:** no `drag_lock` event, no button change, and one
+  `button.drag_lock_refused` diagnostic.
+
+**The overlay shows it.** This is the operator's decision of 2026-11-25. It
+follows their ruling on the elevated-window banner: when something stops
+working, the reason must be visible.
+
+- **While `unprotected`,** the overlay shows a short line in the same style as
+  the O-10 inert banner (`05d9697`): "Unprotected — drag lock off".
+- **A refused drag lock flashes the same message briefly.** Built as: the
+  standing plate turns red for 2 s.
+- **A refused drag lock also says what was blocked and why, unasked.** This is
+  the operator's decision of 2026-11-27, after the live check: the control-bar
+  tooltip needs a hover, and in click-through mode a click first. A red strip
+  slides out under the keyboard for 4 s: "Drag lock refused — crash-release
+  guardian unavailable (<reason>)". A new refusal restarts it rather than
+  stacking. The strip is general: other blocked actions can reuse it.
+- **`not_applicable` shows nothing.** It is the normal state of a build with no
+  guardian.
+- **§12.3's "unprotected" and "drag lock refused" rows** are judged through the
+  overlay, and also through a raw IPC observer.
+- **Exact styling, and how it combines with the inert banner, are left to the
+  builder.** The inert banner takes precedence if both apply.
+
+**What changes beyond the guardian.**
+
+- **SPEC.** The P7 text stays as it is. The SPEC gains:
+  - a guardian component section;
+  - the protection state, in `hello.limitations` and in a `get_state` field;
+  - the diagnostic codes;
+  - the drag-lock refusal.
+- **Manual matrix.** Row 10.2 keeps its expected result. The §12.3 rows are
+  added to section 10.
+- **Launcher contract.** The `LAUNCHING.md` amendments in §11 are made when the
+  guardian lands.
+
+**Left to the builder.**
+
+- The guardian's source layout and CMake target (`keygnosys-guardian.exe`, next
+  to the core).
+- Where the 60 Hz core loop (`kTickInterval`, `core.cpp`) checks whether the
+  guardian is alive.
+- The shape of the `ObligationJournal` interface given to
+  `SendInputOutput::button`, which is the only button injection point.
+- The exact names of the diagnostic codes and `get_state` fields.
+
+---
+
+*The rest of this document is the 2026-09-15 draft. Where it differs from the
+decisions above, the decisions win.*
 
 **Problem.** A synthesized mouse button held by the core stays down in Windows
 after the core is forcibly terminated — `taskkill /F`, a crash, Task Manager
@@ -35,7 +196,8 @@ Middle (`MouseButton`, `keycode.hpp`; there are no others).
 **Out of scope, deliberately:**
 
 - **Synthesized keys.** Every synthesized key-down the core produces mirrors a
-  key the user is physically holding (grace replays, re-synthesised forwards),
+  key the user is physically holding. Since the grace window was removed, the
+  only one left is a re-synthesised forward.
   and after the core dies the physical key-up reaches Windows directly and
   discharges it — observed in `EXCLUDED-attempt1-10.2`. Revisit only if a key
   obligation without a physical counterpart is introduced.

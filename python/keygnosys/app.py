@@ -126,13 +126,30 @@ def _make_client(app: QApplication, backend: str, settings: Settings):
     if backend == "ipc":
         return IpcClient()
 
-    # auto: the core is not built yet (milestones M2-M4), so this resolves to
-    # the mock today and to the core the moment it starts listening.
+    # auto: the core if it is listening now, else the mock.
+    return IpcClient() if _core_present(paths.ipc_endpoint()) else MockClient(app, mode)
+
+
+def _core_present(endpoint: str, platform: str = sys.platform,
+                  listdir=None) -> bool:
+    """Whether the core is listening on `endpoint`, without connecting to it.
+
+    On Windows os.path.exists() is always False for a named pipe, so the pipe
+    namespace is listed instead; listing does not open the pipe.
+    """
     import os
-    endpoint = paths.ipc_endpoint()
-    core_present = (sys.platform == "win32" and os.path.exists(endpoint)) or \
-                   (sys.platform != "win32" and os.path.exists(endpoint))
-    return IpcClient() if core_present else MockClient(app, mode)
+    if platform != "win32":
+        return os.path.exists(endpoint)
+    listdir = listdir or os.listdir
+    prefix = "\\\\.\\pipe\\"
+    if not endpoint.lower().startswith(prefix):
+        return False
+    try:
+        names = listdir(prefix)
+    except OSError:
+        return False
+    wanted = endpoint[len(prefix):].lower()
+    return any(name.lower() == wanted for name in names)
 
 
 if __name__ == "__main__":

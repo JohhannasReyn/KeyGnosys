@@ -6,7 +6,9 @@
 #include "kgn/platform.hpp"
 
 #include "dpi_awareness.hpp"
+#include "guardian_supervisor.hpp"
 #include "hook_input.hpp"
+#include "obligation_journal.hpp"
 #include "sendinput_output.hpp"
 #include "win32_window.hpp"
 
@@ -20,7 +22,22 @@ Backends createBackends() {
     win::enablePerMonitorDpiAwareness();
 
     Backends backends;
-    backends.output = std::make_unique<win::SendInputOutput>();
+    auto output = std::make_unique<win::SendInputOutput>();
+    // The crash-release guardian is spawned and attached BEFORE the input
+    // hook exists (spec section 3.1), so no input -- and so no button press
+    // or drag lock -- can arrive before every button is journaled. start()
+    // waits up to 2 s for the guardian to attach; whatever it reports is the
+    // state hello carries.
+    if (auto journal = win::ObligationJournal::create()) {
+        auto supervisor = std::make_unique<win::GuardianSupervisor>(
+            *journal, win::guardianPathBesideThisExecutable());
+        supervisor->start();
+        output->adoptGuardian(std::move(journal), std::move(supervisor));
+    } else {
+        // No journal, so nothing for a guardian to read: not protected.
+        output->setProtectionFallback({Protection::Unprotected, "spawn_failed"});
+    }
+    backends.output = std::move(output);
     backends.window = std::make_unique<win::Win32Window>();
     // The input backend is also the engine owner: it must answer Windows'
     // suppression question synchronously, and the answer is a function of

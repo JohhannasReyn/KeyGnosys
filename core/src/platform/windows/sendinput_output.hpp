@@ -34,10 +34,13 @@
 #include <windows.h>
 
 #include <array>
+#include <memory>
 #include <vector>
 
 #include "kgn/backends.hpp"
 #include "kgn/diagnostics.hpp"
+#include "guardian_supervisor.hpp"
+#include "obligation_journal.hpp"
 #include "scancode_keymap.hpp"
 
 namespace kgn::win {
@@ -62,6 +65,24 @@ public:
 
     void drainDiagnostics(Diagnostics& out) override;
 
+    // Non-owning; null means no journaling. Every mouse-button transition is
+    // recorded write-ahead: intent before dispatch, result after.
+    void setJournal(ObligationJournal* journal) { journal_ = journal; }
+
+    // Takes ownership of the journal and of the (already started) supervisor
+    // guarding it, and journals every button from here on. Must happen before
+    // any input can arrive: buttons already held are not back-filled.
+    void adoptGuardian(std::unique_ptr<ObligationJournal> journal,
+                       std::unique_ptr<GuardianSupervisor> supervisor);
+    // What protection() reports when there is no supervisor, e.g. the journal
+    // itself could not be created. Defaults to NotApplicable.
+    void setProtectionFallback(ProtectionStatus status) { fallback_ = std::move(status); }
+
+    // Polls the supervisor: a non-blocking liveness check plus restarts.
+    [[nodiscard]] ProtectionStatus protection() override;
+    // Sets CLEAN_EXIT only when no button is still held.
+    void markCleanExit() override;
+
 protected:
     // The single point where an INPUT reaches the OS. Virtual so a test can
     // make it fail on demand: provoking a real SendInput failure needs a
@@ -76,6 +97,12 @@ private:
     // One flag per key id: what this backend believes it is holding down.
     std::vector<bool> heldKeys_;
     std::array<bool, 3> heldButtons_{};
+    ObligationJournal* journal_ = nullptr;
+    // Declared in this order so the supervisor, which refers to the journal,
+    // is destroyed first.
+    std::unique_ptr<ObligationJournal> ownedJournal_;
+    std::unique_ptr<GuardianSupervisor> supervisor_;
+    ProtectionStatus fallback_;
 };
 
 }  // namespace kgn::win

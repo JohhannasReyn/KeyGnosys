@@ -232,7 +232,22 @@ Every row here is a P7 test. A failure leaves a key or a button held.
 | 10.6 | Hold an action key and send `set_bindings` for a document that does not bind it. | The action is released rather than left held by a binding that no longer exists. |
 | 10.7 | Hold several keys and send `release_all`. | Everything lifts. The reply is `ok`. |
 | 10.8 | Engage the layer, hold a key, and disconnect the overlay client abruptly. | The core keeps working. Nothing is stranded. |
-| 10.9 | After every row above, check the modifier state (open an on-screen keyboard). | No modifier is stuck down. |
+| 10.9 | After every row in this section, check the modifier state (open an on-screen keyboard). | No modifier is stuck down. |
+| 10.10 | Engage a left drag lock, then close the core by every clean path (`Ctrl+C` substitute, console close, Windows Terminal close). | The button is released by the core's own unwind. The guardian sends no Up, Windows reports the button up, and the guardian exits 0. |
+| 10.11 | Engage a left drag lock, then `taskkill /F` the core. | Windows reports the button up within the 1 s retry window, with no rescue click. |
+| 10.12 | As 10.11 but `taskkill /T /F`. | The guardian survives the tree kill (its parent is not the core) and releases the button. |
+| 10.13 | Start the core detached (`Start-Process -WindowStyle Hidden`), engage a drag lock, End task in Task Manager. | The button is released. |
+| 10.14 | Start the core in a console, engage a drag lock, End task in Task Manager. | The in-process O-3 path releases it. The guardian finds nothing to lift. |
+| 10.15 | Engage a drag lock, then kill the guardian only. | The core reports `unprotected` (`guardian_lost`) in a `output.unprotected` diagnostic and in `get_state`. The engaged lock stays engaged. A new engage is refused with one `button.drag_lock_refused`. The guardian is restarted (backoff 1 s, 5 s, 30 s) and `output.protected` follows. |
+| 10.16 | After 10.15, wait for the restart. | A guardian reattaches to the same journal. State returns to `protected`, and drag lock engages again. |
+| 10.17 | Start a guardian with a stale identity (core restarted) or a wrong one (bad nonce, bad pid). | The guardian refuses: exit 3, a line in `%LOCALAPPDATA%\KeyGnosys\logs\guardian.log`, and nothing injected. On the core side it surfaces as `attach_timeout` for the wrong-identity case; a stale identity (restarted core) never reaches a live core, so there is nothing to report on that side. |
+| 10.18 | Hold a left drag lock and a right click, then `taskkill /F` the core. | Each button is released exactly once. |
+| 10.19 | `kgn_guardian_fault --button left\|right\|middle --die before-down\|after-down\|held\|before-up\|after-up` for each death point (operator-run). | Per the design's §7: a button the core never held is left alone, and a held one is lifted. |
+| 10.20 | Release one of two held buttons cleanly, then kill the core. | Only the remaining button is released. |
+| 10.21 | Start the core with the guardian binary missing or breakaway denied. | `hello.limitations` begins "Crash-release guardian unavailable (<reason>):" and `protection` is `unprotected`. Drag lock is refused with `button.drag_lock_refused`; clicks and click-and-hold still work. The operator-runnable case is the missing binary (`spawn_failed`); `breakaway_denied` needs a job with `KILL_ON_JOB_CLOSE` and cannot be reproduced from ordinary hosts. |
+| 10.22 | Start the core from Windows Terminal, plain conhost, the VS Code terminal, and detached (`Start-Process -WindowStyle Hidden`). | All four are `protected`. The first three are not in a job (spawn ladder step 1; measured 2026-11-25, `docs/manual-test-logs/2026-08-30-m3-windows.md`, entry "2026-11-25 — Guardian measurements M1 and M2"). The detached host is in a job with `LimitFlags` 0x0 (breakaway refused, no `KILL_ON_JOB_CLOSE`), so it takes ladder step 2. `breakaway_denied` is reached only in a job that has `KILL_ON_JOB_CLOSE`. |
+| 10.23 | Swap the mouse buttons in Windows settings, engage a left drag lock, then `taskkill /F` the core. | The same virtual key the core sent is checked and lifted. The button ends up. |
+| 10.24 | Overlay: reproduce `unprotected` (10.15), then try to engage a drag lock. | While unprotected the overlay shows "Unprotected — drag lock off" with the reason in the tooltip. A refused toggle turns the plate red for 2 s, and a red notice strip slides out under the keyboard for 4 s reading "Drag lock refused — crash-release guardian unavailable (<reason>)", without a hover or click. The inert banner takes precedence. `protected` and `not_applicable` show nothing. |
 
 > **How to run these rows.** Both hands are busy holding keys, so every command
 > in this section is fired by
