@@ -53,6 +53,9 @@ PROTECTION_FLASH_S = 2.0
 
 UNPROTECTED_BANNER = "Unprotected — drag lock off"
 
+#: How long the blocked-action notice tray stays out.
+NOTICE_S = 4.0
+
 MODIFIER_CODES = {
     "ShiftLeft": "Shift", "ShiftRight": "Shift",
     "ControlLeft": "Control", "ControlRight": "Control",
@@ -77,6 +80,9 @@ class AppState:
     protection_reason: str = ""
     #: time.monotonic() deadline of a refused-drag-lock flash; 0 = none.
     flash_until: float = 0.0
+    #: The blocked-action notice and its time.monotonic() deadline.
+    notice: str = ""
+    notice_until: float = 0.0
     caps_lock_led: bool = False
     num_lock_led: bool = True
     scroll_lock_led: bool = False
@@ -257,6 +263,25 @@ class AppState:
         """Show the unprotected banner briefly (a drag lock was refused)."""
         now = time.monotonic() if now is None else now
         self.flash_until = now + PROTECTION_FLASH_S
+
+    def note_blocked(self, diagnostic: dict, now: float | None = None) -> bool:
+        """Turn a core diagnostic about a blocked action into the notice tray's
+        text (and the banner flash). Returns whether it was such a diagnostic.
+        A tooltip needs a hover -- and in click-through mode a click first --
+        so the reason has to come to the user unasked."""
+        if diagnostic.get("code") != "button.drag_lock_refused":
+            return False
+        now = time.monotonic() if now is None else now
+        reason = self.protection_reason or "unknown"
+        self.notice = ("Drag lock refused — crash-release guardian "
+                       f"unavailable ({reason})")
+        self.notice_until = now + NOTICE_S
+        self.flash_protection(now)
+        return True
+
+    def notice_text(self, now: float | None = None) -> str | None:
+        now = time.monotonic() if now is None else now
+        return self.notice if self.notice and now < self.notice_until else None
 
     def banner_flashing(self, now: float | None = None) -> bool:
         """True while a refused drag lock is being signalled. The unprotected

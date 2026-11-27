@@ -14,9 +14,10 @@ from .. import paths
 from ..coreclient.base import CoreClient
 from ..documents import Registry
 from ..settings import Settings
-from ..state import PROTECTION_FLASH_S, AppState
+from ..state import NOTICE_S, PROTECTION_FLASH_S, AppState
 from .control_bar import ControlBar
 from .keyboard_view import KeyboardView
+from .notice_tray import NoticeTray
 from .platform import clickthrough
 from .theme import ResolvedTheme, system_is_dark
 
@@ -60,6 +61,7 @@ class Overlay:
 
         self.window = KeyboardWindow(self.state)
         self.bar = ControlBar()
+        self.tray = NoticeTray()
 
         self._apply_documents()
         self._populate_bar()
@@ -193,9 +195,11 @@ class Overlay:
         self.window.view.update()
 
     def _on_diagnostic(self, payload: dict) -> None:
-        if payload.get("code") != "button.drag_lock_refused":
+        if not self.state.note_blocked(payload):
             return
-        self.state.flash_protection()
+        # Say what was blocked and why, unasked: a tooltip needs a hover,
+        # and in click-through mode a click first.
+        self.tray.show_notice(self.state.notice, self.window.frameGeometry(), NOTICE_S)
         self.window.view.update()
         # Nothing else may arrive to repaint, so schedule the clearing one.
         QTimer.singleShot(int(PROTECTION_FLASH_S * 1000) + 50,
@@ -227,6 +231,8 @@ class Overlay:
         self.state.protection = "not_applicable"
         self.state.protection_reason = ""
         self.state.flash_until = 0.0
+        self.state.notice_until = 0.0
+        self.tray.hide()
         self.state.release_all()
         self.window.view.update()
         self._update_status()
@@ -287,6 +293,7 @@ class Overlay:
         self.bar.move(top_left)
         self.window.move(top_left.x(),
                          top_left.y() + self.bar.height() + DOCK_GAP)
+        self.tray.dock_under(self.window.frameGeometry())
         self._save_soon()
 
     # -- lifecycle --------------------------------------------------------
@@ -326,6 +333,7 @@ class Overlay:
         self.bar.move(top_left)
         self.window.move(top_left.x(),
                          top_left.y() + self.bar.height() + DOCK_GAP)
+        self.tray.dock_under(self.window.frameGeometry())
 
     def _save_soon(self) -> None:
         """Debounce writes so dragging does not hammer the disk."""

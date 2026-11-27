@@ -123,7 +123,14 @@ working, the reason must be visible.
 
 - **While `unprotected`,** the overlay shows a short line in the same style as
   the O-10 inert banner (`05d9697`): "Unprotected — drag lock off".
-- **A refused drag lock flashes the same message briefly.**
+- **A refused drag lock flashes the same message briefly.** Built as: the
+  standing plate turns red for 2 s.
+- **A refused drag lock also says what was blocked and why, unasked.** This is
+  the operator's decision of 2026-11-27, after the live check: the control-bar
+  tooltip needs a hover, and in click-through mode a click first. A red strip
+  slides out under the keyboard for 4 s: "Drag lock refused — crash-release
+  guardian unavailable (<reason>)". A new refusal restarts it rather than
+  stacking. The strip is general: other blocked actions can reuse it.
 - **`not_applicable` shows nothing.** It is the normal state of a build with no
   guardian.
 - **§12.3's "unprotected" and "drag lock refused" rows** are judged through the

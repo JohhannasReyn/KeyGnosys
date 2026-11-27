@@ -331,6 +331,39 @@ def test_the_inert_banner_never_flashes(state: AppState) -> None:
     assert state.banner_flashing(now=100.5) is False
 
 
+def test_a_refused_drag_lock_raises_a_notice_naming_what_and_why(state: AppState) -> None:
+    from keygnosys.state import NOTICE_S
+    assert NOTICE_S == 4.0
+    state.protection = "unprotected"
+    state.protection_reason = "spawn_failed"
+    assert state.notice_text(now=100.0) is None
+    assert state.note_blocked({"code": "button.drag_lock_refused"}, now=100.0) is True
+    assert state.notice_text(now=100.0) == \
+        "Drag lock refused — crash-release guardian unavailable (spawn_failed)"
+    assert state.notice_text(now=103.9) is not None
+    assert state.notice_text(now=104.0) is None
+
+
+def test_a_new_refusal_restarts_the_notice_instead_of_stacking(state: AppState) -> None:
+    state.protection = "unprotected"
+    state.protection_reason = "guardian_lost"
+    state.note_blocked({"code": "button.drag_lock_refused"}, now=100.0)
+    state.note_blocked({"code": "button.drag_lock_refused"}, now=103.0)
+    assert state.notice_text(now=106.5) is not None
+    assert state.notice_text(now=107.0) is None
+
+
+def test_other_diagnostics_raise_no_notice(state: AppState) -> None:
+    assert state.note_blocked({"code": "output.unprotected"}, now=100.0) is False
+    assert state.notice_text(now=100.0) is None
+
+
+def test_a_refused_drag_lock_also_flashes_the_banner(state: AppState) -> None:
+    state.protection = "unprotected"
+    state.note_blocked({"code": "button.drag_lock_refused"}, now=100.0)
+    assert state.banner_flashing(now=101.0) is True
+
+
 def test_unprotected_status_names_the_reason(state: AppState) -> None:
     state.protection = "unprotected"
     state.protection_reason = "spawn_failed"
