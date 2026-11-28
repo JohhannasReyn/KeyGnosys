@@ -1105,3 +1105,16 @@ def test_drop_outside_define_mode_closes_again_on_unexpected_error(
     assert not overlay.define.active
     assert click_calls == [False, True]
     assert overlay.bar.define_button.text() == "Define"
+
+
+def test_undo_of_import_keeps_the_fork_source_template(make_overlay,
+                                                       user_root, tmp_path):
+    overlay = make_overlay()
+    Transfer(overlay)
+    enter(overlay)
+    assert not user_file(user_root).exists()
+    assert overlay.define.import_(import_file(tmp_path))
+    assert saved_doc(user_root)["metadata"]["source_template"] == "default"
+    overlay.define.undo()
+    assert overlay.define.editor.bset.metadata.source_template == "default"
+    assert saved_doc(user_root)["metadata"]["source_template"] == "default"

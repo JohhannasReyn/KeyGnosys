@@ -286,3 +286,22 @@ def test_ordinary_undo_still_keeps_live_metadata(editor):
     assert editor.undo()
     assert editor.bset.metadata.author == "live"
     assert editor.bset.metadata.revision == 9
+
+
+def test_history_is_not_fooled_by_document_fields(editor):
+    # Top-level fields a file may carry, named like the history's own marker.
+    original = editor.bset.to_dict()
+    doc = _imported().to_dict()
+    doc["with_metadata"] = True
+    doc["doc"] = {"schema": "keygnosys/bindings/2", "id": "decoy",
+                  "name": "Decoy", "bindings": {}}
+    editor.replace_all(BindingSet.from_dict(doc), {"id": "other"})
+    imported = editor.bset.to_dict()
+    assert imported["with_metadata"] is True and "doc" in imported
+    editor.assign("KeyW", Binding("overlay.toggle"))
+    assert editor.undo()
+    assert editor.bset.to_dict() == imported
+    assert editor.undo()
+    assert editor.bset.to_dict() == original
+    assert not editor.can_undo
+    assert editor.redo() and editor.bset.to_dict() == imported

@@ -54,6 +54,18 @@ class PickerEntry:
     stored: Binding | None = None
 
 
+@dataclass(frozen=True)
+class _Entry:
+    """One history step: a whole document, and whether travelling over it
+    restores the metadata too (an import) or keeps the live one (an edit).
+
+    A type, not a tagged dict: a document's own top-level fields come from a
+    file and could carry any key."""
+
+    doc: dict
+    with_metadata: bool = False
+
+
 def _label(action: str) -> str:
     prefix, _, name = action.partition(".")
     return f"{prefix} {name.replace('_', ' ')}".capitalize()
@@ -67,8 +79,8 @@ class BindingEditor:
         self._on_change = on_change
         #: Key code -> the name the user sees on the keyboard ("KeyD" -> "D").
         self.display: Callable[[str], str] = display or (lambda code: code)
-        self._undo: list[dict] = []
-        self._redo: list[dict] = []
+        self._undo: list[_Entry] = []
+        self._redo: list[_Entry] = []
 
     # -- queries ------------------------------------------------------------
 
@@ -149,21 +161,20 @@ class BindingEditor:
     def redo(self) -> bool:
         return self._travel(self._redo, self._undo)
 
-    def _travel(self, source: list[dict], sink: list[dict]) -> bool:
+    def _travel(self, source: list[_Entry], sink: list[_Entry]) -> bool:
         if not source:
             return False
         entry = source.pop()
-        with_metadata = "with_metadata" in entry
-        doc = entry["doc"] if with_metadata else entry
-        current = self.bset.to_dict()
-        sink.append({"doc": current, "with_metadata": True}
-                    if with_metadata else current)
+        sink.append(_Entry(self.bset.to_dict(), entry.with_metadata))
         metadata = self.bset.metadata
-        self.bset = BindingSet.from_dict(doc)
-        if with_metadata:
+        self.bset = BindingSet.from_dict(entry.doc)
+        if entry.with_metadata:
             # An import replaced the metadata too, so travelling over it
-            # restores it, except the revision: saves only move that forward.
+            # restores it, except what saves move forward: the revision, and
+            # a source template set when a save forked the shipped map.
             self.bset.metadata.revision = metadata.revision
+            if self.bset.metadata.source_template is None:
+                self.bset.metadata.source_template = metadata.source_template
         else:
             # Content travels; provenance does not. A save between edits
             # forked and bumped the revision, and undoing an edit must not
@@ -186,13 +197,13 @@ class BindingEditor:
         replacement.metadata.source_template = current.metadata.source_template
         replacement.metadata.extra["imported_from"] = copy.deepcopy(imported_from)
         self.bset = replacement
-        self._undo.append({"doc": snapshot, "with_metadata": True})
+        self._undo.append(_Entry(snapshot, with_metadata=True))
         self._redo.clear()
         self._on_change(self.bset)
 
     def _edit(self, mutate: Callable[[], object]) -> None:
         snapshot = self.bset.to_dict()
         mutate()
-        self._undo.append(snapshot)
+        self._undo.append(_Entry(snapshot))
         self._redo.clear()
         self._on_change(self.bset)
