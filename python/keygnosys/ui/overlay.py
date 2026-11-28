@@ -162,6 +162,8 @@ class Overlay:
         self.bar.defineToggled.connect(self.define.set_active)
         self.bar.undoRequested.connect(self.define.undo)
         self.bar.redoRequested.connect(self.define.redo)
+        self.bar.exportRequested.connect(self.define.export)
+        self.bar.importRequested.connect(self.define.import_)
         self.window.view.keyClicked.connect(self.define.on_key_clicked)
         self.window.view.bindingDropped.connect(self.define.on_binding_dropped)
 

@@ -179,6 +179,10 @@ class BindingPicker(QWidget):
         self._editor = editor
         self.refresh()
 
+    def commit_pending(self) -> None:
+        """Commit a label typed but not yet committed, as an edit."""
+        self._emit_legend()
+
     def set_selected_key(self, code: str | None) -> None:
         # A label typed but not yet committed belongs to the key it was
         # typed for; commit it before the field switches keys.

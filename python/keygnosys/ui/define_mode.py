@@ -8,14 +8,19 @@ the file on disk is the one source of truth both sides read.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QStandardPaths, QTimer
+from PySide6.QtWidgets import QFileDialog
 
-from .. import binding_store
+from .. import binding_store, bundle
 from ..binding_editor import BindingEditor
+from ..bundle import Change, ImportPlan
 from ..documents import Binding, BindingSet
+from . import transfer_dialogs
 from .binding_picker import BindingPicker, _ask
+from .control_bar import RESET_FIRST
 from .platform import clickthrough
 
 if TYPE_CHECKING:
@@ -29,6 +34,12 @@ MOCK_NOTICE = "Saved — changes apply when the core is running."
 #: The same words when the real core is down (design 6.4.6).
 OFFLINE_NOTICE = MOCK_NOTICE
 SWITCHED_NOTICE = "The core switched to bindings '{id}'; define mode closed."
+IMPORTED_BACKUP_NOTICE = ("Imported '{name}'. Your previous map is saved as "
+                          "{backup}.")
+IMPORTED_NOTICE = ("Imported '{name}'. Undo or Reset to shipped brings back "
+                   "the previous map.")
+EXPORTED_NOTICE = "Exported to {file}."
+FILE_FILTER = "KeyGnosys files (*.keygnosys.json);;All JSON (*.json)"
 
 
 class DefineMode:
@@ -39,6 +50,16 @@ class DefineMode:
         self.editor: BindingEditor | None = None
         #: Asked before Reset; tests replace it so no dialog ever opens.
         self.confirm: Callable[[str], bool] = _ask
+        # Export and import dialogs, replaced the same way in tests.
+        self.choose_open_path: Callable[[], Path | None] = self._choose_open_path
+        #: Its argument is the suggested file name.
+        self.choose_save_path: Callable[[str], Path | None] = self._choose_save_path
+        self.ask_import: Callable[[ImportPlan, list[Change]], bool] = (
+            lambda plan, changes: transfer_dialogs.ask_import(
+                plan, changes, self._o.window))
+        self.ask_export: Callable[[str, int, list[str]], str | None] = (
+            lambda name, count, warnings: transfer_dialogs.ask_export(
+                name, count, warnings, self._o.window))
         self.picker = BindingPicker(confirm=lambda q: self.confirm(q))
         self._armed: Binding | None = None
         self._click_through_was = True
@@ -243,6 +264,107 @@ class DefineMode:
         self._reload_timer.stop()
         self._reload_now()
 
+    # -- export and import ------------------------------------------------
+
+    @property
+    def can_transfer(self) -> bool:
+        """False while there is no editor: the user copy is broken (or
+        unreadable), so there is no map to export and nothing may replace
+        the file but Reset."""
+        return self.active and self.editor is not None
+
+    def export(self) -> None:
+        """Write the running map to a bundle file. Changes nothing: no save,
+        no reload, no undo entry."""
+        if not self.can_transfer:
+            self._o.show_notice(RESET_FIRST)
+            return
+        # The file should match what the user sees, typed label included.
+        self.picker.commit_pending()
+        bset = self.editor.bset
+        warnings = [
+            f'{self._display(code)}: unknown command "{spec.get("action")}" '
+            f"(exported unchanged)"
+            for code, spec in bset.extra_bindings.items()]
+        warnings += [
+            f'Unassigned: unknown command "{spec.get("action")}" '
+            f"(exported unchanged)"
+            for spec in bset.extra_unassigned]
+        author = self.ask_export(
+            bset.name, len(bset.bindings) + len(bset.extra_bindings), warnings)
+        if author is None:
+            return
+        path = self.choose_save_path(f"{bset.name}{bundle.EXTENSION}")
+        if path is None:
+            return
+        path = Path(path)
+        try:
+            bundle.write_bundle(path, bundle.export_bundle(bset, author))
+        except OSError as exc:
+            self._o.show_notice(f"Export failed — {exc}")
+            return
+        self._o.show_notice(EXPORTED_NOTICE.format(file=path.name))
+
+    def import_(self, path: Path | None = None) -> bool:
+        """Replace the running map with one from a file, as one undoable
+        edit. Returns whether the map was replaced."""
+        if not self.can_transfer:
+            self._o.show_notice(RESET_FIRST)
+            return False
+        if path is None:
+            path = self.choose_open_path()
+            if path is None:
+                return False
+        # A half-typed label is part of the map being replaced, so Undo of
+        # the import brings it back.
+        self.picker.commit_pending()
+        layout = self._o.state.layout
+        try:
+            plan = bundle.read_import(
+                Path(path), layout.codes() if layout is not None else None)
+        except bundle.ImportRefused as exc:
+            self._o.show_notice(f"Not imported — {'; '.join(exc.reasons)}")
+            return False
+        # Ruling R1: the origin's id, before anything rewrites it.
+        imported_from = {"id": plan.bset.id, "name": plan.name,
+                         "author": plan.author, "exported": plan.exported}
+        changes = bundle.diff(
+            self.editor.bset, plan.bset, display=self._display,
+            order=[k.code for k in layout.keys] if layout is not None else ())
+        accepted = self.ask_import(plan, changes)
+        if not changes or not accepted:
+            # An identical map: the preview said so, and nothing is done.
+            return False
+        try:
+            backup = binding_store.backup(self.bindings_id)
+        except binding_store.StoreError as exc:
+            self._o.show_notice(f"Not imported — {exc}")
+            return False
+        # An empty map author is filled from the bundle header.
+        plan.bset.metadata.author = plan.author
+        # Saves and schedules the reload through _on_binding_edit.
+        self.editor.replace_all(plan.bset, imported_from)
+        self._o.show_notice(
+            IMPORTED_BACKUP_NOTICE.format(name=plan.name, backup=backup.name)
+            if backup is not None else IMPORTED_NOTICE.format(name=plan.name))
+        return True
+
+    def _choose_open_path(self) -> Path | None:
+        chosen, _ = QFileDialog.getOpenFileName(
+            self._o.window, "Import bindings", _documents_dir(), FILE_FILTER)
+        return Path(chosen) if chosen else None
+
+    def _choose_save_path(self, suggested: str) -> Path | None:
+        chosen, _ = QFileDialog.getSaveFileName(
+            self._o.window, "Export bindings",
+            str(Path(_documents_dir()) / suggested), FILE_FILTER)
+        if not chosen:
+            return None
+        path = Path(chosen)
+        if not path.name.endswith(".json"):
+            path = path.with_name(path.name + bundle.EXTENSION)
+        return path
+
     # -- saving and reloading ---------------------------------------------
 
     def _on_binding_edit(self, bset: BindingSet) -> None:
@@ -317,4 +439,9 @@ class DefineMode:
         e = self.editor
         self._o.bar.set_define_mode(self.active,
                                     bool(e and e.can_undo),
-                                    bool(e and e.can_redo))
+                                    bool(e and e.can_redo),
+                                    self.can_transfer)
+
+
+def _documents_dir() -> str:
+    return QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
