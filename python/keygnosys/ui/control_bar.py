@@ -15,6 +15,11 @@ from PySide6.QtWidgets import (
 
 from .theme import ResolvedTheme
 
+EXPORT_TIP = "Save this map to a file to share or keep"
+IMPORT_TIP = "Replace this map with one from a file (Undo brings it back)"
+#: Also the notice when an import is refused for a broken user copy.
+RESET_FIRST = "Reset to shipped first."
+
 
 class ControlBar(QWidget):
     """Docked toolbar for the overlay."""
@@ -30,6 +35,8 @@ class ControlBar(QWidget):
     defineToggled = Signal(bool)
     undoRequested = Signal()
     redoRequested = Signal()
+    exportRequested = Signal()
+    importRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -84,7 +91,8 @@ class ControlBar(QWidget):
         root.addWidget(self._pin)
 
         self._click = _toggle("👆", "Click through the keyboard to the window "
-                                    "beneath it")
+                                    "beneath it. Turn it off to drop a file "
+                                    "on the keyboard to import it.")
         self._click.toggled.connect(self.clickThroughToggled)
         root.addWidget(self._click)
 
@@ -100,6 +108,14 @@ class ControlBar(QWidget):
         self.redo_button = _button("↷", "Redo")
         self.redo_button.clicked.connect(self.redoRequested)
         root.addWidget(self.redo_button)
+
+        self.export_button = _button("Export", EXPORT_TIP)
+        self.export_button.clicked.connect(self.exportRequested)
+        root.addWidget(self.export_button)
+
+        self.import_button = _button("Import", IMPORT_TIP)
+        self.import_button.clicked.connect(self.importRequested)
+        root.addWidget(self.import_button)
 
         self._hide = _button("▁", "Hide the keyboard (the bar stays)")
         self._hide.clicked.connect(self.hideRequested)
@@ -156,17 +172,28 @@ class ControlBar(QWidget):
         self._click.setToolTip(reason)
         self._click.blockSignals(False)
 
-    def set_define_mode(self, on: bool, can_undo: bool, can_redo: bool) -> None:
+    def set_define_mode(self, on: bool, can_undo: bool, can_redo: bool,
+                        can_transfer: bool = True,
+                        refusal: str = RESET_FIRST) -> None:
         """Show define mode's controls. There is no separate Done button:
-        while define mode is on, the Define toggle reads "Done"."""
+        while define mode is on, the Define toggle reads "Done".
+
+        `can_transfer` is False while the user copy is broken: there is no
+        map to export, and nothing may be written over the broken file.
+        `refusal` is then the buttons' tooltip."""
         self.define_button.blockSignals(True)
         self.define_button.setChecked(on)
         self.define_button.blockSignals(False)
         self.define_button.setText("Done" if on else "Define")
         for button, enabled in ((self.undo_button, can_undo),
-                                (self.redo_button, can_redo)):
+                                (self.redo_button, can_redo),
+                                (self.export_button, can_transfer),
+                                (self.import_button, can_transfer)):
             button.setVisible(on)
             button.setEnabled(enabled)
+        for button, tip in ((self.export_button, EXPORT_TIP),
+                            (self.import_button, IMPORT_TIP)):
+            button.setToolTip(tip if can_transfer else refusal)
         self.define_indicator.setVisible(on)
         self.adjustSize()
 

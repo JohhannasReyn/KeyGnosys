@@ -19,8 +19,14 @@ def _flat_key(code: str = "KeyA", x: float = 0) -> dict:
 
 
 @pytest.fixture(scope="module")
-def registry() -> Registry:
-    return Registry().load_all()
+def registry(tmp_path_factory) -> Registry:
+    # Bundled content only: the user's own config directory (which may hold
+    # an imported map with commands this build doesn't know) is not under test.
+    from keygnosys import paths
+    empty = tmp_path_factory.mktemp("no-user-config")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(paths, "user_root", lambda: empty)
+        return Registry().load_all()
 
 
 # -- bundled content --------------------------------------------------------
@@ -249,3 +255,28 @@ def test_a_moved_aside_broken_copy_is_never_loaded(tmp_path) -> None:
 
     assert reg.bindings == {}
     assert list(reg.diagnostics) == []
+
+
+def test_registry_skips_backup_files(tmp_path) -> None:
+    def doc(name):
+        return json.dumps({"schema": "keygnosys/bindings/2", "id": "default",
+                           "name": name, "bindings": {}})
+    (tmp_path / "default.json").write_text(doc("real"), encoding="utf-8")
+    (tmp_path / "default.backup-1795842643.json").write_text(doc("b1"), encoding="utf-8")
+    (tmp_path / "default.backup-1795842643-2.json").write_text(doc("b2"), encoding="utf-8")
+    reg = Registry()
+    reg._load_dir("bindings", tmp_path)
+    assert reg.bindings["default"].name == "real"
+    assert list(reg.diagnostics) == []
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("a.broken-1.json", True), ("a.backup-1.json", True),
+    ("a.backup-1-2.json", True), ("a.json", False),
+    ("a.backup-x.json", False), ("backup-1.json", False),
+    ("a.backup-1-.json", False),
+])
+def test_is_set_aside_names(name, expected) -> None:
+    from pathlib import Path
+    from keygnosys.documents import is_set_aside
+    assert is_set_aside(Path(name)) is expected

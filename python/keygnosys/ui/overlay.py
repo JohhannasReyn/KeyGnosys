@@ -162,8 +162,11 @@ class Overlay:
         self.bar.defineToggled.connect(self.define.set_active)
         self.bar.undoRequested.connect(self.define.undo)
         self.bar.redoRequested.connect(self.define.redo)
+        self.bar.exportRequested.connect(self.define.export)
+        self.bar.importRequested.connect(self.define.import_)
         self.window.view.keyClicked.connect(self.define.on_key_clicked)
         self.window.view.bindingDropped.connect(self.define.on_binding_dropped)
+        self.window.view.fileDropped.connect(self.define.on_file_dropped)
 
     def _connect_client(self) -> None:
         self.client.keyEvent.connect(self._on_key)
@@ -218,9 +221,11 @@ class Overlay:
         # and in click-through mode a click first.
         self.tray.show_notice(self.state.notice, self.window.frameGeometry(), NOTICE_S)
 
-    def show_notice(self, text: str) -> None:
-        """Show `text` in the notice tray under the keyboard."""
-        self.tray.show_notice(text, self.window.frameGeometry(), NOTICE_S)
+    def show_notice(self, text: str, level: str = "error") -> None:
+        """Show `text` in the notice tray under the keyboard, coloured by
+        `level`: "success", "warning" or "error"."""
+        self.tray.show_notice(text, self.window.frameGeometry(), NOTICE_S,
+                              level)
 
     def reload_binding_set(self, bindings_id: str | None) -> None:
         """Redraw from the map the core now runs: the user copy if it loads,

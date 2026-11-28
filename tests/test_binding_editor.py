@@ -231,3 +231,77 @@ def test_set_params_keeps_the_legend(editor):
     editor.set_params("Digit1", {"index": 4})
     bound = editor.bset.bindings["Digit1"]
     assert bound.params == {"index": 4} and bound.legend == "Mail"
+
+
+# -- replace_all -------------------------------------------------------------
+
+def _imported():
+    return BindingSet.from_dict({
+        "schema": "keygnosys/bindings/2", "id": "other", "name": "Theirs",
+        "metadata": {"author": "Sam", "revision": 9, "y": 2},
+        "bindings": {FREE: {"action": "overlay.toggle", "params": {}}},
+    })
+
+
+def test_replace_all_sets_import_metadata(editor, calls):
+    editor.bset.metadata.revision = 4
+    editor.bset.metadata.source_template = "default"
+    new = _imported()
+    before = new.to_dict()
+    info = {"id": "other", "name": "Theirs", "author": "Sam", "exported": "t"}
+    editor.replace_all(new, info)
+    meta = editor.bset.metadata
+    assert editor.bset.id == "default"
+    assert meta.revision == 4
+    assert meta.source_template == "default"
+    assert meta.author == "Sam"
+    assert meta.extra["y"] == 2
+    assert meta.extra["imported_from"] == info
+    assert FREE in editor.bset.bindings
+    assert len(calls) == 1
+    assert new.to_dict() == before
+
+
+def test_undo_of_import_restores_metadata_but_not_revision(editor):
+    editor.bset.metadata.revision = 4
+    editor.bset.metadata.source_template = "default"
+    original = editor.bset.to_dict()
+    editor.replace_all(_imported(), {"id": "other"})
+    editor.bset.metadata.revision = 5
+    assert editor.undo()
+    expected = dict(original, metadata=dict(original["metadata"], revision=5))
+    assert editor.bset.to_dict() == expected
+    assert "imported_from" not in editor.bset.metadata.extra
+    editor.bset.metadata.revision = 6
+    assert editor.redo()
+    assert editor.bset.metadata.extra["imported_from"] == {"id": "other"}
+    assert editor.bset.metadata.author == "Sam"
+    assert editor.bset.metadata.revision == 6
+
+
+def test_ordinary_undo_still_keeps_live_metadata(editor):
+    editor.assign(FREE, Binding("overlay.toggle"))
+    editor.bset.metadata.author = "live"
+    editor.bset.metadata.revision = 9
+    assert editor.undo()
+    assert editor.bset.metadata.author == "live"
+    assert editor.bset.metadata.revision == 9
+
+
+def test_history_is_not_fooled_by_document_fields(editor):
+    # Top-level fields a file may carry, named like the history's own marker.
+    original = editor.bset.to_dict()
+    doc = _imported().to_dict()
+    doc["with_metadata"] = True
+    doc["doc"] = {"schema": "keygnosys/bindings/2", "id": "decoy",
+                  "name": "Decoy", "bindings": {}}
+    editor.replace_all(BindingSet.from_dict(doc), {"id": "other"})
+    imported = editor.bset.to_dict()
+    assert imported["with_metadata"] is True and "doc" in imported
+    editor.assign("KeyW", Binding("overlay.toggle"))
+    assert editor.undo()
+    assert editor.bset.to_dict() == imported
+    assert editor.undo()
+    assert editor.bset.to_dict() == original
+    assert not editor.can_undo
+    assert editor.redo() and editor.bset.to_dict() == imported

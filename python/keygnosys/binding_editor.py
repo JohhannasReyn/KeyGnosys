@@ -8,6 +8,7 @@ history of whole-document snapshots. Every edit goes through
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -53,6 +54,18 @@ class PickerEntry:
     stored: Binding | None = None
 
 
+@dataclass(frozen=True)
+class _Entry:
+    """One history step: a whole document, and whether travelling over it
+    restores the metadata too (an import) or keeps the live one (an edit).
+
+    A type, not a tagged dict: a document's own top-level fields come from a
+    file and could carry any key."""
+
+    doc: dict
+    with_metadata: bool = False
+
+
 def _label(action: str) -> str:
     prefix, _, name = action.partition(".")
     return f"{prefix} {name.replace('_', ' ')}".capitalize()
@@ -66,8 +79,8 @@ class BindingEditor:
         self._on_change = on_change
         #: Key code -> the name the user sees on the keyboard ("KeyD" -> "D").
         self.display: Callable[[str], str] = display or (lambda code: code)
-        self._undo: list[dict] = []
-        self._redo: list[dict] = []
+        self._undo: list[_Entry] = []
+        self._redo: list[_Entry] = []
 
     # -- queries ------------------------------------------------------------
 
@@ -148,21 +161,60 @@ class BindingEditor:
     def redo(self) -> bool:
         return self._travel(self._redo, self._undo)
 
-    def _travel(self, source: list[dict], sink: list[dict]) -> bool:
+    def _travel(self, source: list[_Entry], sink: list[_Entry]) -> bool:
         if not source:
             return False
-        sink.append(self.bset.to_dict())
-        # Content travels; provenance does not. A save between edits forked
-        # and bumped the revision, and undoing an edit must not rewind that.
+        entry = source.pop()
+        sink.append(_Entry(self.bset.to_dict(), entry.with_metadata))
         metadata = self.bset.metadata
-        self.bset = BindingSet.from_dict(source.pop())
-        self.bset.metadata = metadata
+        self.bset = BindingSet.from_dict(entry.doc)
+        if entry.with_metadata:
+            # An import replaced the metadata too, so travelling over it
+            # restores it, except what saves move forward: the revision, and
+            # a source template set when a save forked the shipped map.
+            self.bset.metadata.revision = metadata.revision
+            if self.bset.metadata.source_template is None:
+                self.bset.metadata.source_template = metadata.source_template
+        else:
+            # Content travels; provenance does not. A save between edits
+            # forked and bumped the revision, and undoing an edit must not
+            # rewind that.
+            self.bset.metadata = metadata
         self._on_change(self.bset)
+        return True
+
+    def replace_all(self, new: BindingSet, imported_from: dict) -> None:
+        """Replace the whole map with `new` as one undoable step.
+
+        `new` is not modified. The result keeps this map's id, revision and
+        source template, and records `imported_from` in its metadata.
+        """
+        snapshot = self.bset.to_dict()
+        replacement = BindingSet.from_dict(new.to_dict())
+        current = self.bset
+        replacement.id = current.id
+        replacement.metadata.revision = current.metadata.revision
+        replacement.metadata.source_template = current.metadata.source_template
+        replacement.metadata.extra["imported_from"] = copy.deepcopy(imported_from)
+        self.bset = replacement
+        self._undo.append(_Entry(snapshot, with_metadata=True))
+        self._redo.clear()
+        self._on_change(self.bset)
+
+    def revert_last(self) -> bool:
+        """Drop the last step as if it never happened, without notifying.
+
+        For a step whose save failed: memory goes back to what is on disk,
+        and no redo entry is left. History cleared by that step stays
+        cleared."""
+        if not self._undo:
+            return False
+        self.bset = BindingSet.from_dict(self._undo.pop().doc)
         return True
 
     def _edit(self, mutate: Callable[[], object]) -> None:
         snapshot = self.bset.to_dict()
         mutate()
-        self._undo.append(snapshot)
+        self._undo.append(_Entry(snapshot))
         self._redo.clear()
         self._on_change(self.bset)

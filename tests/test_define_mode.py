@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import PurePosixPath, PureWindowsPath
 
 import pytest
 from PySide6.QtCore import QMimeData, QPointF, Qt
 
-from keygnosys import binding_store, paths
+from keygnosys import binding_store, bundle, paths
 from keygnosys.coreclient.base import CoreClient
-from keygnosys.documents import Binding, Registry
+from keygnosys.documents import Binding, BindingSet, Registry
 from keygnosys.settings import Settings
 from keygnosys.ui.binding_picker import MIME_TYPE
 from keygnosys.ui.overlay import Overlay
@@ -556,7 +557,7 @@ def test_an_edit_while_the_core_is_down_says_when_it_applies(make_overlay,
     enter(overlay)
     notices = []
     real = overlay.show_notice
-    overlay.show_notice = lambda text: (notices.append(text), real(text))
+    overlay.show_notice = lambda text, *level: (notices.append(text), real(text, *level))
     overlay.define.editor.assign("KeyD", Binding("button.click", RIGHT))
     overlay.define.editor.assign("KeyD", Binding("button.click", LEFT))
     assert notices == ["Saved — changes apply when the core is running."]
@@ -573,7 +574,7 @@ def test_an_edit_while_connected_shows_no_offline_notice(make_overlay):
     client.connect_core()
     enter(overlay)
     notices = []
-    overlay.show_notice = notices.append
+    overlay.show_notice = lambda text, *level: notices.append(text)
     overlay.define.editor.assign("KeyD", Binding("button.click", RIGHT))
     assert notices == []
 
@@ -622,3 +623,653 @@ def test_overlay_toggle_from_the_core_exits_define_mode(make_overlay):
     client.overlayToggleRequested.emit()
     assert not overlay.window.isVisible()
     assert not overlay.define.active
+
+
+# -- export and import ------------------------------------------------------
+
+RESET_FIRST = "Reset to shipped first"
+
+
+class Transfer:
+    """Stands in for every export and import dialog; records the calls."""
+
+    def __init__(self, overlay: Overlay, *, open_path=None, save_path=None,
+                 import_answer: bool = True,
+                 export_answer: str | None = "") -> None:
+        self.open_path = open_path
+        self.save_path = save_path
+        self.import_answer = import_answer
+        self.export_answer = export_answer
+        self.opened = 0
+        self.suggested: list[str] = []
+        self.imports: list[tuple] = []
+        self.exports: list[tuple] = []
+        d = overlay.define
+        d.choose_open_path = self._open
+        d.choose_save_path = self._save
+        d.ask_import = self._ask_import
+        d.ask_export = self._ask_export
+
+    def _open(self):
+        self.opened += 1
+        return self.open_path
+
+    def _save(self, suggested: str):
+        self.suggested.append(suggested)
+        return self.save_path
+
+    def _ask_import(self, plan, changes) -> bool:
+        self.imports.append((plan, changes))
+        return self.import_answer
+
+    def _ask_export(self, name, key_count, warnings):
+        self.exports.append((name, key_count, warnings))
+        return self.export_answer
+
+
+def import_file(tmp_path, *, name: str = "Sam's layer", author: str = "Sam",
+                code: str = "KeyD", binding: Binding | None = None):
+    """A bundle as another overlay would export it: the shipped map with one
+    key changed, under another id and name (ruling R2)."""
+    bset = BindingSet.from_dict(shipped_default())
+    bset.id = "sams"
+    bset.name = name
+    bset.metadata.author = ""
+    bset.assign(code, binding or Binding("button.click", RIGHT))
+    path = tmp_path / f"incoming{bundle.EXTENSION}"
+    bundle.write_bundle(path, bundle.export_bundle(bset, author=author))
+    return path
+
+
+def saved_doc(user_root) -> dict:
+    return json.loads(user_file(user_root).read_text("utf-8"))
+
+
+def backups(user_root) -> list:
+    return list(user_file(user_root).parent.glob("default.backup-*.json"))
+
+
+def test_buttons_visible_only_in_define_mode(make_overlay):
+    overlay = make_overlay()
+    bar = overlay.bar
+    for button in (bar.export_button, bar.import_button):
+        assert not button.isVisibleTo(bar)
+    enter(overlay)
+    for button in (bar.export_button, bar.import_button):
+        assert button.isVisibleTo(bar) and button.isEnabled()
+        assert RESET_FIRST not in button.toolTip()
+    assert overlay.define.can_transfer
+    overlay.bar.define_button.click()
+    for button in (bar.export_button, bar.import_button):
+        assert not button.isVisibleTo(bar)
+
+
+def test_buttons_disabled_while_broken_with_tooltip(make_overlay, user_root,
+                                                    tmp_path):
+    broken = user_file(user_root)
+    broken.parent.mkdir(parents=True)
+    broken.write_text("not json", encoding="utf-8")
+    overlay = make_overlay()
+    transfer = Transfer(overlay)
+    enter(overlay)
+    bar = overlay.bar
+    assert not overlay.define.can_transfer
+    for button in (bar.export_button, bar.import_button):
+        assert button.isVisibleTo(bar) and not button.isEnabled()
+        assert RESET_FIRST in button.toolTip()
+    # Called anyway (as a drop would), it refuses with the same words.
+    assert overlay.define.import_(import_file(tmp_path)) is False
+    assert overlay.tray.text() == "Reset to shipped first."
+    assert transfer.imports == []
+    assert broken.read_text("utf-8") == "not json"
+    # Reset brings them back.
+    overlay.define.picker.reset_button.click()
+    assert bar.import_button.isEnabled() and bar.export_button.isEnabled()
+    assert RESET_FIRST not in bar.import_button.toolTip()
+
+
+def test_export_writes_bundle_and_makes_no_save(make_overlay, user_root,
+                                                tmp_path, qtbot):
+    client = FakeClient()
+    overlay = make_overlay(client)
+    client.connect_core()
+    out = tmp_path / "out" / f"mine{bundle.EXTENSION}"
+    out.parent.mkdir()
+    transfer = Transfer(overlay, save_path=out, export_answer="Sam")
+    enter(overlay)
+    running = overlay.define.editor.bset
+    overlay.bar.export_button.click()
+
+    plan = bundle.read_import(out)
+    assert plan.bset.to_dict() == running.to_dict()
+    assert json.loads(out.read_text("utf-8"))["author"] == "Sam"
+    assert transfer.suggested == [f"{running.name}.keygnosys.json"]
+    name, key_count, warnings = transfer.exports[0]
+    assert name == running.name
+    assert key_count == len(running.bindings) + len(running.extra_bindings)
+    assert warnings == []
+    qtbot.wait(400)
+    assert client.reloads == 0
+    assert not user_file(user_root).exists()
+    assert not overlay.define.editor.can_undo
+    assert overlay.tray.text() == f"Exported to mine{bundle.EXTENSION}."
+
+
+def test_export_warns_about_unknown_commands(make_overlay, user_root,
+                                             tmp_path):
+    doc = shipped_default()
+    doc["bindings"]["KeyD"] = {"action": "window.snap", "params": {}}
+    write_user_doc(user_root, doc)
+    overlay = make_overlay()
+    transfer = Transfer(overlay, save_path=tmp_path / "x.keygnosys.json")
+    enter(overlay)
+    overlay.define.export()
+    assert transfer.exports[0][2] == [
+        'D: unknown command "window.snap" (exported unchanged)']
+
+
+def test_export_failure_shows_a_notice(make_overlay, tmp_path):
+    overlay = make_overlay()
+    Transfer(overlay, save_path=tmp_path / "missing" / "x.keygnosys.json")
+    enter(overlay)
+    overlay.define.export()
+    assert overlay.tray.text().startswith("Export failed — ")
+
+
+def test_export_cancelled_writes_nothing(make_overlay, user_root, tmp_path):
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    overlay = make_overlay()
+    transfer = Transfer(overlay, save_path=out_dir / "x.keygnosys.json",
+                        export_answer=None)
+    enter(overlay)
+    overlay.define.export()
+    assert transfer.suggested == []
+
+    transfer.export_answer = ""
+    transfer.save_path = None
+    overlay.define.export()
+    assert len(transfer.suggested) == 1
+    assert list(out_dir.iterdir()) == []
+    assert not user_file(user_root).exists()
+    assert not overlay.tray.text().startswith("Exported")
+
+
+def test_export_commits_pending_label_first(make_overlay, tmp_path):
+    out = tmp_path / "x.keygnosys.json"
+    overlay = make_overlay()
+    Transfer(overlay, save_path=out)
+    enter(overlay)
+    select(overlay, "KeyD")
+    overlay.define.picker.label_edit.setText("Mine")
+    overlay.define.export()
+    plan = bundle.read_import(out)
+    assert plan.bset.bindings["KeyD"].legend == "Mine"
+
+
+def test_import_replaces_saves_and_reloads_once(make_overlay, user_root,
+                                                tmp_path, qtbot):
+    path = import_file(tmp_path)
+    client = FakeClient()
+    overlay = make_overlay(client)
+    client.connect_core()
+    transfer = Transfer(overlay, open_path=path)
+    enter(overlay)
+    overlay.bar.import_button.click()
+
+    assert transfer.opened == 1
+    plan, changes = transfer.imports[0]
+    assert [c.name for c in changes] == ["D"]
+    saved = saved_doc(user_root)
+    assert saved["id"] == "default"
+    assert saved["bindings"]["KeyD"] == {"action": "button.click",
+                                         "params": RIGHT}
+    assert saved["metadata"]["imported_from"] == {
+        "id": "sams", "name": "Sam's layer", "author": "Sam",
+        "exported": plan.exported}
+    # The map's empty author is filled from the bundle header.
+    assert saved["metadata"]["author"] == "Sam"
+    assert overlay.state.binding_set is overlay.define.editor.bset
+    assert overlay.define.active
+    qtbot.waitUntil(lambda: client.reloads == 1)
+    qtbot.wait(400)
+    assert client.reloads == 1
+    assert overlay.tray.text() == (
+        "Imported 'Sam's layer'. Undo or Reset to shipped brings back the "
+        "previous map.")
+
+
+def test_import_writes_backup_when_user_copy_exists(make_overlay, user_root,
+                                                    tmp_path):
+    write_user_doc(user_root, shipped_default())
+    before = user_file(user_root).read_bytes()
+    overlay = make_overlay()
+    Transfer(overlay)
+    enter(overlay)
+    assert overlay.define.import_(import_file(tmp_path)) is True
+    made = backups(user_root)
+    assert len(made) == 1
+    assert made[0].read_bytes() == before
+    assert overlay.tray.text() == (
+        f"Imported 'Sam's layer'. Your previous map is saved as "
+        f"{made[0].name}.")
+
+
+def test_import_cancel_changes_nothing(make_overlay, user_root, tmp_path,
+                                       qtbot):
+    write_user_doc(user_root, shipped_default())
+    before = user_file(user_root).read_bytes()
+    client = FakeClient()
+    overlay = make_overlay(client)
+    client.connect_core()
+    transfer = Transfer(overlay, import_answer=False)
+    enter(overlay)
+    assert overlay.define.import_(import_file(tmp_path)) is False
+    assert len(transfer.imports) == 1
+    assert backups(user_root) == []
+    assert user_file(user_root).read_bytes() == before
+    assert not overlay.define.editor.can_undo
+    qtbot.wait(400)
+    assert client.reloads == 0
+
+
+def test_import_with_no_file_chosen_does_nothing(make_overlay, user_root):
+    overlay = make_overlay()
+    transfer = Transfer(overlay, open_path=None)
+    enter(overlay)
+    assert overlay.define.import_() is False
+    assert transfer.opened == 1 and transfer.imports == []
+    assert not user_file(user_root).exists()
+
+
+def test_refused_import_writes_nothing(make_overlay, user_root, tmp_path):
+    write_user_doc(user_root, shipped_default())
+    before = user_file(user_root).read_bytes()
+    bad = tmp_path / "bad.keygnosys.json"
+    bad.write_text('{"schema": "keygnosys/bundle/9", "documents": []}',
+                   encoding="utf-8")
+    overlay = make_overlay()
+    transfer = Transfer(overlay)
+    enter(overlay)
+    assert overlay.define.import_(bad) is False
+    assert "This file was made by a newer KeyGnosys." in overlay.tray.text()
+    assert transfer.imports == []
+    assert backups(user_root) == []
+    assert user_file(user_root).read_bytes() == before
+
+
+def test_identical_import_changes_nothing(make_overlay, user_root, tmp_path,
+                                          qtbot):
+    write_user_doc(user_root, shipped_default())
+    before = user_file(user_root).read_bytes()
+    client = FakeClient()
+    overlay = make_overlay(client)
+    client.connect_core()
+    out = tmp_path / "same.keygnosys.json"
+    enter(overlay)
+    # Whatever the dialog answers, an import that changes nothing does nothing.
+    for answer in (False, True):
+        transfer = Transfer(overlay, save_path=out, import_answer=answer)
+        overlay.define.export()
+        assert overlay.define.import_(out) is False
+        assert transfer.imports[0][1] == []
+    assert backups(user_root) == []
+    assert user_file(user_root).read_bytes() == before
+    assert not overlay.define.editor.can_undo
+    qtbot.wait(400)
+    assert client.reloads == 0
+
+
+def test_undo_reverts_import(make_overlay, user_root, tmp_path, qtbot):
+    write_user_doc(user_root, shipped_default())
+    client = FakeClient()
+    overlay = make_overlay(client)
+    client.connect_core()
+    Transfer(overlay)
+    enter(overlay)
+    previous = overlay.define.editor.bset.to_dict()
+    assert overlay.define.import_(import_file(tmp_path))
+    qtbot.waitUntil(lambda: client.reloads == 1)
+
+    overlay.bar.undo_button.click()
+    assert overlay.state.binding_set.bindings["KeyD"].params == LEFT
+    saved = saved_doc(user_root)
+    assert "imported_from" not in saved["metadata"]
+    assert saved["bindings"] == previous["bindings"]
+    assert saved["name"] == previous["name"]
+    assert not overlay.define.editor.can_undo
+    qtbot.waitUntil(lambda: client.reloads == 2)
+
+
+def test_import_while_offline_reloads_on_connect(make_overlay, user_root,
+                                                 tmp_path, qtbot):
+    client = FakeClient()
+    overlay = make_overlay(client)
+    client.connect_core()
+    Transfer(overlay)
+    enter(overlay)
+    client.disconnected.emit("lost")
+    notices = []
+    real = overlay.show_notice
+    overlay.show_notice = lambda text, *level: (notices.append(text), real(text, *level))
+    assert overlay.define.import_(import_file(tmp_path))
+    assert notices.count(
+        "Saved — changes apply when the core is running.") == 1
+    qtbot.wait(400)
+    assert client.reloads == 0
+    assert saved_binding(user_root, "KeyD") == {"action": "button.click",
+                                                "params": RIGHT}
+    client.connect_core()
+    assert client.reloads == 1
+
+
+def test_import_commits_pending_label_first(make_overlay, user_root, tmp_path):
+    overlay = make_overlay()
+    Transfer(overlay)
+    enter(overlay)
+    select(overlay, "KeyF")
+    overlay.define.picker.label_edit.setText("Typed")
+    assert overlay.define.import_(import_file(tmp_path))
+    assert overlay.state.binding_set.bindings["KeyF"].legend != "Typed"
+    overlay.define.undo()
+    assert overlay.state.binding_set.bindings["KeyF"].legend == "Typed"
+    assert saved_binding(user_root, "KeyF")["legend"] == "Typed"
+
+
+def test_backup_failure_aborts_import(make_overlay, user_root, tmp_path,
+                                      monkeypatch, qtbot):
+    write_user_doc(user_root, shipped_default())
+    before = user_file(user_root).read_bytes()
+    client = FakeClient()
+    overlay = make_overlay(client)
+    client.connect_core()
+    Transfer(overlay)
+    enter(overlay)
+    running = overlay.define.editor.bset.to_dict()
+
+    def fail(_id):
+        raise binding_store.StoreError("disk full")
+    monkeypatch.setattr(binding_store, "backup", fail)
+    assert overlay.define.import_(import_file(tmp_path)) is False
+    assert "disk full" in overlay.tray.text()
+    assert overlay.define.editor.bset.to_dict() == running
+    assert not overlay.define.editor.can_undo
+    assert user_file(user_root).read_bytes() == before
+    qtbot.wait(400)
+    assert client.reloads == 0
+
+
+# -- dropping a file on the keyboard ----------------------------------------
+
+def test_drop_inside_define_mode_opens_preview(make_overlay, user_root,
+                                               tmp_path):
+    write_user_doc(user_root, shipped_default())
+    before = user_file(user_root).read_bytes()
+    overlay = make_overlay()
+    transfer = Transfer(overlay)
+    seen = []
+    ask = transfer._ask_import
+
+    def ask_import(plan, changes):
+        # Nothing has changed while the preview is up.
+        seen.append(user_file(user_root).read_bytes() == before
+                    and backups(user_root) == [])
+        return ask(plan, changes)
+    overlay.define.ask_import = ask_import
+    enter(overlay)
+    overlay.window.view.fileDropped.emit(import_file(tmp_path))
+
+    assert seen == [True]
+    assert len(transfer.imports) == 1
+    assert transfer.opened == 0
+    assert saved_binding(user_root, "KeyD") == {"action": "button.click",
+                                                "params": RIGHT}
+    assert overlay.define.active
+
+
+def test_drop_outside_define_mode_enters_then_exits_on_cancel(
+        make_overlay, user_root, tmp_path, click_calls):
+    overlay = make_overlay()
+    transfer = Transfer(overlay, import_answer=False)
+    active = []
+    ask = transfer._ask_import
+    overlay.define.ask_import = lambda plan, changes: (
+        active.append(overlay.define.active), ask(plan, changes))[1]
+    overlay.window.view.fileDropped.emit(import_file(tmp_path))
+
+    assert active == [True]
+    assert not overlay.define.active
+    assert click_calls == [False, True]
+    assert overlay.bar.define_button.text() == "Define"
+    assert not overlay.define.picker.isVisible()
+    assert not user_file(user_root).exists()
+
+
+def test_drop_outside_define_mode_stays_open_after_import(
+        make_overlay, user_root, tmp_path, click_calls):
+    overlay = make_overlay()
+    Transfer(overlay)
+    overlay.window.view.fileDropped.emit(import_file(tmp_path))
+
+    assert overlay.define.active
+    assert click_calls == [False]
+    assert overlay.bar.define_button.text() == "Done"
+    assert overlay.bar.undo_button.isEnabled()
+    assert saved_binding(user_root, "KeyD") == {"action": "button.click",
+                                                "params": RIGHT}
+
+
+def test_drop_while_broken_is_refused(make_overlay, user_root, tmp_path,
+                                      monkeypatch, click_calls):
+    broken = user_file(user_root)
+    broken.parent.mkdir(parents=True)
+    broken.write_text("not json", encoding="utf-8")
+    overlay = make_overlay()
+    transfer = Transfer(overlay)
+
+    def never(*_args, **_kwargs):
+        raise AssertionError("read_import must not be called")
+    monkeypatch.setattr(bundle, "read_import", never)
+    path = import_file(tmp_path)
+
+    # Outside define mode: nothing opens.
+    overlay.window.view.fileDropped.emit(path)
+    assert overlay.tray.text() == "Reset to shipped first."
+    assert not overlay.define.active
+    assert click_calls == []
+    assert overlay.bar.define_button.text() == "Define"
+
+    # Inside define mode: it stays open.
+    enter(overlay)
+    overlay.window.view.fileDropped.emit(path)
+    assert overlay.tray.text() == "Reset to shipped first."
+    assert overlay.define.active
+    assert transfer.imports == []
+    assert broken.read_text("utf-8") == "not json"
+
+
+def test_click_through_tooltip_mentions_drops(make_overlay):
+    overlay = make_overlay()
+    assert "drop" in overlay.bar._click.toolTip()
+
+
+def test_drop_outside_define_mode_closes_again_on_unexpected_error(
+        make_overlay, user_root, tmp_path, monkeypatch, click_calls):
+    overlay = make_overlay()
+    Transfer(overlay)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("unexpected")
+    monkeypatch.setattr(bundle, "read_import", boom)
+    with pytest.raises(RuntimeError):
+        overlay.define.on_file_dropped(import_file(tmp_path))
+    assert not overlay.define.active
+    assert click_calls == [False, True]
+    assert overlay.bar.define_button.text() == "Define"
+
+
+def test_undo_of_import_keeps_the_fork_source_template(make_overlay,
+                                                       user_root, tmp_path):
+    overlay = make_overlay()
+    Transfer(overlay)
+    enter(overlay)
+    assert not user_file(user_root).exists()
+    assert overlay.define.import_(import_file(tmp_path))
+    assert saved_doc(user_root)["metadata"]["source_template"] == "default"
+    overlay.define.undo()
+    assert overlay.define.editor.bset.metadata.source_template == "default"
+    assert saved_doc(user_root)["metadata"]["source_template"] == "default"
+
+
+def test_imported_name_reaches_the_tray_as_plain_text(make_overlay, tmp_path):
+    overlay = make_overlay()
+    Transfer(overlay)
+    enter(overlay)
+    assert overlay.define.import_(import_file(tmp_path, name="<b>x</b>"))
+    assert overlay.tray._label.textFormat() == Qt.PlainText
+    assert overlay.tray.text().startswith("Imported '<b>x</b>'.")
+
+
+def test_a_long_imported_name_is_capped_in_the_notice(make_overlay, tmp_path):
+    overlay = make_overlay()
+    Transfer(overlay)
+    enter(overlay)
+    long_name = "n" * 10_000
+    assert overlay.define.import_(import_file(tmp_path, name=long_name))
+    shown = "n" * 79 + "…"
+    assert overlay.tray.text().startswith(f"Imported '{shown}'. ")
+    assert len(overlay.tray.text()) < 200
+
+
+def test_a_failed_save_after_the_backup_is_not_an_import(
+        make_overlay, user_root, tmp_path, monkeypatch, qtbot):
+    write_user_doc(user_root, shipped_default())
+    client = FakeClient()
+    overlay = make_overlay(client)
+    client.connect_core()
+    Transfer(overlay)
+    enter(overlay)
+    # One edit first, so there is history to keep.
+    select(overlay, "KeyF")
+    overlay.define.picker.label_edit.setText("Typed")
+    overlay.define.picker.commit_pending()
+    qtbot.wait(400)
+    reloads = client.reloads
+    on_disk = user_file(user_root).read_bytes()
+    running = overlay.define.editor.bset.to_dict()
+    could_undo = overlay.define.editor.can_undo
+
+    def fail(*_args, **_kwargs):
+        raise OSError("disk full")
+    monkeypatch.setattr(binding_store, "save", fail)
+    assert overlay.define.import_(import_file(tmp_path)) is False
+    assert "Imported" not in overlay.tray.text()
+    assert overlay.tray.text() == "Not imported — disk full"
+    assert backups(user_root) == []
+    assert overlay.define.editor.bset.to_dict() == running
+    assert overlay.state.binding_set is overlay.define.editor.bset
+    assert overlay.define.editor.can_undo == could_undo
+    assert user_file(user_root).read_bytes() == on_disk
+    qtbot.wait(400)
+    assert client.reloads == reloads
+
+
+@pytest.mark.parametrize("name", ["a/b", "..\\x", "C:\\evil", "", "n" * 300,
+                                  'q:*?"<>|\x01', " . "],
+                         ids=["slash", "dotdot", "drive", "empty", "long",
+                              "reserved", "dots"])
+def test_suggested_export_name_is_a_bare_safe_file_name(make_overlay,
+                                                         tmp_path, name):
+    overlay = make_overlay()
+    transfer = Transfer(overlay, save_path=None)
+    enter(overlay)
+    overlay.define.editor.bset.name = name
+    overlay.define.export()
+    (suggested,) = transfer.suggested
+    assert suggested.endswith(bundle.EXTENSION)
+    stem = suggested[:-len(bundle.EXTENSION)]
+    assert stem and len(stem) <= 100
+    assert not any(ch in stem for ch in r'/\:*?"<>|')
+    assert all(ord(ch) >= 32 for ch in stem)
+    assert stem == stem.strip(". ")
+    for pure in (PureWindowsPath, PurePosixPath):
+        assert pure(suggested).name == suggested
+    if name in ("", " . "):
+        assert suggested == f"default{bundle.EXTENSION}"
+
+
+def test_an_unreadable_map_refuses_transfer_with_its_own_reason(
+        make_overlay, user_root, tmp_path, monkeypatch, click_calls):
+    def unavailable(_id):
+        raise binding_store.StoreError("no bindings named 'default'")
+    monkeypatch.setattr(binding_store, "load", unavailable)
+    reason = "Bindings unavailable — no bindings named 'default'"
+    overlay = make_overlay()
+    transfer = Transfer(overlay)
+    path = import_file(tmp_path)
+
+    # A drop outside define mode opens it, refuses, and closes it again.
+    overlay.window.view.fileDropped.emit(path)
+    assert overlay.tray.text() == reason
+    assert not overlay.define.active
+
+    enter(overlay)
+    bar = overlay.bar
+    for button in (bar.export_button, bar.import_button):
+        assert not button.isEnabled()
+        assert button.toolTip() == reason
+    assert overlay.define.import_(path) is False
+    assert overlay.tray.text() == reason
+    overlay.define.export()
+    assert overlay.tray.text() == reason
+    assert transfer.imports == [] and transfer.exports == []
+    assert not user_file(user_root).exists()
+
+
+# -- notice colours (operator, live check 2026-11-28) -------------------------
+
+def test_transfer_notices_are_coloured_by_outcome(make_overlay, user_root,
+                                                  tmp_path):
+    overlay = make_overlay()
+    out = tmp_path / "out.keygnosys.json"
+    Transfer(overlay, save_path=out)
+    enter(overlay)
+    overlay.define.export()
+    assert overlay.tray.text().startswith("Exported")
+    assert overlay.tray.level() == "success"
+
+    assert overlay.define.import_(import_file(tmp_path)) is True
+    assert overlay.tray.text().startswith("Imported")
+    assert overlay.tray.level() == "success"
+
+    bad = tmp_path / "bad.keygnosys.json"
+    bad.write_text("not json", encoding="utf-8")
+    assert overlay.define.import_(bad) is False
+    assert overlay.tray.text().startswith("Not imported")
+    assert overlay.tray.level() == "error"
+
+
+def test_reset_first_and_offline_notices_are_warnings(make_overlay, user_root,
+                                                      tmp_path):
+    broken = user_file(user_root)
+    broken.parent.mkdir(parents=True)
+    broken.write_text("not json", encoding="utf-8")
+    overlay = make_overlay()
+    Transfer(overlay)
+    enter(overlay)
+    assert overlay.tray.level() == "error"          # the broken-file notice
+    overlay.define.import_(import_file(tmp_path))
+    assert overlay.tray.text() == "Reset to shipped first."
+    assert overlay.tray.level() == "warning"
+
+
+def test_the_offline_notice_is_a_warning(make_overlay, user_root):
+    client = FakeClient()
+    overlay = make_overlay(client)              # never connected
+    enter(overlay)
+    select(overlay, "KeyD")
+    overlay.define.picker.label_edit.setText("Mine")
+    overlay.define.picker.commit_pending()
+    from keygnosys.ui.define_mode import OFFLINE_NOTICE
+    assert overlay.tray.text() == OFFLINE_NOTICE
+    assert overlay.tray.level() == "warning"

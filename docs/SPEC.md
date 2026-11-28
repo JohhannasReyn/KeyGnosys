@@ -139,7 +139,9 @@ A user copy that exists but does not load is never overwritten by a save; while
 it is in that state the editor offers only Reset to shipped, highlighted as the one
 action left. A moved-aside `<id>.broken-<unix_ts>.json` is kept for the user and is
 **never loaded** as a document: under its own `id` it could shadow the map it was
-moved away from. *Duplicate
+moved away from. The same holds for the backups an import writes
+(`<id>.backup-<unix_ts>[-n].json`, §10.2.5): the registry skips every
+`<id>.broken-<digits>.json` and `<id>.backup-<digits>[-<n>].json`. *Duplicate
 set* (fork under a new id) and *Reset to source template* (§10.2.4) are deferred.
 
 ### 3.3 Live reload
@@ -672,6 +674,58 @@ Single document, user config root, written by the settings UI.
 
 Unknown keys are preserved on rewrite (forward compatibility). Out-of-range values
 are clamped, and the clamp is reported as a diagnostic.
+
+### 4.6 Bundle
+
+A bundle is a file for sharing and backing up configuration, made by the binding
+editor's Export (§10.2.5). It is plain JSON with the extension `.keygnosys.json`.
+
+```jsonc
+{
+  "schema": "keygnosys/bundle/1",
+  "name": "Sam's cursor layer",        // defaults to the map's name
+  "author": "",                         // empty unless the user fills it in
+  "exported": "2026-11-27T14:03:00Z",   // UTC ISO 8601, informational
+  "generator": "KeyGnosys 0.4.0",       // informational
+  "documents": [
+    { "schema": "keygnosys/bindings/2", "id": "default", "name": "…", … }
+  ]
+}
+```
+
+- `documents` holds whole documents, **embedded verbatim**: exactly what the
+  editor would save for the map, unknown entries and fields included. Export
+  never changes a document; the author's name lives only in the bundle header.
+- This version exports exactly one document, the running universal binding map,
+  edited or not.
+- Unknown top-level fields are ignored on import and are not preserved.
+
+**What import accepts.** A `keygnosys/bundle/1` file, or a bare
+`keygnosys/bindings/1` or `/2` document, which is also how a backup (§3.2) is
+restored. Import **MUST** refuse, with a reason and without writing anything:
+
+- a file over 5 MB (5 * 1024 * 1024 bytes), refused before it is read;
+- a file that is not valid UTF-8 or not JSON (a leading UTF-8 byte order mark
+  is accepted, so a hand-edited file saved with one still imports);
+- an unknown schema, or a bundle or bindings major newer than this build knows
+  ("made by a newer KeyGnosys");
+- a bundle with no bindings document, or with more than one;
+- a bindings document that is structurally broken (a bad `id`, `bindings` not an
+  object), or damaged in any other way that stops it being read (a wrong type,
+  an out-of-range number, nesting too deep), refused as "This map is damaged and
+  cannot be read."
+
+**Unknown document kinds are refused whole.** A bundle holding a document kind
+this build does not know (for example a later `appmap/1`) is refused entirely,
+naming the kinds and saying a newer KeyGnosys is needed. Importing the rest would
+be a partial import, and an import **MUST NOT** be partial: any blocking finding
+means neither a backup nor the user copy is written.
+
+Findings that do not block are reported in the preview and the import goes
+ahead: commands this build does not know, or known commands whose parameters it
+rejects (kept unchanged so a newer build can run them); keys absent from the
+current layout (kept, as they may exist on the sender's keyboard); and settings
+outside this build's bounds.
 
 ---
 
@@ -2158,6 +2212,70 @@ command to the displaced list by the same rules.
 | **Duplicate set** | Fork a binding document under a new id, the same way layouts are forked (§10.1.2) |
 | **Reset** | Restore the whole set to its source template, with confirmation |
 | **Undo/redo** | Unlimited within a session, covering reassignment and displacement together — one undo puts both commands back where they were |
+
+#### 10.2.5 Export and import
+
+While define mode is open, the control bar shows **Export** and **Import**
+beside Undo and Redo. They move the universal binding map to and from a bundle
+file (§4.6).
+
+- **Export** first commits a label still being typed in the picker. It then
+  opens a preview showing the map's name, how many keys are bound, an optional
+  **Your name (for credit)** field (empty by default) and a **Warnings**
+  section. The warnings list commands this build does not know; they are
+  exported unchanged. **Save…** opens the system save dialog, suggesting
+  `<map name>.keygnosys.json`, and the file is written atomically. The
+  suggested name is made safe first, as the map name may come from someone
+  else's file: path separators, the characters `: * ? " < > |` and control
+  characters become `_`, leading and trailing dots and spaces are dropped, and
+  the name is cut to 100 characters; an empty result falls back to the map's
+  `id`, then `keymap`. Export
+  changes nothing: no undo entry, no save, no reload. The notice reads
+  "Exported to {file}."
+- **Import** opens a system open dialog and reads the chosen file. The whole file
+  is validated before anything is shown (§4.6). The **preview** lists the
+  per-key changes in layout order, under "Changes"; commands this build cannot
+  run, under "Kept but not usable in this version"; and keys absent from the
+  current layout, under "Not on your keyboard". Setting changes are listed by
+  name, old to new. When nothing differs the preview says so and offers only
+  Close. Import is the default button and Escape cancels. A file that fails
+  validation is refused whole, with its reasons, in a notice beginning
+  "Not imported — "; nothing is written.
+- **The backup.** On confirmation, if a user copy exists, it is copied byte for
+  byte to `<id>.backup-<unix_ts>.json` before anything else changes (§3.2). If
+  that name is taken, `-2`, `-3` and so on are appended. If there is no user
+  copy, no backup is written, because the shipped map is the backup. If the
+  backup cannot be written, the import stops and changes nothing. If the save
+  of the imported map then fails, the import is undone in memory, the backup
+  just written is removed, nothing is reloaded and the notice reads
+  "Not imported — " and the reason.
+- **One Undo.** The import replaces the map as a single edit, then saves and
+  reloads like any other edit. **Undo** reverts the whole import in one step,
+  restoring the previous metadata too, except `revision`, which never goes
+  backwards, and a `source_template` the import's save set when it forked the
+  shipped map. The imported map takes the running `id` and keeps the current
+  `source_template`. Its `revision` continues from the current map's, and
+  `metadata.imported_from` records `{id, name, author, exported}`. When its
+  `author` is empty, the bundle header's `author` fills it. The notice reads
+  "Imported '{name}'. Your previous map is saved as {backup}." or, with no
+  backup, "Imported '{name}'. Undo or Reset to shipped brings back the previous
+  map." A map name longer than 80 characters is cut to 80, ending in "…".
+  Notices are shown as plain text, never as markup.
+- **Dropping a file on the keyboard** starts the same import, with the same
+  validation and preview; a drop never imports without the preview. While a
+  file is dragged over the keyboard, a "Drop to import" highlight covers the
+  whole view. Exactly one local file ending `.json` is accepted; any other drag
+  (several files, a folder, a non-local URL, another extension) is refused at
+  drag-over. A command dragged from the picker still lands on a key; the two
+  are told apart by their data. Click-through **MUST** be off for the window to
+  receive a drop, because with it on the drop goes to the window underneath. A
+  file dropped outside define mode opens define mode first; if the preview is
+  cancelled, define mode closes again.
+- **While the user copy is broken** (§3.2), Export and Import are disabled with
+  the tooltip "Reset to shipped first", and a drop is refused with the notice
+  "Reset to shipped first." Nothing is read. When the map cannot be read for
+  another reason (Reset is unavailable then), the tooltip and the refusal give
+  that reason instead: "Bindings unavailable — {reason}".
 
 ---
 
