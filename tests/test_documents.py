@@ -215,3 +215,19 @@ def test_a_still_unknown_modifier_is_still_rejected() -> None:
             "id": "p",
             "shortcuts": {"Hyper": {"KeyG": "Move"}},
         })
+
+
+def test_to_dict_round_trips_the_shipped_default() -> None:
+    from keygnosys.documents import BindingSet
+    doc = json.loads((paths.BUNDLED_ROOT / "bindings" / "default.json").read_text(encoding="utf-8"))
+    once = BindingSet.from_dict(doc).to_dict()
+    again = BindingSet.from_dict(once).to_dict()
+    assert again == once
+    assert again["schema"] == "keygnosys/bindings/2"
+    assert again["bindings"] == doc["bindings"]
+
+
+def test_unmodelled_top_level_fields_survive() -> None:
+    from keygnosys.documents import BindingSet
+    doc = {"schema": "keygnosys/bindings/2", "id": "t", "bindings": {}, "x-note": "keep me"}
+    assert BindingSet.from_dict(doc).to_dict()["x-note"] == "keep me"

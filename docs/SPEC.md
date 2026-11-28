@@ -502,7 +502,7 @@ bound to nowhere — the persistent half of the editor's unassigned list (§10.2
 It exists so that a command displaced by reassignment keeps its `params` and its
 custom `legend` across a restart instead of silently reverting to a catalog
 default. It is validated exactly like a binding; entries that fail validation are
-dropped with a diagnostic.
+dropped with a diagnostic. Entries may carry `was_on`, the key the command was last bound to. It is informational, set when a command is displaced, and dropped when it is assigned again.
 
 The list is **not** a complete inventory of unbound commands. Everything in the
 action catalog that is neither bound nor listed here is offered by the editor as

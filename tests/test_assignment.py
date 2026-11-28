@@ -232,3 +232,52 @@ def test_schema_1_bindings_get_an_empty_unassigned_list() -> None:
 @pytest.fixture(scope="module")
 def registry_default() -> BindingSet:
     return Registry().load_all().bindings["default"]
+
+
+# -- serialisation and was_on -------------------------------------------------
+
+def minimal_doc(bindings: dict) -> dict:
+    return {"schema": "keygnosys/bindings/2", "id": "t", "bindings": bindings}
+
+
+def test_params_and_legend_survive_displace_save_restore() -> None:
+    bset = BindingSet.from_dict(minimal_doc(
+        {"KeyD": {"action": "window.slot", "params": {"index": 3}, "legend": "Mail"}}))
+    bset.assign("KeyD", Binding("button.click", {"button": "left"}))
+    reloaded = BindingSet.from_dict(bset.to_dict())
+    [u] = reloaded.unassigned
+    assert (u.action, u.params, u.legend, u.was_on) == (
+        "window.slot", {"index": 3}, "Mail", "KeyD")
+    reloaded.assign("KeyF", u)
+    assert reloaded.bindings["KeyF"].legend == "Mail" and reloaded.unassigned == []
+    assert "was_on" not in reloaded.to_dict()["bindings"]["KeyF"]
+
+
+def test_unassign_records_the_key_it_came_from() -> None:
+    bset = make_set(KeyA=LEFT)
+    bset.unassign("KeyA")
+    assert bset.unassigned[0].was_on == "KeyA"
+
+
+def test_was_on_is_not_part_of_identity() -> None:
+    assert Binding("pointer.move", {"dir": "left"}, was_on="KeyA").identity() == LEFT.identity()
+
+
+def test_assigning_from_unassigned_clears_was_on() -> None:
+    bset = make_set(KeyA=LEFT)
+    bset.unassign("KeyA")
+    bset.assign("KeyB", bset.unassigned[0])
+    assert bset.bindings["KeyB"].was_on is None
+
+
+def test_an_unknown_action_survives_load_and_save() -> None:
+    doc = minimal_doc({"KeyZ": {"action": "future.thing", "params": {"x": 1}}})
+    bset = BindingSet.from_dict(doc)
+    assert "KeyZ" not in bset.bindings
+    assert bset.to_dict()["bindings"]["KeyZ"] == {"action": "future.thing", "params": {"x": 1}}
+
+
+def test_a_modelled_binding_wins_over_a_preserved_unknown_one() -> None:
+    bset = BindingSet.from_dict(minimal_doc({"KeyZ": {"action": "future.thing"}}))
+    bset.assign("KeyZ", CLICK)
+    assert bset.to_dict()["bindings"]["KeyZ"]["action"] == "button.click"
