@@ -190,3 +190,44 @@ def test_unchanged_legend_or_setting_is_a_silent_no_op(editor, calls):
     editor.set_legend("Digit1", "Hi")
     editor.set_legend("Digit1", "Hi")
     assert len(calls) == 1 and editor.undo() and not editor.can_undo
+
+
+# -- final review fixes -----------------------------------------------------
+
+def test_undo_restores_content_but_keeps_the_live_metadata(editor):
+    editor.assign(FREE, Binding("overlay.toggle"))
+    # A save between edits forks and bumps the revision on the live object.
+    editor.bset.metadata.source_template = "default"
+    editor.bset.metadata.revision = 7
+    assert editor.undo()
+    assert FREE not in editor.bset.bindings
+    assert editor.bset.metadata.source_template == "default"
+    assert editor.bset.metadata.revision == 7
+    editor.bset.metadata.revision = 8
+    assert editor.redo()
+    assert FREE in editor.bset.bindings
+    assert editor.bset.metadata.revision == 8
+
+
+def test_unassigned_labels_use_the_display_name(calls):
+    doc = json.loads((paths.BUNDLED_ROOT / "bindings" / "default.json")
+                     .read_text(encoding="utf-8"))
+    editor = BindingEditor(BindingSet.from_dict(doc), lambda b: calls.append(b),
+                           display=lambda code: {"Digit1": "1"}.get(code, code))
+    editor.clear("Digit1")
+    labels = [e.label for e in editor.entries() if e.stored is not None]
+    assert any(label.endswith("(was on 1)") for label in labels), labels
+    assert editor.display("KeyQ") == "KeyQ"
+
+
+def test_without_a_display_name_the_code_is_shown(editor):
+    editor.clear("Digit1")
+    labels = [e.label for e in editor.entries() if e.stored is not None]
+    assert any(label.endswith("(was on Digit1)") for label in labels), labels
+
+
+def test_set_params_keeps_the_legend(editor):
+    editor.set_legend("Digit1", "Mail")
+    editor.set_params("Digit1", {"index": 4})
+    bound = editor.bset.bindings["Digit1"]
+    assert bound.params == {"index": 4} and bound.legend == "Mail"

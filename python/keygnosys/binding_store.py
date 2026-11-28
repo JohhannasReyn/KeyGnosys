@@ -91,12 +91,19 @@ def shadows_shipped(bindings_id: str) -> bool:
     return user_path(bindings_id).exists() and shipped_path(bindings_id).exists()
 
 
-def save(bset: BindingSet) -> Path:
+def save(bset: BindingSet, bindings_id: str | None = None) -> Path:
+    """Write `bset` to the user copy for `bindings_id` (default: its own id).
+
+    Pass the id the set was loaded under: a user file whose `id` field
+    disagrees with its file name is saved back in place, and its `id` field
+    is left as it is.
+    """
     problem = _first_problem(bset)
     if problem:
         raise StoreError(f"refusing to save an invalid binding: {problem}")
 
-    path = user_path(bset.id)
+    bindings_id = bindings_id or bset.id
+    path = user_path(bindings_id)
     forking = False
     if path.exists():
         try:
@@ -104,12 +111,12 @@ def save(bset: BindingSet) -> Path:
         except ValueError as exc:
             raise BrokenUserCopy(path, str(exc)) from exc
     else:
-        forking = shipped_path(bset.id).exists()
+        forking = shipped_path(bindings_id).exists()
 
     old_source = bset.metadata.source_template
     old_revision = bset.metadata.revision
     if forking:
-        bset.metadata.source_template = bset.id
+        bset.metadata.source_template = bindings_id
     bset.metadata.revision = old_revision + 1
     try:
         _write_atomic(path, json.dumps(bset.to_dict(), indent=2) + "\n")

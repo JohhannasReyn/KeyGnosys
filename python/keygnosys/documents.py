@@ -274,6 +274,9 @@ class Key:
             seg.y += dy
 
 
+_METADATA_FIELDS = frozenset({"author", "source_template", "model", "revision"})
+
+
 @dataclass
 class Metadata:
     """Provenance. Records where a document came from, for reset-to-template."""
@@ -282,6 +285,9 @@ class Metadata:
     source_template: str | None = None
     model: str | None = None
     revision: int = 1
+    #: Keys this class does not model, written back so a newer release's
+    #: provenance survives a save from an older one.
+    extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, raw: Any) -> "Metadata":
@@ -296,10 +302,13 @@ class Metadata:
             source_template=raw.get("source_template"),
             model=raw.get("model"),
             revision=revision,
+            extra={k: copy.deepcopy(v) for k, v in raw.items()
+                   if k not in _METADATA_FIELDS},
         )
 
     def to_dict(self) -> dict:
-        out: dict[str, Any] = {"author": self.author, "revision": self.revision}
+        out: dict[str, Any] = copy.deepcopy(self.extra)
+        out.update({"author": self.author, "revision": self.revision})
         if self.source_template is not None:
             out["source_template"] = self.source_template
         if self.model is not None:
@@ -445,6 +454,13 @@ class Layout:
     def codes(self) -> set[str]:
         return {k.code for k in self.keys}
 
+    def display_name(self, code: str) -> str:
+        """The name the overlay draws on `code`'s base layer, else the code."""
+        for key in self.keys:
+            if key.code == code and key.base.strip():
+                return key.base
+        return code
+
     def key_by_id(self, key_id: str) -> Key | None:
         return next((k for k in self.keys if k.id == key_id), None)
 
@@ -523,6 +539,10 @@ _BINDING_DOC_FIELDS = frozenset(
      "bindings", "unassigned"})
 
 
+#: Fields of one binding entry that Binding models; the rest go to `extra`.
+_BINDING_ENTRY_FIELDS = frozenset({"action", "params", "legend", "was_on"})
+
+
 @dataclass
 class Binding:
     """One command: an action, its parameters, and an optional custom label."""
@@ -533,9 +553,13 @@ class Binding:
     #: Only meaningful while the command sits in `unassigned`: the key it was
     #: last bound to. Informational, and not part of its identity.
     was_on: str | None = None
+    #: Entry fields this class does not model, written back verbatim. Not
+    #: part of identity.
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        out: dict[str, Any] = {"action": self.action, "params": dict(self.params)}
+        out: dict[str, Any] = copy.deepcopy(self.extra)
+        out.update({"action": self.action, "params": dict(self.params)})
         if self.legend is not None:
             out["legend"] = self.legend
         if self.was_on is not None:
@@ -753,7 +777,9 @@ def _binding_from_dict(spec: Any, where: str, warn) -> Binding | None:
         return None
     was_on = spec.get("was_on")
     return Binding(action=action, params=params, legend=spec.get("legend"),
-                   was_on=was_on if isinstance(was_on, str) else None)
+                   was_on=was_on if isinstance(was_on, str) else None,
+                   extra={k: copy.deepcopy(v) for k, v in spec.items()
+                          if k not in _BINDING_ENTRY_FIELDS})
 
 
 # ---------------------------------------------------------------------------

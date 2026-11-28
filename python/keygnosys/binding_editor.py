@@ -60,9 +60,12 @@ def _label(action: str) -> str:
 
 class BindingEditor:
     def __init__(self, bset: BindingSet,
-                 on_change: Callable[[BindingSet], None]) -> None:
+                 on_change: Callable[[BindingSet], None],
+                 display: Callable[[str], str] | None = None) -> None:
         self.bset = bset
         self._on_change = on_change
+        #: Key code -> the name the user sees on the keyboard ("KeyD" -> "D").
+        self.display: Callable[[str], str] = display or (lambda code: code)
         self._undo: list[dict] = []
         self._redo: list[dict] = []
 
@@ -84,7 +87,7 @@ class BindingEditor:
         for stored in self.bset.unassigned:
             label = stored.legend or default_legend(stored.action, stored.params)
             if stored.was_on:
-                label = f"{label} (was on {stored.was_on})"
+                label = f"{label} (was on {self.display(stored.was_on)})"
             out.append(PickerEntry(UNASSIGNED, label, stored.action,
                                    [dict(stored.params)], {}, stored))
 
@@ -127,7 +130,8 @@ class BindingEditor:
 
     def set_params(self, code: str, params: dict) -> None:
         current = self.bset.bindings[code]
-        self.assign(code, Binding(current.action, dict(params), current.legend))
+        self.assign(code, Binding(current.action, dict(params), current.legend,
+                                  extra=dict(current.extra)))
 
     def set_setting(self, name: str, value: float | int) -> None:
         if name not in self.bset.settings:
@@ -148,7 +152,11 @@ class BindingEditor:
         if not source:
             return False
         sink.append(self.bset.to_dict())
+        # Content travels; provenance does not. A save between edits forked
+        # and bumped the revision, and undoing an edit must not rewind that.
+        metadata = self.bset.metadata
         self.bset = BindingSet.from_dict(source.pop())
+        self.bset.metadata = metadata
         self._on_change(self.bset)
         return True
 
