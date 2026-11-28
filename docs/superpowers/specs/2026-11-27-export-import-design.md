@@ -8,7 +8,8 @@
   the two disagree, this one is newer and wins for project 2.
 
 **Operator answers:** the 14 questions put on 2026-11-27 were all accepted as
-suggested. They are recorded as decisions below, marked **(operator)**.
+suggested, except Q14, which the operator later reversed: dropping a file on
+the keyboard imports it (§6.1). They are recorded as decisions below, marked **(operator)**.
 Everything marked **(my call)** is mine and open to correction.
 
 ## 1. Intent
@@ -42,7 +43,6 @@ that can't leave the machine can't be shared, posted or downloaded.
 ### Non-goals (this project)
 - Exporting or importing overlay settings, layouts or themes **(operator, Q3)**.
 - Picking individual keys out of an imported map **(operator, Q9)**.
-- Dragging a file onto the overlay to import it **(operator, Q14)**.
 - Keeping several universal maps side by side and switching between them
   **(operator, Q5)**.
 - An online gallery, links or any network use.
@@ -167,6 +167,34 @@ operator's earlier "approach 1 is the correct build design" covers it.
   - One way out keeps the never-overwrite-a-broken-file rule simple.
 - **Export is also disabled while broken**, because there is no map to
   export.
+
+**Dropping a file on the keyboard imports it** **(operator, Q14 reversed)**.
+- **It is the same import, started differently.** The dropped file goes
+  through the same validation (§6.2) and the same preview (§6.3), and
+  nothing changes until Import is pressed. A drop never imports silently.
+- **While a file is dragged over the keyboard**, the keyboard shows a
+  "Drop to import" highlight across the whole view, distinct from the key
+  outline used when dragging a command from the picker.
+- **What is accepted:** exactly one local file ending `.json`. More than
+  one file, a folder, a non-local URL or another extension is refused at
+  drag-over (no-drop cursor), so nothing is read.
+- **The existing picker drag keeps working.** A command dragged from the
+  picker still lands on a key. The two are told apart by their data: the
+  picker's own MIME type, or file URLs.
+- **Outside define mode** **(my call)**:
+  - Click-through must be off for the window to receive a drop at all.
+    With click-through on, the drop goes to whatever is underneath; that
+    is the operating system's behaviour, not a choice here. The tooltip on
+    the click-through control mentions it.
+  - When a file is dropped outside define mode, define mode opens first,
+    because the import is a define-mode edit with Undo. If the preview is
+    cancelled, define mode closes again, so a cancelled drop leaves the
+    overlay as it was.
+- **While the map file is broken**, a drop is refused with the same
+  "Reset to shipped first" notice as the greyed-out button.
+- **Windows elevation:** if the overlay ever runs elevated, Windows blocks
+  drops from a non-elevated Explorer. The overlay isn't elevated today;
+  this is a live-check note, not a design change.
 
 ### 6.2 Validation (before anything is shown)
 
@@ -347,6 +375,9 @@ Not on your keyboard (2)
 - **`ui/define_mode.py`:** an `export()` and an `import_()` that wire the
   dialogs, store and editor together.
 - **`ui/control_bar.py`:** the two buttons, enabled per state.
+- **`ui/keyboard_view.py`:** accepts file drops alongside the picker's
+  drags, draws the "Drop to import" highlight, and emits a
+  `fileDropped(path)` signal that define mode handles.
 - **The dialogs must be parented and raised** so they appear above the
   topmost, no-activate overlay and take keyboard focus.
   - That is a live-check item, because the same focus question is still
@@ -389,11 +420,21 @@ Not on your keyboard (2)
   - cancelling the preview changes nothing;
   - confirming saves and reloads once (debounced);
   - Export commits a pending label first and makes no save.
-- **Manual rows 14.1–14.4** in `docs/manual-tests.md`:
+- **Dropping a file:**
+  - one `.json` file is accepted and opens the preview, and nothing
+    changes until Import;
+  - two files, a folder, or a `.txt` file are refused at drag-over;
+  - a picker command drag still assigns to a key;
+  - a drop outside define mode opens define mode, and cancelling the
+    preview closes it again;
+  - a drop while broken shows the notice and reads nothing.
+- **Manual rows 14.1–14.5** in `docs/manual-tests.md`:
   - export, then import on the same machine;
   - import a hand-edited file with an unknown command and see it listed;
   - Undo an import live;
-  - refuse a broken file.
+  - refuse a broken file;
+  - drag a real file from Explorer onto the keyboard, in and out of
+    define mode.
   - The dialogs taking focus above the overlay is checked here.
 
 ## 10. SPEC amendments
@@ -404,8 +445,8 @@ Not on your keyboard (2)
   - unknown document kinds are refused whole.
 - **§3.2:** backup files `<id>.backup-<ts>[-n].json` are written by import
   and never loaded, alongside the broken copies.
-- **§10.2:** Export and Import in define mode; the preview; the backup; one
-  Undo.
+- **§10.2:** Export and Import in define mode; dropping a file on the
+  keyboard; the preview; the backup; one Undo.
 - **§10.1.7** (layout import/export, M6) is unchanged. A layout later gets
   its own kind in the same bundle.
 
