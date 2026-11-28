@@ -198,3 +198,45 @@ def test_fork_detection_uses_the_given_id(roots):
     assert out == user / "bindings" / "default.json"
     saved = json.loads(out.read_text("utf-8"))
     assert saved["metadata"]["source_template"] == "default"
+
+
+# -- backup ------------------------------------------------------------------
+
+def test_backup_copies_bytes_exactly(roots):
+    user, _ = roots
+    path = binding_store.user_path("default")
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b'{ "schema":\r\n\t"x"   ,  \n\n}  \n')
+    out = binding_store.backup("default")
+    assert out.read_bytes() == path.read_bytes()
+    import re
+    assert re.fullmatch(r"default\.backup-\d+\.json", out.name)
+
+
+def test_backup_without_user_copy_is_none(roots):
+    assert binding_store.backup("default") is None
+
+
+def test_second_backup_same_second_gets_suffix(roots, monkeypatch):
+    import time
+    monkeypatch.setattr(time, "time", lambda: 1795842643.7)
+    path = binding_store.user_path("default")
+    path.parent.mkdir(parents=True)
+    path.write_text("{}", encoding="utf-8")
+    names = [binding_store.backup("default").name for _ in range(3)]
+    assert names == ["default.backup-1795842643.json",
+                     "default.backup-1795842643-2.json",
+                     "default.backup-1795842643-3.json"]
+
+
+def test_backup_failure_is_store_error(roots, monkeypatch):
+    import shutil
+    path = binding_store.user_path("default")
+    path.parent.mkdir(parents=True)
+    path.write_text("{}", encoding="utf-8")
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(shutil, "copyfile", boom)
+    with pytest.raises(binding_store.StoreError):
+        binding_store.backup("default")

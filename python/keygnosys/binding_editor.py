@@ -8,6 +8,7 @@ history of whole-document snapshots. Every edit goes through
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -151,14 +152,43 @@ class BindingEditor:
     def _travel(self, source: list[dict], sink: list[dict]) -> bool:
         if not source:
             return False
-        sink.append(self.bset.to_dict())
-        # Content travels; provenance does not. A save between edits forked
-        # and bumped the revision, and undoing an edit must not rewind that.
+        entry = source.pop()
+        with_metadata = "with_metadata" in entry
+        doc = entry["doc"] if with_metadata else entry
+        current = self.bset.to_dict()
+        sink.append({"doc": current, "with_metadata": True}
+                    if with_metadata else current)
         metadata = self.bset.metadata
-        self.bset = BindingSet.from_dict(source.pop())
-        self.bset.metadata = metadata
+        self.bset = BindingSet.from_dict(doc)
+        if with_metadata:
+            # An import replaced the metadata too, so travelling over it
+            # restores it, except the revision: saves only move that forward.
+            self.bset.metadata.revision = metadata.revision
+        else:
+            # Content travels; provenance does not. A save between edits
+            # forked and bumped the revision, and undoing an edit must not
+            # rewind that.
+            self.bset.metadata = metadata
         self._on_change(self.bset)
         return True
+
+    def replace_all(self, new: BindingSet, imported_from: dict) -> None:
+        """Replace the whole map with `new` as one undoable step.
+
+        `new` is not modified. The result keeps this map's id, revision and
+        source template, and records `imported_from` in its metadata.
+        """
+        snapshot = self.bset.to_dict()
+        replacement = BindingSet.from_dict(new.to_dict())
+        current = self.bset
+        replacement.id = current.id
+        replacement.metadata.revision = current.metadata.revision
+        replacement.metadata.source_template = current.metadata.source_template
+        replacement.metadata.extra["imported_from"] = copy.deepcopy(imported_from)
+        self.bset = replacement
+        self._undo.append({"doc": snapshot, "with_metadata": True})
+        self._redo.clear()
+        self._on_change(self.bset)
 
     def _edit(self, mutate: Callable[[], object]) -> None:
         snapshot = self.bset.to_dict()

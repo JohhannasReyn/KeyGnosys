@@ -940,10 +940,15 @@ _LOADERS = {
 }
 
 
-def _is_moved_aside(path: Path) -> bool:
-    """True for `<id>.broken-<digits>.json`, the name Reset gives a broken copy."""
-    stem, _, suffix = path.stem.rpartition(".broken-")
-    return bool(stem) and suffix.isdigit()
+_SET_ASIDE_RE = re.compile(r".+\.(?:broken-\d+|backup-\d+(?:-\d+)?)")
+
+
+def is_set_aside(path: Path) -> bool:
+    """True for `<id>.broken-<digits>.json` and `<id>.backup-<digits>[-<n>].json`.
+
+    These are the names Reset and Import give a copy they keep for the user.
+    """
+    return bool(_SET_ASIDE_RE.fullmatch(path.stem))
 
 
 class Registry:
@@ -975,9 +980,9 @@ class Registry:
             return
         target = getattr(self, kind)
         for path in sorted(directory.glob("*.json")):
-            if _is_moved_aside(path):
-                # A broken copy Reset moved aside (<id>.broken-<ts>.json) is
-                # kept for the user, never loaded: under its own id it could
+            if is_set_aside(path):
+                # A copy Reset moved aside (<id>.broken-<ts>.json) or Import
+                # backed up (<id>.backup-<ts>.json) is kept for the user, never loaded: under its own id it could
                 # shadow the map it was moved away from.
                 continue
             try:

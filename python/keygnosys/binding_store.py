@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -155,3 +156,24 @@ def reset_to_shipped(bindings_id: str) -> BindingSet:
         else:
             user.unlink()
     return load(bindings_id)
+
+
+def backup(bindings_id: str) -> Path | None:
+    """Copy the user file byte for byte to `<id>.backup-<ts>[-<n>].json`.
+
+    Returns the backup's path, or None when there is no user copy.
+    """
+    user = user_path(bindings_id)
+    if not user.exists():
+        return None
+    stamp = int(time.time())
+    target = user.with_name(f"{bindings_id}.backup-{stamp}.json")
+    n = 2
+    while target.exists():
+        target = user.with_name(f"{bindings_id}.backup-{stamp}-{n}.json")
+        n += 1
+    try:
+        shutil.copyfile(user, target)
+    except OSError as exc:
+        raise StoreError(f"could not back up {user}: {exc}") from exc
+    return target

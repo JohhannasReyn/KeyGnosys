@@ -249,3 +249,28 @@ def test_a_moved_aside_broken_copy_is_never_loaded(tmp_path) -> None:
 
     assert reg.bindings == {}
     assert list(reg.diagnostics) == []
+
+
+def test_registry_skips_backup_files(tmp_path) -> None:
+    def doc(name):
+        return json.dumps({"schema": "keygnosys/bindings/2", "id": "default",
+                           "name": name, "bindings": {}})
+    (tmp_path / "default.json").write_text(doc("real"), encoding="utf-8")
+    (tmp_path / "default.backup-1795842643.json").write_text(doc("b1"), encoding="utf-8")
+    (tmp_path / "default.backup-1795842643-2.json").write_text(doc("b2"), encoding="utf-8")
+    reg = Registry()
+    reg._load_dir("bindings", tmp_path)
+    assert reg.bindings["default"].name == "real"
+    assert list(reg.diagnostics) == []
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("a.broken-1.json", True), ("a.backup-1.json", True),
+    ("a.backup-1-2.json", True), ("a.json", False),
+    ("a.backup-x.json", False), ("backup-1.json", False),
+    ("a.backup-1-.json", False),
+])
+def test_is_set_aside_names(name, expected) -> None:
+    from pathlib import Path
+    from keygnosys.documents import is_set_aside
+    assert is_set_aside(Path(name)) is expected
