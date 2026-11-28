@@ -27,6 +27,9 @@ class ControlBar(QWidget):
     hideRequested = Signal()
     quitRequested = Signal()
     dragged = Signal(QPoint)
+    defineToggled = Signal(bool)
+    undoRequested = Signal()
+    redoRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -85,6 +88,19 @@ class ControlBar(QWidget):
         self._click.toggled.connect(self.clickThroughToggled)
         root.addWidget(self._click)
 
+        self.define_button = _toggle("Define", "Edit what each key does in "
+                                               "the cursor layer")
+        self.define_button.toggled.connect(self._on_define_toggled)
+        root.addWidget(self.define_button)
+
+        self.undo_button = _button("↶", "Undo the last binding edit")
+        self.undo_button.clicked.connect(self.undoRequested)
+        root.addWidget(self.undo_button)
+
+        self.redo_button = _button("↷", "Redo")
+        self.redo_button.clicked.connect(self.redoRequested)
+        root.addWidget(self.redo_button)
+
         self._hide = _button("▁", "Hide the keyboard (the bar stays)")
         self._hide.clicked.connect(self.hideRequested)
         root.addWidget(self._hide)
@@ -95,9 +111,15 @@ class ControlBar(QWidget):
 
         root.addWidget(_separator())
 
+        self.define_indicator = QLabel("● DEFINE MODE")
+        self.define_indicator.setObjectName("define")
+        root.addWidget(self.define_indicator)
+
         self._status = QLabel()
         self._status.setObjectName("status")
         root.addWidget(self._status)
+
+        self.set_define_mode(False, False, False)
 
     # -- population -------------------------------------------------------
 
@@ -134,6 +156,20 @@ class ControlBar(QWidget):
         self._click.setToolTip(reason)
         self._click.blockSignals(False)
 
+    def set_define_mode(self, on: bool, can_undo: bool, can_redo: bool) -> None:
+        """Show define mode's controls. There is no separate Done button:
+        while define mode is on, the Define toggle reads "Done"."""
+        self.define_button.blockSignals(True)
+        self.define_button.setChecked(on)
+        self.define_button.blockSignals(False)
+        self.define_button.setText("Done" if on else "Define")
+        for button, enabled in ((self.undo_button, can_undo),
+                                (self.redo_button, can_redo)):
+            button.setVisible(on)
+            button.setEnabled(enabled)
+        self.define_indicator.setVisible(on)
+        self.adjustSize()
+
     def set_status(self, text: str, tooltip: str = "") -> None:
         self._status.setText(text)
         self._status.setToolTip(tooltip)
@@ -151,6 +187,7 @@ class ControlBar(QWidget):
             }}
             QLabel {{ color: {text.name()}; font-size: 11px; }}
             QLabel#title {{ font-weight: 600; }}
+            QLabel#define {{ color: #FFB020; font-weight: 700; }}
             QLabel#status {{ color: {theme.key_text_dim.name()}; font-size: 10px; }}
             QToolButton {{
                 color: {text.name()};
@@ -208,6 +245,10 @@ class ControlBar(QWidget):
         super().mouseReleaseEvent(event)
 
     # -- signal plumbing --------------------------------------------------
+
+    def _on_define_toggled(self, on: bool) -> None:
+        self.define_button.setText("Done" if on else "Define")
+        self.defineToggled.emit(on)
 
     def _emit_layout(self, index: int) -> None:
         data = self._layout_box.itemData(index)

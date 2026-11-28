@@ -285,6 +285,16 @@ Every row here is a P7 test. A failure leaves a key or a button held.
 | 12.3 | Trigger the `overlay.toggle` action. | The overlay shows or hides. |
 | 12.4 | Move a window between monitors and watch the overlay. | The slot list updates within about 250 ms, and not more often than that. |
 
+## 13. Define mode
+
+| # | Procedure | Expected |
+|---|---|---|
+| 13.1 | Enter define mode (**Define** on the control bar), reassign `D` to Right click, engage the layer, and press `D`. | The right click happens. |
+| 13.2 | Repeat 13.1, but first clear `Space`: the shipped map also puts Left click there, and a command still bound elsewhere is not displaced (SPEC §10.2.2). Then look under **Unassigned** in the picker. | The displaced Left click appears under Unassigned as "was on D". |
+| 13.3 | Press Undo on the control bar. | `D` returns to Left click, live: the next press of `D` in the layer left-clicks. |
+| 13.4 | With the core stopped, make an edit, then start the core. | The edit applies. |
+| 13.5 | Hand-break the user file (`%APPDATA%\KeyGnosys\bindings\default.json`), then enter define mode. Use **Reset to shipped**. | Entering define mode says the file has an error. Reset moves it aside to `default.broken-<unix_ts>.json`; it is not deleted. |
+
 ---
 
 ## Rows deliberately absent

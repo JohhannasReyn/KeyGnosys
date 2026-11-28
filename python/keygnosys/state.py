@@ -83,6 +83,12 @@ class AppState:
     #: The blocked-action notice and its time.monotonic() deadline.
     notice: str = ""
     notice_until: float = 0.0
+    #: The diagnostic that raised the notice, so a vaguer report of the same
+    #: problem does not replace a more informative one still showing.
+    notice_code: str = ""
+    notice_has_file: bool = False
+    #: Define mode is open: the keyboard shows the cursor layer being edited.
+    define_mode: bool = False
     caps_lock_led: bool = False
     num_lock_led: bool = True
     scroll_lock_led: bool = False
@@ -119,7 +125,7 @@ class AppState:
         return canonical_modifiers(mods)
 
     def active_layer(self) -> LegendLayer:
-        if self.cursor_layer:
+        if self.cursor_layer or self.define_mode:
             return LegendLayer.CURSOR
         if self.modifier_combo():
             return LegendLayer.MODIFIER
@@ -276,7 +282,30 @@ class AppState:
         self.notice = ("Drag lock refused — crash-release guardian "
                        f"unavailable ({reason})")
         self.notice_until = now + NOTICE_S
+        self.notice_code = "button.drag_lock_refused"
+        self.notice_has_file = False
         self.flash_protection(now)
+        return True
+
+    def note_config_problem(self, diagnostic: dict,
+                            now: float | None = None) -> bool:
+        """Turn a core diagnostic saying the user's bindings were rejected into
+        the notice tray's text. Returns whether the notice changed.
+
+        One failure can arrive twice: the parser's report, naming the file,
+        then a file-less summary. The summary does not replace the report
+        while the report is still showing."""
+        if diagnostic.get("code") != "binding.invalid":
+            return False
+        now = time.monotonic() if now is None else now
+        has_file = bool(diagnostic.get("file"))
+        if (not has_file and self.notice_code == "binding.invalid"
+                and self.notice_has_file and self.notice_text(now)):
+            return False
+        self.notice = f"Bindings not applied — {diagnostic.get('message', '')}"
+        self.notice_until = now + NOTICE_S
+        self.notice_code = "binding.invalid"
+        self.notice_has_file = has_file
         return True
 
     def notice_text(self, now: float | None = None) -> str | None:

@@ -129,6 +129,15 @@ and editing the copy. An upgrade that changes the bundled original will not
 silently overwrite the user's work, and will not silently take effect either. The
 settings UI **MUST** offer a one-click "fork this to my config" action.
 
+For binding sets the fork is **implicit**: the binding editor's first save of a
+bundled set writes the user copy under the same `id` (setting
+`metadata.source_template`), and every later save edits that copy. While a user
+copy shadows a bundled one, the editor offers **Reset to shipped**, which deletes
+the user copy — or, if it does not load, moves it aside to
+`<id>.broken-<unix_ts>.json`, never deleting it — and returns to the bundled set.
+A user copy that exists but does not load is never overwritten by a save. *Duplicate
+set* (fork under a new id) and *Reset to source template* (§10.2.4) are deferred.
+
 ### 3.3 Live reload
 
 The user config directory **SHOULD** be watched. On change, the affected registry
@@ -2050,6 +2059,27 @@ Decides what each key does while the cursor layer is engaged. It edits binding
 documents (§4.2), and it renders on the same canvas as the layout editor: click a
 key on the drawn keyboard, choose a command, done.
 
+**Placement: on the overlay itself.** The control bar's **Define** toggle opens
+*define mode* (the toggle reads **Done** while it is open, and the bar shows
+`● DEFINE MODE` with Undo and Redo). While define mode is open:
+
+- click-through is held off, so the keyboard can be clicked; the stored
+  preference is unchanged and is restored on exit;
+- the keyboard shows the cursor layer being edited, the selected key outlined
+  in orange, and the keys that cannot hold a binding — the activation key and
+  the eight modifiers — dimmed and unclickable;
+- a side picker docks beside the keyboard and follows it: the grouped command
+  list with its Unassigned group (§10.2.3), the selected key's label, Clear,
+  the layer's tuning settings, and Reset to shipped (§3.2).
+
+Every edit is saved to the user copy at once (atomically) and the core is asked
+to `reload_config` after 300 ms of quiet, so a burst of edits costs one reload.
+While the core is unreachable the reload waits for the next connection. The
+overlay never sends `set_bindings`: the file is the one source both sides read.
+If the core reports that it now runs a *different* bindings id, define mode
+closes with a notice rather than saving edits into a map the core no longer
+runs. Losing the core does not close it.
+
 #### 10.2.1 A key holds one command; a command may sit on many keys
 
 These are not symmetric, and the asymmetry is what makes reassignment simple.
@@ -2233,6 +2263,11 @@ logic inherited from the prototype can be tested at all.
 | **M5** | Configuration UI | Settings dialog, binding editor with silent reassignment and the unassigned-commands list, profile editor, **the layer indicator (§9.7)** |
 | **M6** | **Visual layout editor** | Canvas, key palette, move/resize/align/distribute/snap, segment-edit mode, validation panel, import/export, reset-to-template |
 | **M7** | Packaging | Windows installer, Linux packages, first release |
+
+**M5 note: the binding editor moved ahead of M4.** It shipped first, as define
+mode on the overlay (§10.2), once M3 made the layer drive a real mouse.
+Per-program binding maps and macros follow it, as projects 3 and 4; the rest of
+M5 keeps its place.
 
 **M1 is revised, not extended.** Segmented keys land in the schema, the loader,
 the validator, the renderer and the bundled layouts *now*. What is deferred to
