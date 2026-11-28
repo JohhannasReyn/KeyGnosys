@@ -705,12 +705,15 @@ editor's Export (§10.2.5). It is plain JSON with the extension `.keygnosys.json
 restored. Import **MUST** refuse, with a reason and without writing anything:
 
 - a file over 5 MB (5 * 1024 * 1024 bytes), refused before it is read;
-- a file that is not valid UTF-8 or not JSON;
+- a file that is not valid UTF-8 or not JSON (a leading UTF-8 byte order mark
+  is accepted, so a hand-edited file saved with one still imports);
 - an unknown schema, or a bundle or bindings major newer than this build knows
   ("made by a newer KeyGnosys");
 - a bundle with no bindings document, or with more than one;
 - a bindings document that is structurally broken (a bad `id`, `bindings` not an
-  object).
+  object), or damaged in any other way that stops it being read (a wrong type,
+  an out-of-range number, nesting too deep), refused as "This map is damaged and
+  cannot be read."
 
 **Unknown document kinds are refused whole.** A bundle holding a document kind
 this build does not know (for example a later `appmap/1`) is refused entirely,
@@ -2221,7 +2224,12 @@ file (§4.6).
   **Your name (for credit)** field (empty by default) and a **Warnings**
   section. The warnings list commands this build does not know; they are
   exported unchanged. **Save…** opens the system save dialog, suggesting
-  `<map name>.keygnosys.json`, and the file is written atomically. Export
+  `<map name>.keygnosys.json`, and the file is written atomically. The
+  suggested name is made safe first, as the map name may come from someone
+  else's file: path separators, the characters `: * ? " < > |` and control
+  characters become `_`, leading and trailing dots and spaces are dropped, and
+  the name is cut to 100 characters; an empty result falls back to the map's
+  `id`, then `keymap`. Export
   changes nothing: no undo entry, no save, no reload. The notice reads
   "Exported to {file}."
 - **Import** opens a system open dialog and reads the chosen file. The whole file
@@ -2237,17 +2245,22 @@ file (§4.6).
   byte to `<id>.backup-<unix_ts>.json` before anything else changes (§3.2). If
   that name is taken, `-2`, `-3` and so on are appended. If there is no user
   copy, no backup is written, because the shipped map is the backup. If the
-  backup cannot be written, the import stops and changes nothing.
+  backup cannot be written, the import stops and changes nothing. If the save
+  of the imported map then fails, the import is undone in memory, the backup
+  just written is removed, nothing is reloaded and the notice reads
+  "Not imported — " and the reason.
 - **One Undo.** The import replaces the map as a single edit, then saves and
   reloads like any other edit. **Undo** reverts the whole import in one step,
   restoring the previous metadata too, except `revision`, which never goes
-  backwards. The imported map takes the running `id` and keeps the current
+  backwards, and a `source_template` the import's save set when it forked the
+  shipped map. The imported map takes the running `id` and keeps the current
   `source_template`. Its `revision` continues from the current map's, and
   `metadata.imported_from` records `{id, name, author, exported}`. When its
   `author` is empty, the bundle header's `author` fills it. The notice reads
   "Imported '{name}'. Your previous map is saved as {backup}." or, with no
   backup, "Imported '{name}'. Undo or Reset to shipped brings back the previous
-  map."
+  map." A map name longer than 80 characters is cut to 80, ending in "…".
+  Notices are shown as plain text, never as markup.
 - **Dropping a file on the keyboard** starts the same import, with the same
   validation and preview; a drop never imports without the preview. While a
   file is dragged over the keyboard, a "Drop to import" highlight covers the
@@ -2260,7 +2273,9 @@ file (§4.6).
   cancelled, define mode closes again.
 - **While the user copy is broken** (§3.2), Export and Import are disabled with
   the tooltip "Reset to shipped first", and a drop is refused with the notice
-  "Reset to shipped first." Nothing is read.
+  "Reset to shipped first." Nothing is read. When the map cannot be read for
+  another reason (Reset is unavailable then), the tooltip and the refusal give
+  that reason instead: "Bindings unavailable — {reason}".
 
 ---
 

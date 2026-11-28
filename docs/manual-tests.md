@@ -304,6 +304,7 @@ Every row here is a P7 test. A failure leaves a key or a button held.
 | 14.3 | Import a map that changes some keys, then press **Undo** on the control bar. | The previous map is live again: the next press in the layer does what it did before the import. |
 | 14.4 | Truncate an exported file (cut it off mid-way) and import it. | The import is refused with a reason ("Not imported — ..."), and no `<id>.backup-<unix_ts>.json` appears in `%APPDATA%\KeyGnosys\bindings`. |
 | 14.5 | Drag a real `.keygnosys.json` file from Explorer onto the keyboard, first inside define mode, then outside it with click-through off. | The "Drop to import" highlight shows. The preview opens above the overlay and takes keyboard focus (Escape cancels it). Cancelling outside define mode leaves define mode closed. |
+| 14.6 | With the user copy broken (hand-truncate `%APPDATA%\KeyGnosys\bindings\default.json`), drop an exported file on the keyboard. | The notice reads "Reset to shipped first.", nothing changes, and no `<id>.backup-<unix_ts>.json` appears. |
 
 ---
 
