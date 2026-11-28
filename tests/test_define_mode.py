@@ -1196,3 +1196,31 @@ def test_suggested_export_name_is_a_bare_safe_file_name(make_overlay,
         assert pure(suggested).name == suggested
     if name in ("", " . "):
         assert suggested == f"default{bundle.EXTENSION}"
+
+
+def test_an_unreadable_map_refuses_transfer_with_its_own_reason(
+        make_overlay, user_root, tmp_path, monkeypatch, click_calls):
+    def unavailable(_id):
+        raise binding_store.StoreError("no bindings named 'default'")
+    monkeypatch.setattr(binding_store, "load", unavailable)
+    reason = "Bindings unavailable — no bindings named 'default'"
+    overlay = make_overlay()
+    transfer = Transfer(overlay)
+    path = import_file(tmp_path)
+
+    # A drop outside define mode opens it, refuses, and closes it again.
+    overlay.window.view.fileDropped.emit(path)
+    assert overlay.tray.text() == reason
+    assert not overlay.define.active
+
+    enter(overlay)
+    bar = overlay.bar
+    for button in (bar.export_button, bar.import_button):
+        assert not button.isEnabled()
+        assert button.toolTip() == reason
+    assert overlay.define.import_(path) is False
+    assert overlay.tray.text() == reason
+    overlay.define.export()
+    assert overlay.tray.text() == reason
+    assert transfer.imports == [] and transfer.exports == []
+    assert not user_file(user_root).exists()

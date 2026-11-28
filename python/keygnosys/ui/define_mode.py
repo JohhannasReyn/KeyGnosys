@@ -69,6 +69,9 @@ class DefineMode:
         self.reload_pending = False
         #: The offline notice has been shown in this disconnected stretch.
         self._offline_noticed = False
+        #: Why the editor could not open, when the user copy is not broken
+        #: but cannot be read either; None otherwise.
+        self._unavailable: str | None = None
         #: Why the last save failed, or None if it succeeded.
         self._save_error: str | None = None
 
@@ -184,6 +187,7 @@ class DefineMode:
 
     def _open_editor(self) -> None:
         o = self._o
+        self._unavailable = None
         try:
             bset = binding_store.load(self.bindings_id)
         except binding_store.BrokenUserCopy as exc:
@@ -195,8 +199,9 @@ class DefineMode:
             o.show_notice(BROKEN_NOTICE.format(reason=exc.reason))
             return
         except binding_store.StoreError as exc:
+            self._unavailable = f"Bindings unavailable — {exc}"
             self._set_editor(None, can_reset=False)
-            o.show_notice(f"Bindings unavailable — {exc}")
+            o.show_notice(self._unavailable)
             return
         self._set_editor(bset, binding_store.shadows_shipped(self.bindings_id))
 
@@ -278,11 +283,17 @@ class DefineMode:
         the file but Reset."""
         return self.active and self.editor is not None
 
+    @property
+    def transfer_refusal(self) -> str:
+        """Why Export and Import are refused: Reset is the way on from a
+        broken copy, but not from one that merely cannot be read."""
+        return self._unavailable or RESET_FIRST
+
     def export(self) -> None:
         """Write the running map to a bundle file. Changes nothing: no save,
         no reload, no undo entry."""
         if not self.can_transfer:
-            self._o.show_notice(RESET_FIRST)
+            self._o.show_notice(self.transfer_refusal)
             return
         # The file should match what the user sees, typed label included.
         self.picker.commit_pending()
@@ -314,7 +325,7 @@ class DefineMode:
         """Replace the running map with one from a file, as one undoable
         edit. Returns whether the map was replaced."""
         if not self.can_transfer:
-            self._o.show_notice(RESET_FIRST)
+            self._o.show_notice(self.transfer_refusal)
             return False
         if path is None:
             path = self.choose_open_path()
@@ -493,7 +504,8 @@ class DefineMode:
         self._o.bar.set_define_mode(self.active,
                                     bool(e and e.can_undo),
                                     bool(e and e.can_redo),
-                                    self.can_transfer)
+                                    self.can_transfer,
+                                    self.transfer_refusal)
 
 
 def _capped(name: str, limit: int = NOTICE_NAME_MAX) -> str:

@@ -173,12 +173,14 @@ class ControlBar(QWidget):
         self._click.blockSignals(False)
 
     def set_define_mode(self, on: bool, can_undo: bool, can_redo: bool,
-                        can_transfer: bool = True) -> None:
+                        can_transfer: bool = True,
+                        refusal: str = RESET_FIRST) -> None:
         """Show define mode's controls. There is no separate Done button:
         while define mode is on, the Define toggle reads "Done".
 
         `can_transfer` is False while the user copy is broken: there is no
-        map to export, and nothing may be written over the broken file."""
+        map to export, and nothing may be written over the broken file.
+        `refusal` is then the buttons' tooltip."""
         self.define_button.blockSignals(True)
         self.define_button.setChecked(on)
         self.define_button.blockSignals(False)
@@ -191,7 +193,7 @@ class ControlBar(QWidget):
             button.setEnabled(enabled)
         for button, tip in ((self.export_button, EXPORT_TIP),
                             (self.import_button, IMPORT_TIP)):
-            button.setToolTip(tip if can_transfer else RESET_FIRST)
+            button.setToolTip(tip if can_transfer else refusal)
         self.define_indicator.setVisible(on)
         self.adjustSize()
 
