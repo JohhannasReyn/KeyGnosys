@@ -10,6 +10,7 @@ See docs/SPEC.md section 4 for the formats and section 11 for diagnostic codes.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from dataclasses import dataclass, field
@@ -273,6 +274,9 @@ class Key:
             seg.y += dy
 
 
+_METADATA_FIELDS = frozenset({"author", "source_template", "model", "revision"})
+
+
 @dataclass
 class Metadata:
     """Provenance. Records where a document came from, for reset-to-template."""
@@ -281,6 +285,9 @@ class Metadata:
     source_template: str | None = None
     model: str | None = None
     revision: int = 1
+    #: Keys this class does not model, written back so a newer release's
+    #: provenance survives a save from an older one.
+    extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, raw: Any) -> "Metadata":
@@ -295,7 +302,18 @@ class Metadata:
             source_template=raw.get("source_template"),
             model=raw.get("model"),
             revision=revision,
+            extra={k: copy.deepcopy(v) for k, v in raw.items()
+                   if k not in _METADATA_FIELDS},
         )
+
+    def to_dict(self) -> dict:
+        out: dict[str, Any] = copy.deepcopy(self.extra)
+        out.update({"author": self.author, "revision": self.revision})
+        if self.source_template is not None:
+            out["source_template"] = self.source_template
+        if self.model is not None:
+            out["model"] = self.model
+        return out
 
 
 def _synth_id(raw: Any, prefix: str, index: int) -> str:
@@ -436,6 +454,13 @@ class Layout:
     def codes(self) -> set[str]:
         return {k.code for k in self.keys}
 
+    def display_name(self, code: str) -> str:
+        """The name the overlay draws on `code`'s base layer, else the code."""
+        for key in self.keys:
+            if key.code == code and key.base.strip():
+                return key.base
+        return code
+
     def key_by_id(self, key_id: str) -> Key | None:
         return next((k for k in self.keys if k.id == key_id), None)
 
@@ -508,6 +533,16 @@ DEFAULT_BINDING_SETTINGS = {
 }
 
 
+#: Top-level fields BindingSet models; anything else is carried in extra_fields.
+_BINDING_DOC_FIELDS = frozenset(
+    {"schema", "id", "name", "description", "metadata", "settings",
+     "bindings", "unassigned"})
+
+
+#: Fields of one binding entry that Binding models; the rest go to `extra`.
+_BINDING_ENTRY_FIELDS = frozenset({"action", "params", "legend", "was_on"})
+
+
 @dataclass
 class Binding:
     """One command: an action, its parameters, and an optional custom label."""
@@ -515,6 +550,21 @@ class Binding:
     action: str
     params: dict[str, Any] = field(default_factory=dict)
     legend: str | None = None
+    #: Only meaningful while the command sits in `unassigned`: the key it was
+    #: last bound to. Informational, and not part of its identity.
+    was_on: str | None = None
+    #: Entry fields this class does not model, written back verbatim. Not
+    #: part of identity.
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        out: dict[str, Any] = copy.deepcopy(self.extra)
+        out.update({"action": self.action, "params": dict(self.params)})
+        if self.legend is not None:
+            out["legend"] = self.legend
+        if self.was_on is not None:
+            out["was_on"] = self.was_on
+        return out
 
     def identity(self) -> tuple:
         """What makes two commands "the same command".
@@ -541,6 +591,14 @@ class BindingSet:
     unassigned: list[Binding] = field(default_factory=list)
     metadata: Metadata = field(default_factory=Metadata)
     schema_major: int = BINDINGS_SCHEMA_MAJOR
+    #: Raw entries for keys whose action this build does not know. Written back
+    #: verbatim so a newer build's bindings survive a save from an older one.
+    extra_bindings: dict[str, dict] = field(default_factory=dict)
+    #: Raw `unassigned` entries this build cannot model, kept the same way.
+    extra_unassigned: list[dict] = field(default_factory=list)
+    #: Top-level document fields this class does not model, kept for the same
+    #: reason.
+    extra_fields: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, doc: dict, sink: "DiagnosticSink | None" = None,
@@ -557,17 +615,25 @@ class BindingSet:
                 sink.warn(code, message, origin)
 
         bindings: dict[str, Binding] = {}
+        extra_bindings: dict[str, dict] = {}
         for code, spec in raw.items():
             binding = _binding_from_dict(spec, str(code), warn)
             if binding is not None:
                 bindings[code] = binding
+            elif isinstance(spec, dict) and "action" in spec:
+                # Unknown action, or known action with params this build
+                # rejects (e.g. a newer enum value): keep it verbatim.
+                extra_bindings[code] = copy.deepcopy(spec)
 
         bound = {b.identity() for b in bindings.values()}
         unassigned: list[Binding] = []
+        extra_unassigned: list[dict] = []
         seen: set[tuple] = set()
         for i, spec in enumerate(doc.get("unassigned") or []):
             binding = _binding_from_dict(spec, f"unassigned[{i}]", warn)
             if binding is None:
+                if isinstance(spec, dict) and "action" in spec:
+                    extra_unassigned.append(copy.deepcopy(spec))
                 continue
             identity = binding.identity()
             if identity in bound:
@@ -594,7 +660,35 @@ class BindingSet:
             unassigned=unassigned,
             metadata=Metadata.from_dict(doc.get("metadata")),
             schema_major=major,
+            extra_bindings=extra_bindings,
+            extra_unassigned=extra_unassigned,
+            extra_fields={k: copy.deepcopy(v) for k, v in doc.items()
+                          if k not in _BINDING_DOC_FIELDS},
         )
+
+    def to_dict(self) -> dict:
+        """A complete `keygnosys/bindings/2` document.
+
+        Always the current schema: upgrading happens on save, never in place
+        (SPEC 3.4.4). A modelled binding wins over a preserved unknown one on
+        the same key.
+        """
+        out: dict[str, Any] = {
+            "schema": f"keygnosys/bindings/{BINDINGS_SCHEMA_MAJOR}",
+            "id": self.id,
+            "name": self.name,
+        }
+        if self.description:
+            out["description"] = self.description
+        out["metadata"] = self.metadata.to_dict()
+        out["settings"] = dict(self.settings)
+        merged: dict[str, dict] = copy.deepcopy(self.extra_bindings)
+        merged.update({code: b.to_dict() for code, b in self.bindings.items()})
+        out["bindings"] = merged
+        out["unassigned"] = ([b.to_dict() for b in self.unassigned]
+                             + copy.deepcopy(self.extra_unassigned))
+        out.update(copy.deepcopy(self.extra_fields))
+        return out
 
     # -- assignment (SPEC 10.2.2) -----------------------------------------
 
@@ -614,34 +708,39 @@ class BindingSet:
         Returns the displaced command, if the key held one.
         """
         displaced = self.bindings.get(code)
+        self.extra_bindings.pop(code, None)
         self.bindings[code] = command
 
         # A command may legitimately sit on several keys, so it only becomes
         # unassigned when its *last* key is taken.
         if displaced is not None and not self.keys_for(displaced):
-            self._remember_unassigned(displaced)
+            self._remember_unassigned(displaced, code)
 
         # If the incoming command came from the unassigned list, it is now
         # assigned and must leave it.
         identity = command.identity()
         self.unassigned = [b for b in self.unassigned
                            if b.identity() != identity]
+        command.was_on = None
         return displaced
 
     def unassign(self, code: str) -> Binding | None:
         """Clear a key, moving its command to the unassigned list."""
         removed = self.bindings.pop(code, None)
+        self.extra_bindings.pop(code, None)
         if removed is not None and not self.keys_for(removed):
-            self._remember_unassigned(removed)
+            self._remember_unassigned(removed, code)
         return removed
 
-    def _remember_unassigned(self, command: Binding) -> None:
+    def _remember_unassigned(self, command: Binding, code: str) -> None:
         identity = command.identity()
         if any(b.identity() == identity for b in self.unassigned):
             return
         # Kept with its params and custom legend intact: a user who wrote
         # "Send to left screen" on a key should not have to retype it because
         # they moved it.
+        # `was_on` says where it came from, so the editor can offer it back.
+        command.was_on = code
         self.unassigned.append(command)
 
     def available_commands(self) -> list[Binding]:
@@ -676,7 +775,11 @@ def _binding_from_dict(spec: Any, where: str, warn) -> Binding | None:
         # A bad command is skipped; every other one in the file still loads.
         warn(f"{where}: {problem}")
         return None
-    return Binding(action=action, params=params, legend=spec.get("legend"))
+    was_on = spec.get("was_on")
+    return Binding(action=action, params=params, legend=spec.get("legend"),
+                   was_on=was_on if isinstance(was_on, str) else None,
+                   extra={k: copy.deepcopy(v) for k, v in spec.items()
+                          if k not in _BINDING_ENTRY_FIELDS})
 
 
 # ---------------------------------------------------------------------------
@@ -837,6 +940,12 @@ _LOADERS = {
 }
 
 
+def _is_moved_aside(path: Path) -> bool:
+    """True for `<id>.broken-<digits>.json`, the name Reset gives a broken copy."""
+    stem, _, suffix = path.stem.rpartition(".broken-")
+    return bool(stem) and suffix.isdigit()
+
+
 class Registry:
     """All loaded documents, keyed by kind then id.
 
@@ -866,6 +975,11 @@ class Registry:
             return
         target = getattr(self, kind)
         for path in sorted(directory.glob("*.json")):
+            if _is_moved_aside(path):
+                # A broken copy Reset moved aside (<id>.broken-<ts>.json) is
+                # kept for the user, never loaded: under its own id it could
+                # shadow the map it was moved away from.
+                continue
             try:
                 doc = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:

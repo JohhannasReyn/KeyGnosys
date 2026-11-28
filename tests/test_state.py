@@ -370,3 +370,36 @@ def test_unprotected_status_names_the_reason(state: AppState) -> None:
     text, tip = state.status_text()
     assert "unprotected" in text.lower()
     assert "spawn_failed" in tip
+
+
+def test_binding_invalid_becomes_a_notice(state: AppState) -> None:
+    diagnostic = {"level": "error", "code": "binding.invalid",
+                  "message": "KeyD: unknown action 'button.klick'",
+                  "file": "C:/cfg/bindings/default.json"}
+    assert state.note_config_problem(diagnostic, now=100.0) is True
+    assert state.notice_text(now=100.0) == \
+        "Bindings not applied — KeyD: unknown action 'button.klick'"
+    assert state.notice_text(now=103.9) is not None
+    assert state.notice_text(now=104.0) is None
+
+
+def test_other_diagnostics_are_not_config_problems(state: AppState) -> None:
+    assert state.note_config_problem({"code": "output.unprotected"},
+                                     now=100.0) is False
+    assert state.notice_text(now=100.0) is None
+
+
+def test_a_file_less_summary_does_not_replace_the_detailed_notice(
+        state: AppState) -> None:
+    detailed = {"code": "binding.invalid", "message": "KeyD: bad params",
+                "file": "default.json"}
+    summary = {"code": "binding.invalid", "message": "user bindings rejected",
+               "file": ""}
+    state.note_config_problem(detailed, now=100.0)
+    assert state.note_config_problem(summary, now=100.1) is False
+    assert state.notice_text(now=100.1) == \
+        "Bindings not applied — KeyD: bad params"
+    # Once the detailed notice is gone, a summary alone is still shown.
+    assert state.note_config_problem(summary, now=105.0) is True
+    assert state.notice_text(now=105.0) == \
+        "Bindings not applied — user bindings rejected"

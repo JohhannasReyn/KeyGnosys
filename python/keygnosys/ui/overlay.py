@@ -7,15 +7,18 @@ and the two windows. Nothing here decides what a key *says* -- that is
 
 from __future__ import annotations
 
+import time
+
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
-from .. import paths
+from .. import binding_store, paths
 from ..coreclient.base import CoreClient
 from ..documents import Registry
 from ..settings import Settings
 from ..state import NOTICE_S, PROTECTION_FLASH_S, AppState
 from .control_bar import ControlBar
+from .define_mode import DefineMode
 from .keyboard_view import KeyboardView
 from .notice_tray import NoticeTray
 from .platform import clickthrough
@@ -62,6 +65,7 @@ class Overlay:
         self.window = KeyboardWindow(self.state)
         self.bar = ControlBar()
         self.tray = NoticeTray()
+        self.define = DefineMode(self)
 
         self._apply_documents()
         self._populate_bar()
@@ -107,6 +111,7 @@ class Overlay:
         )
         self.window.view.set_theme(resolved)
         self.bar.apply_theme(resolved)
+        self.define.picker.apply_theme(resolved)
 
     def _populate_bar(self) -> None:
         layouts = sorted(
@@ -154,6 +159,11 @@ class Overlay:
         self.bar.hideRequested.connect(self._on_hide)
         self.bar.quitRequested.connect(self._on_quit)
         self.bar.dragged.connect(self._on_dragged)
+        self.bar.defineToggled.connect(self.define.set_active)
+        self.bar.undoRequested.connect(self.define.undo)
+        self.bar.redoRequested.connect(self.define.redo)
+        self.window.view.keyClicked.connect(self.define.on_key_clicked)
+        self.window.view.bindingDropped.connect(self.define.on_binding_dropped)
 
     def _connect_client(self) -> None:
         self.client.keyEvent.connect(self._on_key)
@@ -166,6 +176,7 @@ class Overlay:
         self.client.overlayToggleRequested.connect(self._on_hide)
         self.client.connected.connect(self._on_connected)
         self.client.disconnected.connect(self._on_disconnected)
+        self.client.configChanged.connect(self.define.on_config_changed)
 
     # -- client events ----------------------------------------------------
 
@@ -195,15 +206,33 @@ class Overlay:
         self.window.view.update()
 
     def _on_diagnostic(self, payload: dict) -> None:
-        if not self.state.note_blocked(payload):
+        now = time.monotonic()
+        if self.state.note_blocked(payload, now):
+            self.window.view.update()
+            # Nothing else may arrive to repaint, so schedule the clearing one.
+            QTimer.singleShot(int(PROTECTION_FLASH_S * 1000) + 50,
+                              self.window.view.update)
+        elif not self.state.note_config_problem(payload, now):
             return
-        # Say what was blocked and why, unasked: a tooltip needs a hover,
+        # Say what went wrong and why, unasked: a tooltip needs a hover,
         # and in click-through mode a click first.
         self.tray.show_notice(self.state.notice, self.window.frameGeometry(), NOTICE_S)
+
+    def show_notice(self, text: str) -> None:
+        """Show `text` in the notice tray under the keyboard."""
+        self.tray.show_notice(text, self.window.frameGeometry(), NOTICE_S)
+
+    def reload_binding_set(self, bindings_id: str | None) -> None:
+        """Redraw from the map the core now runs: the user copy if it loads,
+        else whatever the registry holds under that id."""
+        bindings_id = (bindings_id or self.client.bindings_id
+                       or self.settings.get("behavior.bindings"))
+        try:
+            bset = binding_store.load(bindings_id)
+        except binding_store.StoreError:
+            bset = self.registry.binding_set(bindings_id) or self.state.binding_set
+        self.state.binding_set = bset
         self.window.view.update()
-        # Nothing else may arrive to repaint, so schedule the clearing one.
-        QTimer.singleShot(int(PROTECTION_FLASH_S * 1000) + 50,
-                          self.window.view.update)
 
     def _on_focus(self, payload: dict) -> None:
         self.state.focus_process = payload.get("process")
@@ -217,13 +246,16 @@ class Overlay:
             int(s["index"]): s.get("title") or s.get("process") or ""
             for s in slots if s.get("index") is not None
         }
-        if self.state.cursor_layer:
+        # Slot legends are drawn wherever the cursor layer is shown, which
+        # includes define mode.
+        if self.state.cursor_layer or self.state.define_mode:
             self.window.view.update()
 
     def _on_connected(self, payload: dict) -> None:
         self.state.connected = True
         self.state.backend_name = payload.get("backends", {}).get("input", "?")
         self._update_status()
+        self.define.on_connected()
 
     def _on_disconnected(self, _reason: str) -> None:
         self.state.connected = False
@@ -248,6 +280,11 @@ class Overlay:
         self.settings.save()
 
     def _on_click_through(self, enabled: bool) -> None:
+        if self.define.active:
+            # Define mode holds click-through off; the choice takes effect,
+            # and is stored, when it closes.
+            self.define.remember_click_through(enabled)
+            return
         ok = clickthrough.set_click_through(self.window, enabled)
         if not ok:
             self.bar.disable_click_through(
@@ -281,6 +318,10 @@ class Overlay:
 
     def _on_hide(self) -> None:
         visible = not self.window.isVisible()
+        if not visible:
+            # Ruling R13: the picker belongs to the keyboard; hiding one
+            # leaves define mode normally rather than leave it floating.
+            self.define.exit()
         self.window.setVisible(visible)
         self.settings.set("appearance.overlay_visible", visible)
         self.settings.save()
@@ -294,6 +335,7 @@ class Overlay:
         self.window.move(top_left.x(),
                          top_left.y() + self.bar.height() + DOCK_GAP)
         self.tray.dock_under(self.window.frameGeometry())
+        self.define.follow()
         self._save_soon()
 
     # -- lifecycle --------------------------------------------------------
@@ -312,7 +354,7 @@ class Overlay:
 
     def _reapply_native_flags(self) -> None:
         clickthrough.set_no_activate(self.window)
-        if self.settings.get("window.click_through", True):
+        if self.settings.get("window.click_through", True) and not self.define.active:
             if not clickthrough.set_click_through(self.window, True):
                 self.bar.disable_click_through(
                     clickthrough.unavailable_reason()
@@ -334,6 +376,7 @@ class Overlay:
         self.window.move(top_left.x(),
                          top_left.y() + self.bar.height() + DOCK_GAP)
         self.tray.dock_under(self.window.frameGeometry())
+        self.define.follow()
 
     def _save_soon(self) -> None:
         """Debounce writes so dragging does not hammer the disk."""
@@ -350,5 +393,7 @@ class Overlay:
         self.settings.save()
 
     def shutdown(self) -> None:
+        # Leaving define mode sends any reload still waiting on the debounce.
+        self.define.exit()
         self._save_position()
         self.client.stop()

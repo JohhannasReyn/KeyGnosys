@@ -11,12 +11,18 @@ All *decisions* about what a key says and how it should look live in
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath
+import json
+
+from PySide6.QtCore import QMimeData, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen,
+)
 from PySide6.QtWidgets import QWidget
 
-from ..documents import Key, Layout, Segment
+from ..binding_editor import NOT_TARGETS
+from ..documents import Binding, Key, Layout, Segment
 from ..state import AppState, KeyStyle
+from .binding_picker import MIME_TYPE as BINDING_MIME
 from .theme import ResolvedTheme
 
 #: Pixels per layout unit at scale 1.0.
@@ -27,12 +33,19 @@ KEY_GAP_PX = 3.0
 BOARD_PAD_PX = 8.0
 #: Frames per second for the release fade animation.
 FADE_FPS = 60
+#: Define mode's selection outline.
+SELECTED_COLOUR = QColor("#FFB020")
+SELECTED_WIDTH_PX = 2.0
+#: Opacity of keys that cannot hold a binding, in define mode.
+NOT_TARGET_OPACITY = 0.35
 
 
 class KeyboardView(QWidget):
     """Renders a Layout for the current AppState."""
 
     keyClicked = Signal(str)
+    #: (code, Binding) a dragged command was dropped on a key, in define mode
+    bindingDropped = Signal(str, object)
 
     def __init__(self, state: AppState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -42,6 +55,8 @@ class KeyboardView(QWidget):
         self._scale = 1.0
         self._show_numpad = True
         self._fade_ms = 220
+        self._define_mode = False
+        self._selected: str | None = None
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMouseTracking(False)
 
@@ -78,6 +93,19 @@ class KeyboardView(QWidget):
 
     def set_fade_ms(self, ms: int) -> None:
         self._fade_ms = max(0, ms)
+
+    def set_define_mode(self, on: bool) -> None:
+        self._define_mode = on
+        self.setAcceptDrops(on)
+        self.update()
+
+    def set_selected(self, code: str | None) -> None:
+        self._selected = code
+        self.update()
+
+    @property
+    def selected(self) -> str | None:
+        return self._selected
 
     # -- geometry ---------------------------------------------------------
 
@@ -271,6 +299,26 @@ class KeyboardView(QWidget):
 
     def _paint_key(self, painter: QPainter, key: Key, rect: QRectF,
                    radius: float) -> None:
+        if self._define_mode and key.code in NOT_TARGETS:
+            # Nothing can be assigned here; say so before the user clicks.
+            painter.save()
+            painter.setOpacity(NOT_TARGET_OPACITY)
+            self._paint_key_face(painter, key, rect, radius)
+            painter.restore()
+        else:
+            self._paint_key_face(painter, key, rect, radius)
+        if self._define_mode and key.code == self._selected:
+            painter.save()
+            painter.setPen(QPen(SELECTED_COLOUR, SELECTED_WIDTH_PX * self._scale))
+            painter.setBrush(Qt.NoBrush)
+            if len(key.segments) == 1:
+                painter.drawRoundedRect(rect, radius, radius)
+            else:
+                painter.drawPath(self.key_path(key))
+            painter.restore()
+
+    def _paint_key_face(self, painter: QPainter, key: Key, rect: QRectF,
+                        radius: float) -> None:
         theme = self._theme
         render = self._state.render_key(key)
         fade = self._state.fading.get(key.code, 0.0)
@@ -385,10 +433,56 @@ class KeyboardView(QWidget):
 
     def mousePressEvent(self, event) -> None:
         key = self.key_at(event.position())
-        if key is not None:
+        if key is not None and not self._refuses(key):
             self.keyClicked.emit(key.code)
+        elif key is not None:
+            event.accept()
         else:
             super().mousePressEvent(event)
+
+    def _refuses(self, key: Key) -> bool:
+        """In define mode, a key that can hold no binding ignores the user."""
+        return self._define_mode and key.code in NOT_TARGETS
+
+    # -- define-mode drops --------------------------------------------------
+
+    def _drop_target(self, pos: QPointF, mime: QMimeData) -> Key | None:
+        if not self._define_mode or not mime.hasFormat(BINDING_MIME):
+            return None
+        key = self.key_at(pos)
+        return None if key is None or self._refuses(key) else key
+
+    def drop_at(self, pos: QPointF, mime: QMimeData) -> bool:
+        """Deliver a dropped command at `pos`; returns whether it was taken."""
+        key = self._drop_target(pos, mime)
+        if key is None:
+            return False
+        try:
+            raw = json.loads(bytes(mime.data(BINDING_MIME)).decode("utf-8"))
+            binding = Binding(str(raw["action"]), dict(raw.get("params") or {}),
+                              raw.get("legend"), raw.get("was_on"))
+        except (ValueError, KeyError, TypeError, AttributeError):
+            return False
+        self.bindingDropped.emit(key.code, binding)
+        return True
+
+    def dragEnterEvent(self, event) -> None:
+        if self._define_mode and event.mimeData().hasFormat(BINDING_MIME):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if self._drop_target(event.position(), event.mimeData()) is not None:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:
+        if self.drop_at(event.position(), event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
 
 
 def _bridge(a: QRectF, b: QRectF, radius: float) -> QRectF | None:

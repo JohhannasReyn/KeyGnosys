@@ -30,3 +30,4 @@ CMakeUserPresets.json
 
 # Operator-local tools (macro recorder etc.), not part of the project
 third_party_tools/
+.superpowers/

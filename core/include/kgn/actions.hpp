@@ -131,6 +131,17 @@ struct Action {
     Cycle cycle = Cycle::Next;            // window.cycle
     int index = 0;                        // warp.grid cell, window.slot index
     KeyCode code{};                       // key.passthrough
+
+    // The whole command, id and params. Members not meaningful for `id` keep
+    // their defaults (parseAction starts from a fresh Action), so comparing
+    // them all is the same as comparing only the meaningful ones.
+    bool operator==(const Action& other) const {
+        return id == other.id && dir == other.dir && button == other.button &&
+               corner == other.corner && target.kind == other.target.kind &&
+               target.index == other.target.index && cycle == other.cycle &&
+               index == other.index && code == other.code;
+    }
+    bool operator!=(const Action& other) const { return !(*this == other); }
 };
 
 // Catalog names, exactly as they appear in a bindings document.

@@ -129,12 +129,38 @@ and editing the copy. An upgrade that changes the bundled original will not
 silently overwrite the user's work, and will not silently take effect either. The
 settings UI **MUST** offer a one-click "fork this to my config" action.
 
+For binding sets the fork is **implicit**: the binding editor's first save of a
+bundled set writes the user copy under the same `id` (setting
+`metadata.source_template`), and every later save edits that copy. While a user
+copy shadows a bundled one, the editor offers **Reset to shipped**, which deletes
+the user copy — or, if it does not load, moves it aside to
+`<id>.broken-<unix_ts>.json`, never deleting it — and returns to the bundled set.
+A user copy that exists but does not load is never overwritten by a save; while
+it is in that state the editor offers only Reset to shipped, highlighted as the one
+action left. A moved-aside `<id>.broken-<unix_ts>.json` is kept for the user and is
+**never loaded** as a document: under its own `id` it could shadow the map it was
+moved away from. *Duplicate
+set* (fork under a new id) and *Reset to source template* (§10.2.4) are deferred.
+
 ### 3.3 Live reload
 
 The user config directory **SHOULD** be watched. On change, the affected registry
 reloads and emits `bindings_changed` / `layouts_changed` over IPC. A reload that
 produces zero valid documents **MUST** keep the previous set and emit a diagnostic
 (inherited from the prototype's behaviour).
+
+A user document that exists but fails to load never replaces the running map.
+The core keeps what it is running and emits `binding.invalid`. Only at startup,
+with nothing running, may it fall back to the next document in the search path,
+with the same diagnostic. "Fails to load" includes a document that exists but
+cannot be read (locked, access denied): it is not treated as missing.
+
+When the core is started with `--bindings-file <path>`, it loads that one file
+and ignores the id search. `bindings_id` in `hello` and `config_changed` still
+reports the `--bindings` id option (default `default`), not the file. The
+overlay's editor edits the user copy for that id; it does not edit the file
+named by `--bindings-file`, so edits made there do not reach a core started
+this way.
 
 Reloading bindings **MUST** release every held action whose binding disappeared,
 and every locked drag button (P7).
@@ -497,7 +523,7 @@ bound to nowhere — the persistent half of the editor's unassigned list (§10.2
 It exists so that a command displaced by reassignment keeps its `params` and its
 custom `legend` across a restart instead of silently reverting to a catalog
 default. It is validated exactly like a binding; entries that fail validation are
-dropped with a diagnostic.
+dropped with a diagnostic. Entries may carry `was_on`, the key the command was last bound to. It is informational, set when a command is displaced, and dropped when it is assigned again.
 
 The list is **not** a complete inventory of unbound commands. Everything in the
 action catalog that is neither bound nor listed here is offered by the editor as
@@ -986,7 +1012,7 @@ events.
 
 | `n` | Payload | Emitted when |
 |-----|---------|--------------|
-| `hello` | `{core_version, protocol, platform, backends:{input,output,window}, capabilities:[…], limitations:[…]}` | Immediately on connect |
+| `hello` | `{core_version, protocol, platform, backends:{input,output,window}, capabilities:[…], limitations:[…], bindings_id:string\|null}` (`bindings_id`: the running bindings map, null when none is running) | Immediately on connect |
 | `key` | `{code, state:"down"\|"up"\|"repeat", suppressed:bool}` | Every physical key event, suppressed or not |
 | `modifiers` | `{shift, control, alt, meta, caps_layer}` — all bool | Any modifier state change |
 | `mode` | `{mode:"normal"\|"cursor", latched:bool, activation:"toggle"\|"hold"\|"hybrid", inert:bool, protection:"not_applicable"\|"protected"\|"unprotected", protection_reason:string}` | Layer engaged/released, `inert` or `protection` changed, and on connect (sent to that client only, after `hello`) |
@@ -996,7 +1022,7 @@ events.
 | `pointer` | `{x, y, monitor}` | Only while cursor layer is engaged, ≤20 Hz |
 | `drag_lock` | `{button, active}` | Drag lock engaged/released |
 | `overlay_toggle` | `{}` | The `overlay.toggle` action fired; the overlay shows or hides itself |
-| `config_changed` | `{kinds:["bindings","layouts",…]}` | Core reloaded config |
+| `config_changed` | `{kinds:["bindings","layouts",…], bindings_id:string}` | Core reloaded config (`reload_config`), or `set_bindings` switched the running map |
 | `diagnostic` | `{level:"info"\|"warn"\|"error", code, message, file?}` | §11 |
 | `shutdown` | `{reason}` | Core is exiting |
 
@@ -1029,7 +1055,7 @@ positional codes are transmitted. See §12.
 | `get_state` | `{}` | Full snapshot: mode, latched, activation, enabled, inert, protection, protection_reason, modifiers, focus, windows, monitors |
 | `set_activation_mode` | `{mode}` | `{}` |
 | `set_enabled` | `{enabled:bool}` | `{}` — master switch; disables interception entirely |
-| `reload_config` | `{}` | `{loaded:{layouts:n, bindings:n, profiles:n}}` |
+| `reload_config` | `{}` | `{loaded:{layouts:n, bindings:n, profiles:n}}`; fails with `binding.invalid`, the running map unchanged, when no document loads (§3.3) |
 | `set_bindings` | `{id}` | `{}` |
 | `set_setting` | `{path, value}` | `{}` — dotted path into §4.5 `behavior` |
 | `release_all` | `{}` | `{}` — panic button: release every held key, button and drag lock |
@@ -2045,6 +2071,27 @@ Decides what each key does while the cursor layer is engaged. It edits binding
 documents (§4.2), and it renders on the same canvas as the layout editor: click a
 key on the drawn keyboard, choose a command, done.
 
+**Placement: on the overlay itself.** The control bar's **Define** toggle opens
+*define mode* (the toggle reads **Done** while it is open, and the bar shows
+`● DEFINE MODE` with Undo and Redo). While define mode is open:
+
+- click-through is held off, so the keyboard can be clicked; the stored
+  preference is unchanged and is restored on exit;
+- the keyboard shows the cursor layer being edited, the selected key outlined
+  in orange, and the keys that cannot hold a binding — the activation key and
+  the eight modifiers — dimmed and unclickable;
+- a side picker docks beside the keyboard and follows it: the grouped command
+  list with its Unassigned group (§10.2.3), the selected key's label, Clear,
+  the layer's tuning settings, and Reset to shipped (§3.2).
+
+Every edit is saved to the user copy at once (atomically) and the core is asked
+to `reload_config` after 300 ms of quiet, so a burst of edits costs one reload.
+While the core is unreachable the reload waits for the next connection. The
+overlay never sends `set_bindings`: the file is the one source both sides read.
+If the core reports that it now runs a *different* bindings id, define mode
+closes with a notice rather than saving edits into a map the core no longer
+runs. Losing the core does not close it.
+
 #### 10.2.1 A key holds one command; a command may sit on many keys
 
 These are not symmetric, and the asymmetry is what makes reassignment simple.
@@ -2228,6 +2275,11 @@ logic inherited from the prototype can be tested at all.
 | **M5** | Configuration UI | Settings dialog, binding editor with silent reassignment and the unassigned-commands list, profile editor, **the layer indicator (§9.7)** |
 | **M6** | **Visual layout editor** | Canvas, key palette, move/resize/align/distribute/snap, segment-edit mode, validation panel, import/export, reset-to-template |
 | **M7** | Packaging | Windows installer, Linux packages, first release |
+
+**M5 note: the binding editor moved ahead of M4.** It shipped first, as define
+mode on the overlay (§10.2), once M3 made the layer drive a real mouse.
+Per-program binding maps and macros follow it, as projects 3 and 4; the rest of
+M5 keeps its place.
 
 **M1 is revised, not extended.** Segmented keys land in the schema, the loader,
 the validator, the renderer and the bundled layouts *now*. What is deferred to

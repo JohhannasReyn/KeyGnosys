@@ -29,6 +29,7 @@ Json HelloInfo::toJson() const {
     payload.set("backends", std::move(backends));
     payload.set("capabilities", toJsonArray(capabilities));
     payload.set("limitations", toJsonArray(limitations));
+    payload.set("bindings_id", bindingsId.empty() ? Json() : Json(bindingsId));
     return payload;
 }
 

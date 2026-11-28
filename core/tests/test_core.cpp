@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -624,9 +625,11 @@ KGN_TEST(reload_reports_what_it_actually_loaded) {
     for (int i = 0; i < 8; ++i) {
         const Json message = parseLine(client.readLine(fixture.core));
         if (message["t"].asString() != "reply") continue;
-        KGN_CHECK(message["ok"].asBool());
-        // Nothing was found, and it says zero rather than a number it made up.
-        KGN_CHECK_EQ(message["d"]["loaded"]["bindings"].asInt(-1), std::int64_t{0});
+        // Nothing was found, and it says so -- a failure, never a success
+        // with a made-up count. What it does load is counted in
+        // hello_and_config_changed_carry_the_running_bindings_id.
+        KGN_CHECK(!message["ok"].asBool());
+        KGN_CHECK_EQ(message["e"]["code"].asString(), std::string("binding.invalid"));
         break;
     }
     client.close();
@@ -1481,6 +1484,260 @@ KGN_TEST(a_search_path_that_does_not_exist_is_a_miss_not_an_empty_document) {
         }
     }
     KGN_CHECK_EQ(malformed, 0);
+    core.stop("test finished");
+    removeEndpoint(address);
+}
+
+// ---------------------------------------------------------------------------
+// The running map and a broken user document (SPEC 3.3).
+
+namespace {
+
+// A user root and a shipped root of their own, each with a bindings
+// directory, under a fresh temporary directory removed with the test.
+struct BindingRoots {
+    std::filesystem::path root;
+    std::filesystem::path user;
+    std::filesystem::path shipped;
+
+    explicit BindingRoots(const char* suffix) {
+        const std::string endpoint = uniqueEndpoint(suffix);
+        std::string name = "kgn-bindings-";
+        for (const char c : endpoint) {
+            const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                               (c >= '0' && c <= '9') || c == '-';
+            if (plain) name.push_back(c);
+        }
+        root = std::filesystem::temp_directory_path() / name;
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        user = root / "user";
+        shipped = root / "shipped";
+        std::filesystem::create_directories(user / "bindings");
+        std::filesystem::create_directories(shipped / "bindings");
+    }
+
+    ~BindingRoots() {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+    }
+
+    BindingRoots(const BindingRoots&) = delete;
+    BindingRoots& operator=(const BindingRoots&) = delete;
+
+    static void write(const std::string& path, const std::string& text) {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file << text;
+    }
+
+    static std::string document(const std::string& id, const std::string& key) {
+        return R"({"schema":"keygnosys/bindings/2","id":")" + id +
+               R"(","name":"Test","bindings":{")" + key +
+               R"(":{"action":"button.drag_lock","params":{"button":"left"}}}})";
+    }
+
+    [[nodiscard]] std::string userPath(const std::string& id = "default") const {
+        return (user / "bindings" / (id + ".json")).string();
+    }
+    [[nodiscard]] std::string shippedPath(const std::string& id = "default") const {
+        return (shipped / "bindings" / (id + ".json")).string();
+    }
+
+    [[nodiscard]] CoreOptions options(const std::string& endpoint) const {
+        CoreOptions opts;
+        opts.endpointOverrideForTests = endpoint;
+        opts.configDir = user.string();
+        opts.dataDir = shipped.string();
+        return opts;
+    }
+};
+
+bool hasInvalidFor(const kgn::Diagnostics& diagnostics, const std::string& file) {
+    for (const auto& diagnostic : diagnostics) {
+        if (diagnostic.code == "binding.invalid" && diagnostic.file == file) return true;
+    }
+    return false;
+}
+
+// Read until the reply, keeping every event that arrived before it.
+Json replyCollecting(RawClient& client, Core& core, std::vector<Json>& events) {
+    for (int i = 0; i < 32; ++i) {
+        const Json message = parseLine(client.readLine(core));
+        if (message["t"].asString() == "reply") return message;
+        if (message["t"].asString() == "event") events.push_back(message);
+    }
+    return Json();
+}
+
+const Json* findEvent(const std::vector<Json>& events, const std::string& name) {
+    for (const auto& event : events) {
+        if (event["n"].asString() == name) return &event;
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+KGN_TEST(a_broken_user_map_on_reload_keeps_the_running_map) {
+    BindingRoots roots("brokenreload");
+    BindingRoots::write(roots.userPath(), BindingRoots::document("default", "KeyQ"));
+    BindingRoots::write(roots.shippedPath(), BindingRoots::document("default", "KeyW"));
+
+    const std::string address = uniqueEndpoint("brokenreload");
+    Core core(roots.options(address));
+    KGN_CHECK(core.start().ok());
+    KGN_CHECK_EQ(core.bindingsSourceForTests(), roots.userPath());
+
+    BindingRoots::write(roots.userPath(), "{ not json");
+
+    RawClient client;
+    KGN_CHECK(client.connect(address));
+    if (client.valid()) {
+        client.send(R"({"v":1,"t":"command","n":"reload_config","id":"c1","d":{}})" "\n");
+        std::vector<Json> events;
+        const Json reply = replyCollecting(client, core, events);
+        KGN_CHECK(!reply["ok"].asBool());
+        KGN_CHECK_EQ(reply["e"]["code"].asString(), std::string("binding.invalid"));
+        // Nothing changed, so nothing says it did.
+        KGN_CHECK(findEvent(events, "config_changed") == nullptr);
+        client.close();
+    }
+
+    // Still the user's map, not the shipped one behind it.
+    KGN_CHECK_EQ(core.bindingsSourceForTests(), roots.userPath());
+    KGN_CHECK(hasInvalidFor(core.diagnostics(), roots.userPath()));
+    core.stop("test finished");
+    removeEndpoint(address);
+}
+
+KGN_TEST(a_broken_user_map_at_startup_falls_back_and_says_so) {
+    BindingRoots roots("brokenstart");
+    BindingRoots::write(roots.userPath(), "{ not json");
+    BindingRoots::write(roots.shippedPath(), BindingRoots::document("default", "KeyW"));
+
+    const std::string address = uniqueEndpoint("brokenstart");
+    Core core(roots.options(address));
+    KGN_CHECK(core.start().ok());
+    KGN_CHECK_EQ(core.bindingsSourceForTests(), roots.shippedPath());
+    KGN_CHECK(hasInvalidFor(core.diagnostics(), roots.userPath()));
+    core.stop("test finished");
+    removeEndpoint(address);
+}
+
+// A user document that exists but cannot be read (locked, denied) is not a
+// missing one. A directory in its place stands in for it: it exists, and
+// reading it fails.
+KGN_TEST(an_unreadable_user_map_on_reload_keeps_the_running_map) {
+    BindingRoots roots("unreadreload");
+    BindingRoots::write(roots.userPath(), BindingRoots::document("default", "KeyQ"));
+    BindingRoots::write(roots.shippedPath(), BindingRoots::document("default", "KeyW"));
+
+    const std::string address = uniqueEndpoint("unreadreload");
+    Core core(roots.options(address));
+    KGN_CHECK(core.start().ok());
+    KGN_CHECK_EQ(core.bindingsSourceForTests(), roots.userPath());
+
+    std::filesystem::remove(roots.userPath());
+    std::filesystem::create_directory(roots.userPath());
+
+    RawClient client;
+    KGN_CHECK(client.connect(address));
+    if (client.valid()) {
+        client.send(R"({"v":1,"t":"command","n":"reload_config","id":"c1","d":{}})" "\n");
+        std::vector<Json> events;
+        const Json reply = replyCollecting(client, core, events);
+        KGN_CHECK(!reply["ok"].asBool());
+        KGN_CHECK_EQ(reply["e"]["code"].asString(), std::string("binding.invalid"));
+        KGN_CHECK(findEvent(events, "config_changed") == nullptr);
+        client.close();
+    }
+
+    KGN_CHECK_EQ(core.bindingsSourceForTests(), roots.userPath());
+    KGN_CHECK(hasInvalidFor(core.diagnostics(), roots.userPath()));
+    core.stop("test finished");
+    removeEndpoint(address);
+}
+
+KGN_TEST(an_unreadable_user_map_at_startup_falls_back_and_says_so) {
+    BindingRoots roots("unreadstart");
+    std::filesystem::create_directory(roots.userPath());
+    BindingRoots::write(roots.shippedPath(), BindingRoots::document("default", "KeyW"));
+
+    const std::string address = uniqueEndpoint("unreadstart");
+    Core core(roots.options(address));
+    KGN_CHECK(core.start().ok());
+    KGN_CHECK_EQ(core.bindingsSourceForTests(), roots.shippedPath());
+    KGN_CHECK(hasInvalidFor(core.diagnostics(), roots.userPath()));
+    core.stop("test finished");
+    removeEndpoint(address);
+}
+
+KGN_TEST(hello_and_config_changed_carry_the_running_bindings_id) {
+    BindingRoots roots("bindingsid");
+    BindingRoots::write(roots.shippedPath(), BindingRoots::document("default", "KeyW"));
+
+    const std::string address = uniqueEndpoint("bindingsid");
+    Core core(roots.options(address));
+    KGN_CHECK(core.start().ok());
+
+    RawClient client;
+    KGN_CHECK(client.connect(address));
+    if (client.valid()) {
+        const Json hello = parseLine(client.readLine(core));
+        KGN_CHECK_EQ(hello["n"].asString(), std::string("hello"));
+        KGN_CHECK_EQ(hello["d"]["bindings_id"].asString(), std::string("default"));
+
+        client.send(R"({"v":1,"t":"command","n":"reload_config","id":"c1","d":{}})" "\n");
+        std::vector<Json> events;
+        const Json reply = replyCollecting(client, core, events);
+        KGN_CHECK(reply["ok"].asBool());
+        KGN_CHECK_EQ(reply["d"]["loaded"]["bindings"].asInt(-1), std::int64_t{1});
+        const Json* changed = findEvent(events, "config_changed");
+        KGN_CHECK(changed != nullptr);
+        if (changed != nullptr) {
+            KGN_CHECK_EQ((*changed)["d"]["bindings_id"].asString(), std::string("default"));
+            KGN_CHECK_EQ((*changed)["d"]["kinds"].at(0).asString(), std::string("bindings"));
+        }
+        client.close();
+    }
+    core.stop("test finished");
+    removeEndpoint(address);
+}
+
+KGN_TEST(set_bindings_broadcasts_config_changed_with_the_new_id) {
+    BindingRoots roots("setbindings");
+    BindingRoots::write(roots.shippedPath(), BindingRoots::document("default", "KeyW"));
+    BindingRoots::write(roots.shippedPath("alt"), BindingRoots::document("alt", "KeyE"));
+
+    const std::string address = uniqueEndpoint("setbindings");
+    Core core(roots.options(address));
+    KGN_CHECK(core.start().ok());
+
+    RawClient client;
+    KGN_CHECK(client.connect(address));
+    if (client.valid()) {
+        client.send(
+            R"({"v":1,"t":"command","n":"set_bindings","id":"c1","d":{"id":"alt"}})" "\n");
+        std::vector<Json> events;
+        const Json reply = replyCollecting(client, core, events);
+        KGN_CHECK(reply["ok"].asBool());
+        const Json* changed = findEvent(events, "config_changed");
+        KGN_CHECK(changed != nullptr);
+        if (changed != nullptr) {
+            KGN_CHECK_EQ((*changed)["d"]["bindings_id"].asString(), std::string("alt"));
+        }
+        client.close();
+
+        // A client that connects afterwards is greeted with the new id.
+        RawClient late;
+        KGN_CHECK(late.connect(address));
+        if (late.valid()) {
+            const Json hello = parseLine(late.readLine(core));
+            KGN_CHECK_EQ(hello["d"]["bindings_id"].asString(), std::string("alt"));
+            late.close();
+        }
+    }
+    KGN_CHECK_EQ(core.bindingsSourceForTests(), roots.shippedPath("alt"));
     core.stop("test finished");
     removeEndpoint(address);
 }

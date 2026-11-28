@@ -29,6 +29,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "kgn/diagnostics.hpp"
@@ -104,6 +105,9 @@ struct HelloInfo {
     std::string windowBackend;
     std::vector<std::string> capabilities;
     std::vector<std::string> limitations;
+    // The id of the running bindings map. Empty, reported as null, when no
+    // map is running.
+    std::string bindingsId;
 
     [[nodiscard]] Json toJson() const;
 };
@@ -183,6 +187,9 @@ public:
         return overloadedClients_;
     }
     [[nodiscard]] const HelloInfo& hello() const { return hello_; }
+    // Replace what later clients are greeted with. Clients already connected
+    // learn of a change through its own event, not a second hello.
+    void setHello(HelloInfo hello) { hello_ = std::move(hello); }
 
     // Test seam: the sequence number the next event to this client will carry.
     [[nodiscard]] std::uint64_t nextSeq(ClientId client) const;

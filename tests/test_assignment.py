@@ -232,3 +232,83 @@ def test_schema_1_bindings_get_an_empty_unassigned_list() -> None:
 @pytest.fixture(scope="module")
 def registry_default() -> BindingSet:
     return Registry().load_all().bindings["default"]
+
+
+# -- serialisation and was_on -------------------------------------------------
+
+def minimal_doc(bindings: dict) -> dict:
+    return {"schema": "keygnosys/bindings/2", "id": "t", "bindings": bindings}
+
+
+def test_params_and_legend_survive_displace_save_restore() -> None:
+    bset = BindingSet.from_dict(minimal_doc(
+        {"KeyD": {"action": "window.slot", "params": {"index": 3}, "legend": "Mail"}}))
+    bset.assign("KeyD", Binding("button.click", {"button": "left"}))
+    reloaded = BindingSet.from_dict(bset.to_dict())
+    [u] = reloaded.unassigned
+    assert (u.action, u.params, u.legend, u.was_on) == (
+        "window.slot", {"index": 3}, "Mail", "KeyD")
+    reloaded.assign("KeyF", u)
+    assert reloaded.bindings["KeyF"].legend == "Mail" and reloaded.unassigned == []
+    assert "was_on" not in reloaded.to_dict()["bindings"]["KeyF"]
+
+
+def test_unassign_records_the_key_it_came_from() -> None:
+    bset = make_set(KeyA=LEFT)
+    bset.unassign("KeyA")
+    assert bset.unassigned[0].was_on == "KeyA"
+
+
+def test_was_on_is_not_part_of_identity() -> None:
+    assert Binding("pointer.move", {"dir": "left"}, was_on="KeyA").identity() == LEFT.identity()
+
+
+def test_assigning_from_unassigned_clears_was_on() -> None:
+    bset = make_set(KeyA=LEFT)
+    bset.unassign("KeyA")
+    bset.assign("KeyB", bset.unassigned[0])
+    assert bset.bindings["KeyB"].was_on is None
+
+
+def test_an_unknown_action_survives_load_and_save() -> None:
+    doc = minimal_doc({"KeyZ": {"action": "future.thing", "params": {"x": 1}}})
+    bset = BindingSet.from_dict(doc)
+    assert "KeyZ" not in bset.bindings
+    assert bset.to_dict()["bindings"]["KeyZ"] == {"action": "future.thing", "params": {"x": 1}}
+
+
+def test_a_modelled_binding_wins_over_a_preserved_unknown_one() -> None:
+    bset = BindingSet.from_dict(minimal_doc({"KeyZ": {"action": "future.thing"}}))
+    bset.assign("KeyZ", CLICK)
+    assert bset.to_dict()["bindings"]["KeyZ"]["action"] == "button.click"
+
+
+def test_a_preserved_binding_does_not_return_after_assign_then_unassign() -> None:
+    bset = BindingSet.from_dict(minimal_doc({"KeyZ": {"action": "future.thing"}}))
+    bset.assign("KeyZ", CLICK)
+    bset.unassign("KeyZ")
+    assert "KeyZ" not in bset.to_dict()["bindings"]
+
+
+def test_unassigning_a_key_holding_only_a_preserved_binding_clears_it() -> None:
+    bset = BindingSet.from_dict(minimal_doc({"KeyZ": {"action": "future.thing"}}))
+    bset.unassign("KeyZ")
+    assert "KeyZ" not in bset.to_dict()["bindings"]
+
+
+def test_a_known_action_with_unacceptable_params_is_preserved_with_a_warning() -> None:
+    entry = {"action": "pointer.move", "params": {"dir": "sideways-from-the-future"}}
+    sink = DiagnosticSink()
+    bset = BindingSet.from_dict(minimal_doc({"KeyZ": entry}), sink)
+    assert "KeyZ" not in bset.bindings
+    assert len(sink) == 1
+    assert bset.to_dict()["bindings"]["KeyZ"] == entry
+
+
+def test_unmodelled_unassigned_entries_are_preserved() -> None:
+    doc = minimal_doc({})
+    unknown = {"action": "future.thing", "params": {"x": 1}, "was_on": "KeyQ"}
+    badparams = {"action": "pointer.move", "params": {"dir": "sideways-from-the-future"}}
+    doc["unassigned"] = [unknown, badparams, {"action": "button.click", "params": {"button": "left"}}]
+    out = BindingSet.from_dict(doc).to_dict()["unassigned"]
+    assert unknown in out and badparams in out and len(out) == 3

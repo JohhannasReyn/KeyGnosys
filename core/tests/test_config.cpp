@@ -267,6 +267,40 @@ KGN_TEST(an_unassigned_entry_with_no_conflict_is_silent) {
     KGN_CHECK(!hasCode(diags, "binding.unassigned_conflict"));
 }
 
+KGN_TEST(an_unassigned_command_differing_only_in_params_is_no_conflict) {
+    BindingsDocument doc;
+    Diagnostics diags;
+    KGN_CHECK(load(R"({
+        "schema": "keygnosys/bindings/2",
+        "id": "x",
+        "bindings": {
+            "KeyD": { "action": "button.click", "params": { "button": "right" } },
+            "Digit1": { "action": "window.slot", "params": { "index": 2 } }
+        },
+        "unassigned": [
+            { "action": "button.click", "params": { "button": "left" } },
+            { "action": "window.slot", "params": { "index": 1 } }
+        ]
+    })", doc, diags));
+    KGN_CHECK(!hasCode(diags, "binding.unassigned_conflict"));
+}
+
+KGN_TEST(an_unassigned_command_with_the_same_params_still_conflicts) {
+    BindingsDocument doc;
+    Diagnostics diags;
+    KGN_CHECK(load(R"({
+        "schema": "keygnosys/bindings/2",
+        "id": "x",
+        "bindings": {
+            "KeyD": { "action": "button.click", "params": { "button": "right" } }
+        },
+        "unassigned": [
+            { "action": "button.click", "params": { "button": "right" } }
+        ]
+    })", doc, diags));
+    KGN_CHECK(hasCode(diags, "binding.unassigned_conflict"));
+}
+
 // ---------------------------------------------------------------------------
 // Settings
 
