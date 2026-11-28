@@ -120,7 +120,10 @@ class BindingEditor:
 
     def set_legend(self, code: str, legend: str | None) -> None:
         current = self.bset.bindings[code]
-        self._edit(lambda: setattr(current, "legend", legend or None))
+        legend = legend or None
+        if current.legend == legend:
+            return
+        self._edit(lambda: setattr(current, "legend", legend))
 
     def set_params(self, code: str, params: dict) -> None:
         current = self.bset.bindings[code]
@@ -129,6 +132,8 @@ class BindingEditor:
     def set_setting(self, name: str, value: float | int) -> None:
         if name not in self.bset.settings:
             raise KeyError(name)
+        if self.bset.settings[name] == value:
+            return
         self._edit(lambda: self.bset.settings.__setitem__(name, value))
 
     # -- history ------------------------------------------------------------

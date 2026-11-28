@@ -140,30 +140,53 @@ def test_search_filters_on_label_and_action_name(editor):
 
 @pytest.mark.parametrize("case", ["from_unassigned", "parameterised", "clear", "empty_key"])
 def test_table_driven_edits(editor, case):
+    before = {c: (b.action, b.params, b.legend) for c, b in editor.bset.bindings.items()}
+    n_un = len(editor.bset.unassigned)
+
+    def bindings():
+        return {c: (b.action, b.params, b.legend) for c, b in editor.bset.bindings.items()}
+
     if case == "from_unassigned":
         editor.clear("Digit1")
         stored = editor.bset.unassigned[-1]
         assert stored.was_on == "Digit1"
         editor.assign(FREE, Binding(stored.action, dict(stored.params)))
-        assert editor.bset.bindings[FREE].params == {"index": 1}
-        assert "Digit1" not in editor.bset.bindings
-        assert not any(u.params == {"index": 1} and u.action == "window.slot"
-                       for u in editor.bset.unassigned)
+        expected = dict(before)
+        del expected["Digit1"]
+        expected[FREE] = ("window.slot", {"index": 1}, None)
+        assert bindings() == expected
+        assert len(editor.bset.unassigned) == n_un
+        assert all(u.was_on is None for u in editor.bset.unassigned)
         assert editor.bset.bindings[FREE].was_on is None
     elif case == "parameterised":
+        keys_before = editor.bset.keys_for(Binding("warp.grid", {"cell": 3}))
         editor.assign(FREE, Binding("warp.grid", {"cell": 3}))
-        assert editor.bset.bindings[FREE].params == {"cell": 3}
-        assert editor.bset.keys_for(Binding("warp.grid", {"cell": 3})) == [FREE] or \
-            FREE in editor.bset.keys_for(Binding("warp.grid", {"cell": 3}))
+        assert bindings() == {**before, FREE: ("warp.grid", {"cell": 3}, None)}
+        assert editor.bset.keys_for(Binding("warp.grid", {"cell": 3})) == keys_before + [FREE]
+        assert len(editor.bset.unassigned) == n_un
+        assert editor.bset.bindings[FREE].was_on is None
     elif case == "clear":
         editor.clear("Digit1")
-        assert "Digit1" not in editor.bset.bindings
-        u = [x for x in editor.bset.unassigned if x.action == "window.slot"
-             and x.params == {"index": 1}]
-        assert len(u) == 1 and u[0].was_on == "Digit1"
+        expected = dict(before)
+        del expected["Digit1"]
+        assert bindings() == expected
+        assert len(editor.bset.unassigned) == n_un + 1
+        last = editor.bset.unassigned[-1]
+        assert (last.action, last.params, last.was_on) == ("window.slot", {"index": 1}, "Digit1")
     else:
-        assert FREE not in editor.bset.bindings
-        n = len(editor.bset.unassigned)
+        assert FREE not in before
         editor.assign(FREE, Binding("overlay.toggle"))
-        assert editor.bset.bindings[FREE].action == "overlay.toggle"
-        assert len(editor.bset.unassigned) == n
+        assert bindings() == {**before, FREE: ("overlay.toggle", {}, None)}
+        assert len(editor.bset.unassigned) == n_un
+        assert editor.bset.bindings[FREE].was_on is None
+        assert all(u.was_on is None for u in editor.bset.unassigned[:n_un])
+
+
+def test_unchanged_legend_or_setting_is_a_silent_no_op(editor, calls):
+    editor.set_legend("Digit1", None)
+    editor.set_legend("Digit1", "")
+    editor.set_setting("pointer_max_speed", editor.bset.settings["pointer_max_speed"])
+    assert calls == [] and not editor.can_undo
+    editor.set_legend("Digit1", "Hi")
+    editor.set_legend("Digit1", "Hi")
+    assert len(calls) == 1 and editor.undo() and not editor.can_undo
