@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget,
 )
 
-from ..actions import default_legend
+from ..actions import COMMAND_PARAMS, default_legend
 from ..binding_editor import UNASSIGNED, BindingEditor, PickerEntry
 from ..documents import Binding
 from .theme import ResolvedTheme
@@ -85,6 +85,9 @@ class BindingPicker(QWidget):
     clearRequested = Signal(str)
     legendEdited = Signal(str, str)
     settingEdited = Signal(str, object)
+    #: (code, params): the selected key keeps its command and label, with
+    #: these params.
+    paramsEdited = Signal(str, object)
     resetRequested = Signal()
 
     def __init__(self, confirm: Callable[[str], bool] = _ask) -> None:
@@ -125,6 +128,11 @@ class BindingPicker(QWidget):
         self.assign_button = QPushButton("Assign")
         self.assign_button.clicked.connect(self._choose)
         root.addWidget(self.assign_button)
+
+        self.params_combo = QComboBox()
+        self.params_combo.setVisible(False)
+        self.params_combo.activated.connect(lambda _i: self._emit_params())
+        root.addWidget(self.params_combo)
 
         self.label_edit = QLineEdit()
         self.label_edit.setPlaceholderText("Key label")
@@ -269,11 +277,17 @@ class BindingPicker(QWidget):
             self.header.setText("Pick a key")
             return
         current = self._current_binding()
-        if current is None:
-            now = "unbound"
-        else:
+        preserved = (self._editor.bset.extra_bindings.get(self._key)
+                     if self._editor is not None else None)
+        if current is not None:
             now = current.legend or default_legend(current.action, current.params)
-        self.header.setText(f"Assign to {self._key} (now: {now})")
+        elif preserved is not None:
+            now = (f"{preserved.get('action')} "
+                   "(not supported by this version)")
+        else:
+            now = "unbound"
+        name = self._editor.display(self._key) if self._editor else self._key
+        self.header.setText(f"Assign to {name} (now: {now})")
 
     def _fill_list(self) -> None:
         previous = self._current_entry()
@@ -341,23 +355,50 @@ class BindingPicker(QWidget):
         self.label_edit.blockSignals(False)
         self.label_edit.setEnabled(current is not None)
         self.clear_button.setEnabled(current is not None)
+        self._update_params(current)
         self._update_assign_button()
+
+    def _update_params(self, current: Binding | None) -> None:
+        """The selected key's parameter editor (design 6.1 item 5)."""
+        choices = COMMAND_PARAMS.get(current.action, []) if current else []
+        self.params_combo.clear()
+        if current is None or len(choices) <= 1:
+            self.params_combo.setVisible(False)
+            return
+        for params in choices:
+            self.params_combo.addItem(default_legend(current.action, params),
+                                      dict(params))
+        index = self.params_combo.findData(dict(current.params))
+        if index < 0:
+            # Valid but off the menu: still show what the key holds.
+            self.params_combo.insertItem(
+                0, default_legend(current.action, current.params),
+                dict(current.params))
+            index = 0
+        self.params_combo.setCurrentIndex(index)
+        self.params_combo.setVisible(True)
 
     def _update_settings(self) -> None:
         settings = self._editor.bset.settings if self._editor else {}
-        if set(settings) != set(self.setting_boxes):
+        # Only known settings with a number get a box; anything else (a newer
+        # release's setting, a hand-written string) is left alone and still
+        # round-trips through the document.
+        editable = {name: value for name, value in settings.items()
+                    if name in KNOWN_SETTINGS and _is_number(value)}
+        if set(editable) != set(self.setting_boxes):
             while self._settings_form.rowCount():
                 self._settings_form.removeRow(0)
             self.setting_boxes = {}
-            for name, value in settings.items():
-                box = _spin_box_for(value)
+            for name in editable:
+                box = _spin_box_for(name)
                 box.valueChanged.connect(
                     lambda v, n=name: self.settingEdited.emit(n, v))
                 self._settings_form.addRow(name.replace("_", " "), box)
                 self.setting_boxes[name] = box
         for name, box in self.setting_boxes.items():
+            value = settings[name]
             box.blockSignals(True)
-            box.setValue(settings[name])
+            box.setValue(int(value) if isinstance(box, QSpinBox) else float(value))
             box.blockSignals(False)
 
     def _toggle_settings(self, open_: bool) -> None:
@@ -393,6 +434,13 @@ class BindingPicker(QWidget):
         if text != (current.legend or ""):
             self.legendEdited.emit(self._key, text)
 
+    def _emit_params(self) -> None:
+        current = self._current_binding()
+        params = self.params_combo.currentData()
+        if current is None or params is None or params == current.params:
+            return
+        self.paramsEdited.emit(self._key, dict(params))
+
     def _emit_clear(self) -> None:
         if self._current_binding() is not None:
             self.clearRequested.emit(self._key)
@@ -402,14 +450,33 @@ class BindingPicker(QWidget):
             self.resetRequested.emit()
 
 
-def _spin_box_for(value: float | int) -> QSpinBox | QDoubleSpinBox:
-    if isinstance(value, float):
+#: The core's clamps (core/src/config.cpp), so a box never offers a value
+#: the core would silently change.
+_SPEED = ("double", 0.01, 10000.0, 0.5)
+_RAMP = ("int", 0, 60000, 10)
+KNOWN_SETTINGS: dict[str, tuple] = {
+    "pointer_base_speed": _SPEED,
+    "pointer_max_speed": _SPEED,
+    "scroll_base_speed": _SPEED,
+    "scroll_max_speed": _SPEED,
+    "pointer_ramp_ms": _RAMP,
+    "scroll_ramp_ms": _RAMP,
+    "precision_factor": ("double", 0.001, 1.0, 0.05),
+}
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _spin_box_for(name: str) -> QSpinBox | QDoubleSpinBox:
+    kind, low, high, step = KNOWN_SETTINGS[name]
+    if kind == "double":
         box = QDoubleSpinBox()
         box.setDecimals(4)
-        box.setRange(-1e6, 1e6)
-        box.setSingleStep(0.05)
     else:
         box = QSpinBox()
-        box.setRange(-1_000_000, 1_000_000)
+    box.setRange(low, high)
+    box.setSingleStep(step)
     box.setKeyboardTracking(False)
     return box

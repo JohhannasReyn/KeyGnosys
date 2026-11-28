@@ -182,12 +182,17 @@ def test_an_uncommitted_label_is_kept_when_the_key_changes(qtbot, editor):
     assert blocker.args == ["Digit1", "Mail"]
 
 
-def test_settings_do_not_clamp_or_round(qtbot, editor):
+def test_settings_do_not_round_and_showing_one_never_rewrites_it(qtbot, editor):
     editor.bset.settings["precision_factor"] = 0.1234
     editor.bset.settings["pointer_ramp_ms"] = -5
     picker = make_picker(qtbot, editor)
+    with qtbot.assertNotEmitted(picker.settingEdited):
+        picker.refresh()
     assert picker.setting_boxes["precision_factor"].value() == pytest.approx(0.1234)
-    assert picker.setting_boxes["pointer_ramp_ms"].value() == -5
+    # Out of the core's range: shown as the core runs it (clamped to 0), but
+    # the document keeps what the user wrote until they edit it.
+    assert picker.setting_boxes["pointer_ramp_ms"].value() == 0
+    assert editor.bset.settings["pointer_ramp_ms"] == -5
 
 
 def test_an_unassigned_entry_assigns_the_stored_command_with_its_legend(qtbot, editor):
@@ -243,11 +248,12 @@ def test_settings_get_typed_spin_boxes(qtbot, editor):
     boxes = picker.setting_boxes
     assert set(boxes) == set(editor.bset.settings)
     assert isinstance(boxes["precision_factor"], QDoubleSpinBox)
-    assert isinstance(boxes["pointer_max_speed"], QSpinBox)
+    assert isinstance(boxes["pointer_max_speed"], QDoubleSpinBox)
+    assert isinstance(boxes["pointer_ramp_ms"], QSpinBox)
     assert boxes["pointer_max_speed"].value() == editor.bset.settings["pointer_max_speed"]
     with qtbot.waitSignal(picker.settingEdited) as blocker:
         boxes["pointer_max_speed"].setValue(40)
-    assert blocker.args == ["pointer_max_speed", 40]
+    assert blocker.args == ["pointer_max_speed", 40.0]
 
 
 def test_settings_section_collapses(qtbot, editor):
@@ -316,3 +322,84 @@ def test_it_accepts_input(qtbot, editor):
     picker = make_picker(qtbot, editor)
     assert not picker.windowFlags() & Qt.WindowTransparentForInput
     assert picker.windowFlags() & Qt.Tool
+
+
+# -- final review fixes -----------------------------------------------------
+
+def test_known_settings_get_core_bounded_boxes(qtbot, editor):
+    from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
+    picker = make_picker(qtbot, editor)
+    boxes = picker.setting_boxes
+    for name in ("pointer_base_speed", "pointer_max_speed",
+                 "scroll_base_speed", "scroll_max_speed"):
+        box = boxes[name]
+        assert isinstance(box, QDoubleSpinBox), name
+        assert (box.minimum(), box.maximum()) == (0.01, 10000.0)
+    for name in ("pointer_ramp_ms", "scroll_ramp_ms"):
+        box = boxes[name]
+        assert isinstance(box, QSpinBox), name
+        assert (box.minimum(), box.maximum()) == (0, 60000)
+    box = boxes["precision_factor"]
+    assert isinstance(box, QDoubleSpinBox)
+    assert (box.minimum(), box.maximum()) == (0.001, 1.0)
+
+
+def test_unknown_and_non_numeric_settings_get_no_box(qtbot, editor):
+    editor.bset.settings["pointer_curve"] = "smooth"      # a newer release's
+    editor.bset.settings["x_flag"] = True
+    editor.bset.settings["x_future_number"] = 3
+    editor.bset.settings["precision_factor"] = "high"     # known, wrong type
+    editor.bset.settings["pointer_ramp_ms"] = False       # a bool is not an int
+    picker = make_picker(qtbot, editor)                   # must not raise
+    for name in ("pointer_curve", "x_flag", "x_future_number",
+                 "precision_factor", "pointer_ramp_ms"):
+        assert name not in picker.setting_boxes, name
+    assert "pointer_max_speed" in picker.setting_boxes
+
+
+def test_a_bound_parameterised_key_offers_its_params(qtbot, editor):
+    picker = make_picker(qtbot, editor)
+    picker.set_selected_key("Digit1")                    # window.slot index 1
+    assert picker.params_combo.isVisibleTo(picker)
+    assert picker.params_combo.count() == 9
+    assert picker.params_combo.currentData() == {"index": 1}
+    with qtbot.waitSignal(picker.paramsEdited) as blocker:
+        picker.params_combo.setCurrentIndex(2)
+        picker.params_combo.activated.emit(2)
+    assert blocker.args == ["Digit1", {"index": 3}]
+
+
+def test_params_are_not_offered_for_a_single_choice_or_unbound_key(qtbot, editor):
+    picker = make_picker(qtbot, editor)
+    picker.set_selected_key("KeyQ")                       # unbound
+    assert not picker.params_combo.isVisibleTo(picker)
+    editor.assign("KeyQ", Binding("overlay.toggle"))
+    picker.refresh()
+    assert not picker.params_combo.isVisibleTo(picker)
+
+
+def test_choosing_the_current_params_emits_nothing(qtbot, editor):
+    picker = make_picker(qtbot, editor)
+    picker.set_selected_key("Digit1")
+    with qtbot.assertNotEmitted(picker.paramsEdited):
+        picker.params_combo.activated.emit(0)
+
+
+def test_header_uses_the_key_display_name(qtbot):
+    doc = json.loads((paths.BUNDLED_ROOT / "bindings" / "default.json")
+                     .read_text(encoding="utf-8"))
+    editor = BindingEditor(BindingSet.from_dict(doc), lambda b: None,
+                           display=lambda code: {"KeyD": "D"}.get(code, code))
+    picker = make_picker(qtbot, editor)
+    picker.set_selected_key("KeyD")
+    assert picker.header.text().startswith("Assign to D (now: ")
+
+
+def test_header_names_a_preserved_unknown_action(qtbot, editor):
+    editor.bset.bindings.pop("KeyQ", None)
+    editor.bset.extra_bindings["KeyQ"] = {"action": "pointer.teleport",
+                                          "params": {}}
+    picker = make_picker(qtbot, editor)
+    picker.set_selected_key("KeyQ")
+    assert picker.header.text() == \
+        "Assign to KeyQ (now: pointer.teleport (not supported by this version))"
