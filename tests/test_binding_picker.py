@@ -111,13 +111,83 @@ def test_passthrough_targets_the_selected_key(qtbot, editor):
     assert blocker.args == ["KeyD", Binding("key.passthrough", {"code": "KeyD"})]
 
 
-def test_passthrough_cannot_be_armed_without_a_key(qtbot, editor):
+def test_passthrough_arms_without_a_code_when_no_key_is_selected(qtbot, editor):
     picker = make_picker(qtbot, editor)
     picker.set_selected_key(None)
     pick(picker, "key.passthrough")
-    assert not picker.assign_button.isEnabled()
-    with qtbot.assertNotEmitted(picker.armed):
+    assert picker.assign_button.isEnabled()
+    with qtbot.waitSignal(picker.armed) as blocker:
         picker.assign_button.click()
+    assert blocker.args == [Binding("key.passthrough", {})]
+
+
+def test_passthrough_drags_without_a_code(qtbot, editor):
+    picker = make_picker(qtbot, editor)
+    picker.set_selected_key("KeyD")
+    item = next(i for i, e in entry_items(picker) if e.action == "key.passthrough")
+    assert item.flags() & Qt.ItemIsDragEnabled
+    mime = picker.list.mimeData([item])
+    payload = json.loads(bytes(mime.data(MIME_TYPE)).decode("utf-8"))
+    assert payload == Binding("key.passthrough", {}).to_dict()
+
+
+def click_item(qtbot, picker, action):
+    item = next(i for i, e in entry_items(picker) if e.action == action)
+    picker.list.scrollToItem(item)
+    rect = picker.list.visualItemRect(item)
+    qtbot.mouseClick(picker.list.viewport(), Qt.LeftButton, pos=rect.center())
+
+
+def test_a_single_click_assigns_a_parameterless_entry(qtbot, editor):
+    picker = make_picker(qtbot, editor)
+    picker.show()
+    picker.set_selected_key("KeyQ")
+    with qtbot.waitSignal(picker.assignRequested) as blocker:
+        click_item(qtbot, picker, "overlay.toggle")
+    assert blocker.args == ["KeyQ", Binding("overlay.toggle", {})]
+
+
+def test_a_click_on_a_parameterised_entry_waits_for_its_choice(qtbot, editor):
+    picker = make_picker(qtbot, editor)
+    picker.show()
+    picker.set_selected_key("KeyQ")
+    with qtbot.assertNotEmitted(picker.assignRequested):
+        click_item(qtbot, picker, "window.slot")
+    assert picker.choice.isVisible()
+    index = picker.choice.findData({"index": 4})
+    picker.choice.setCurrentIndex(index)
+    with qtbot.waitSignal(picker.assignRequested) as blocker:
+        picker.choice.activated.emit(index)      # the user's pick
+    assert blocker.args == ["KeyQ", Binding("window.slot", {"index": 4})]
+
+
+def test_selecting_a_key_while_armed_disarms(qtbot, editor):
+    picker = make_picker(qtbot, editor)
+    picker.set_selected_key(None)
+    pick(picker, "overlay.toggle")
+    picker.assign_button.click()
+    with qtbot.waitSignal(picker.armed) as blocker:
+        picker.set_selected_key("KeyQ")
+    assert blocker.args == [None]
+    with qtbot.assertNotEmitted(picker.armed):
+        picker.set_selected_key("KeyW")
+
+
+def test_an_uncommitted_label_is_kept_when_the_key_changes(qtbot, editor):
+    picker = make_picker(qtbot, editor)
+    picker.set_selected_key("Digit1")
+    picker.label_edit.setText("Mail")
+    with qtbot.waitSignal(picker.legendEdited) as blocker:
+        picker.set_selected_key("Digit2")
+    assert blocker.args == ["Digit1", "Mail"]
+
+
+def test_settings_do_not_clamp_or_round(qtbot, editor):
+    editor.bset.settings["precision_factor"] = 0.1234
+    editor.bset.settings["pointer_ramp_ms"] = -5
+    picker = make_picker(qtbot, editor)
+    assert picker.setting_boxes["precision_factor"].value() == pytest.approx(0.1234)
+    assert picker.setting_boxes["pointer_ramp_ms"].value() == -5
 
 
 def test_an_unassigned_entry_assigns_the_stored_command_with_its_legend(qtbot, editor):

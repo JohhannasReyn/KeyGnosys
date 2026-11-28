@@ -56,7 +56,8 @@ class _EntryList(QListWidget):
 
     def mimeData(self, items) -> QMimeData | None:
         for item in items:
-            binding = self._picker._binding_for(item.data(Qt.UserRole))
+            binding = self._picker._binding_for(item.data(Qt.UserRole),
+                                                for_drag=True)
             if binding is not None:
                 mime = QMimeData()
                 mime.setData(MIME_TYPE,
@@ -94,6 +95,7 @@ class BindingPicker(QWidget):
         self._confirm = confirm
         self._editor: BindingEditor | None = None
         self._key: str | None = None
+        self._armed = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 8, 10, 8)
@@ -112,11 +114,12 @@ class BindingPicker(QWidget):
         self.list = _EntryList(self)
         self.list.setItemDelegate(_EntryDelegate(self.list))
         self.list.currentItemChanged.connect(lambda *_: self._on_entry_changed())
-        self.list.itemDoubleClicked.connect(lambda _i: self._choose())
+        self.list.itemClicked.connect(self._on_item_clicked)
         root.addWidget(self.list, 1)
 
         self.choice = QComboBox()
         self.choice.setVisible(False)
+        self.choice.activated.connect(lambda _i: self._choose())
         root.addWidget(self.choice)
 
         self.assign_button = QPushButton("Assign")
@@ -161,6 +164,12 @@ class BindingPicker(QWidget):
         self.refresh()
 
     def set_selected_key(self, code: str | None) -> None:
+        # A label typed but not yet committed belongs to the key it was
+        # typed for; commit it before the field switches keys.
+        self._emit_legend()
+        if code is not None and self._armed:
+            self._armed = False
+            self.armed.emit(None)
         self._key = code
         self.refresh()
 
@@ -231,16 +240,19 @@ class BindingPicker(QWidget):
         item = self.list.currentItem()
         return item.data(Qt.UserRole) if item is not None else None
 
-    def _binding_for(self, entry: PickerEntry | None) -> Binding | None:
-        """The Binding choosing `entry` would request, or None if it can't
-        be built (passthrough with no key selected)."""
+    def _binding_for(self, entry: PickerEntry | None,
+                     for_drag: bool = False) -> Binding | None:
+        """The Binding choosing (or dragging) `entry` would request."""
         if entry is None:
             return None
         if entry.stored is not None:
             return entry.stored
         if entry.action == "key.passthrough":
-            return (Binding(entry.action, {"code": self._key})
-                    if self._key else None)
+            # Armed or dragged, the target key isn't known here: the receiver
+            # fills in {"code": <target key>}.
+            if self._key and not for_drag:
+                return Binding(entry.action, {"code": self._key})
+            return Binding(entry.action, {})
         if not entry.choices:
             return Binding(entry.action, {})
         # The choice box speaks for the current entry; a dragged entry that
@@ -284,10 +296,8 @@ class BindingPicker(QWidget):
                 item = QListWidgetItem(entry.label)
                 item.setData(Qt.UserRole, entry)
                 item.setToolTip(entry.action)
-                flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable
-                if entry.action != "key.passthrough":
-                    flags |= Qt.ItemIsDragEnabled
-                item.setFlags(flags)
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable
+                              | Qt.ItemIsDragEnabled)
                 if entry.group == UNASSIGNED:
                     item.setData(_UNASSIGNED_ROLE, True)
                 self.list.addItem(item)
@@ -356,11 +366,21 @@ class BindingPicker(QWidget):
 
     # -- signal plumbing --------------------------------------------------
 
+    def _on_item_clicked(self, item: QListWidgetItem) -> None:
+        entry = item.data(Qt.UserRole)
+        if entry is None:
+            return
+        # One click chooses, unless the entry needs a choice first: then the
+        # combo is showing and picking from it chooses.
+        if entry.stored is not None or len(entry.choices) <= 1:
+            self._choose()
+
     def _choose(self) -> None:
         binding = self._binding_for(self._current_entry())
         if binding is None:
             return
         if self._key is None:
+            self._armed = True
             self.armed.emit(binding)
         else:
             self.assignRequested.emit(self._key, binding)
@@ -385,11 +405,11 @@ class BindingPicker(QWidget):
 def _spin_box_for(value: float | int) -> QSpinBox | QDoubleSpinBox:
     if isinstance(value, float):
         box = QDoubleSpinBox()
-        box.setDecimals(3)
-        box.setRange(0.0, 10000.0)
+        box.setDecimals(4)
+        box.setRange(-1e6, 1e6)
         box.setSingleStep(0.05)
     else:
         box = QSpinBox()
-        box.setRange(0, 100000)
+        box.setRange(-1_000_000, 1_000_000)
     box.setKeyboardTracking(False)
     return box
