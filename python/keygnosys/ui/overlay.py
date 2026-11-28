@@ -318,6 +318,10 @@ class Overlay:
 
     def _on_hide(self) -> None:
         visible = not self.window.isVisible()
+        if not visible:
+            # Ruling R13: the picker belongs to the keyboard; hiding one
+            # leaves define mode normally rather than leave it floating.
+            self.define.exit()
         self.window.setVisible(visible)
         self.settings.set("appearance.overlay_visible", visible)
         self.settings.save()

@@ -470,3 +470,153 @@ def test_a_failed_click_through_restore_disables_the_control(make_overlay,
     click = overlay.bar._click
     assert not click.isEnabled() and not click.isChecked()
     assert click.toolTip() == "Click-through failed on this platform."
+
+
+# -- final review fixes -----------------------------------------------------
+
+def write_user_doc(user_root, doc: dict, name: str = "default") -> None:
+    path = user_root / "bindings" / f"{name}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def shipped_default() -> dict:
+    return json.loads((paths.BUNDLED_ROOT / "bindings" / "default.json")
+                      .read_text("utf-8"))
+
+
+def test_define_mode_opens_with_a_string_setting_and_keeps_it(make_overlay,
+                                                              user_root):
+    doc = shipped_default()
+    doc["settings"]["pointer_curve"] = "smooth"
+    write_user_doc(user_root, doc)
+    overlay = make_overlay()
+    enter(overlay)
+    assert overlay.define.editor is not None
+    assert overlay.define.picker.isVisible()
+    assert "pointer_curve" not in overlay.define.picker.setting_boxes
+    select(overlay, "KeyQ")
+    assign_from_picker(overlay, "overlay.toggle", {})
+    saved = json.loads(user_file(user_root).read_text("utf-8"))
+    assert saved["settings"]["pointer_curve"] == "smooth"
+    assert saved["bindings"]["KeyQ"]["action"] == "overlay.toggle"
+
+
+def test_a_failure_opening_the_editor_leaves_define_mode_closed(
+        make_overlay, click_calls, monkeypatch):
+    overlay = make_overlay()
+
+    def boom(_editor):
+        raise TypeError("picker exploded")
+    monkeypatch.setattr(overlay.define.picker, "set_editor", boom)
+    overlay.bar.define_button.click()
+    assert not overlay.define.active
+    assert overlay.define.editor is None
+    assert click_calls == [False, True]
+    assert not overlay.state.define_mode
+    assert not overlay.define.picker.isVisible()
+    assert overlay.bar.define_button.text() == "Define"
+    assert not overlay.bar.define_button.isChecked()
+    assert "picker exploded" in overlay.tray.text()
+
+
+def test_changing_params_keeps_the_label(make_overlay, user_root):
+    overlay = make_overlay()
+    enter(overlay)
+    select(overlay, "Digit1")
+    picker = overlay.define.picker
+    picker.label_edit.setText("Mail")
+    picker.label_edit.editingFinished.emit()
+    index = picker.params_combo.findData({"index": 4})
+    picker.params_combo.setCurrentIndex(index)
+    picker.params_combo.activated.emit(index)
+    bound = overlay.state.binding_set.bindings["Digit1"]
+    assert bound.params == {"index": 4} and bound.legend == "Mail"
+    assert saved_binding(user_root, "Digit1") == {
+        "action": "window.slot", "params": {"index": 4}, "legend": "Mail"}
+
+
+def test_the_picker_names_keys_as_the_layout_draws_them(make_overlay):
+    overlay = make_overlay()
+    enter(overlay)
+    select(overlay, "KeyD")
+    assert overlay.define.picker.header.text().startswith("Assign to D (now: ")
+    overlay.define.editor.clear("Digit1")
+    labels = [e.label for e in overlay.define.editor.entries()
+              if e.stored is not None]
+    assert any(label.endswith("(was on 1)") for label in labels), labels
+
+
+def test_an_edit_while_the_core_is_down_says_when_it_applies(make_overlay,
+                                                             qtbot):
+    client = FakeClient()
+    overlay = make_overlay(client)
+    enter(overlay)
+    notices = []
+    real = overlay.show_notice
+    overlay.show_notice = lambda text: (notices.append(text), real(text))
+    overlay.define.editor.assign("KeyD", Binding("button.click", RIGHT))
+    overlay.define.editor.assign("KeyD", Binding("button.click", LEFT))
+    assert notices == ["Saved — changes apply when the core is running."]
+    # A new disconnected stretch says it again.
+    client.connect_core()
+    client.disconnected.emit("lost")
+    overlay.define.editor.assign("KeyD", Binding("button.click", RIGHT))
+    assert notices == ["Saved — changes apply when the core is running."] * 2
+
+
+def test_an_edit_while_connected_shows_no_offline_notice(make_overlay):
+    client = FakeClient()
+    overlay = make_overlay(client)
+    client.connect_core()
+    enter(overlay)
+    notices = []
+    overlay.show_notice = notices.append
+    overlay.define.editor.assign("KeyD", Binding("button.click", RIGHT))
+    assert notices == []
+
+
+def test_a_broken_user_file_with_no_shipped_copy_offers_no_reset(make_overlay,
+                                                                 user_root):
+    broken = user_root / "bindings" / "mine.json"
+    broken.parent.mkdir(parents=True)
+    broken.write_text("not json", encoding="utf-8")
+    overlay = make_overlay(FakeClient(bindings_id="mine"))
+    enter(overlay)
+    assert overlay.define.editor is None
+    assert not overlay.define.picker.reset_button.isVisible()
+
+
+def test_a_user_file_whose_id_differs_is_saved_in_place(make_overlay,
+                                                        user_root):
+    doc = shipped_default()
+    doc["id"] = "custom"
+    write_user_doc(user_root, doc)
+    overlay = make_overlay()
+    enter(overlay)
+    select(overlay, "KeyQ")
+    assign_from_picker(overlay, "overlay.toggle", {})
+    assert saved_binding(user_root, "KeyQ")["action"] == "overlay.toggle"
+    assert not (user_root / "bindings" / "custom.json").exists()
+
+
+def test_hiding_the_keyboard_from_the_bar_exits_define_mode(make_overlay,
+                                                            click_calls):
+    overlay = make_overlay()
+    overlay.window.show()
+    enter(overlay)
+    overlay.bar._hide.click()
+    assert not overlay.window.isVisible()
+    assert not overlay.define.active
+    assert not overlay.define.picker.isVisible()
+    assert click_calls == [False, True]
+
+
+def test_overlay_toggle_from_the_core_exits_define_mode(make_overlay):
+    client = FakeClient()
+    overlay = make_overlay(client)
+    overlay.window.show()
+    enter(overlay)
+    client.overlayToggleRequested.emit()
+    assert not overlay.window.isVisible()
+    assert not overlay.define.active
