@@ -148,7 +148,15 @@ produces zero valid documents **MUST** keep the previous set and emit a diagnost
 A user document that exists but fails to load never replaces the running map.
 The core keeps what it is running and emits `binding.invalid`. Only at startup,
 with nothing running, may it fall back to the next document in the search path,
-with the same diagnostic.
+with the same diagnostic. "Fails to load" includes a document that exists but
+cannot be read (locked, access denied): it is not treated as missing.
+
+When the core is started with `--bindings-file <path>`, it loads that one file
+and ignores the id search. `bindings_id` in `hello` and `config_changed` still
+reports the `--bindings` id option (default `default`), not the file. The
+overlay's editor edits the user copy for that id; it does not edit the file
+named by `--bindings-file`, so edits made there do not reach a core started
+this way.
 
 Reloading bindings **MUST** release every held action whose binding disappeared,
 and every locked drag button (P7).
