@@ -1,6 +1,6 @@
 # Binding editor, per-program keymaps and macros — design
 
-**Status:** draft, 2026-11-27. Brainstormed with the operator in this session.
+**Status:** draft, 2026-11-27; open questions settled by the operator the same day. Brainstormed with the operator in this session.
 **Supersedes for these features:** SPEC §10.2 (binding editor placement), the
 M5 row of §14 (ordering), and §3.2 (fork UX). Each amendment is listed in §9.
 
@@ -159,8 +159,8 @@ directory, `appmaps/`.
   still reaches every program that didn't override that key. The operator
   accepted this proposal.
 - **A key a program wants to do nothing** is an explicit
-  `{ "action": "none" }` override. Project 3 settles whether "nothing" means
-  suppressed or passed through.
+  `{ "action": "none" }` override. Whether it is suppressed or passed through
+  is configurable (§10).
 
 **Macro.** This is a new kind, `keygnosys/macro/1`, stored in `macros/`.
 
@@ -213,8 +213,7 @@ directory, `appmaps/`.
   of the macro, and everything the macro holds is released.
   - Leaving covers the activation key, `layer.release` and every existing
     `releaseAll` exit path.
-- **A second press of the same key while it runs:** project 4 decides between
-  abort and ignore.
+- **A second press of the same key while it runs restarts the macro** (§10).
 
 **Recording.**
 - **New IPC commands:** `record_start {kinds:["keys","mouse"], placement}` and
@@ -222,8 +221,10 @@ directory, `appmaps/`.
 - **The core streams `record_step` events to the requesting client.** For a
   click, it also captures the control under the pointer at click time,
   off the hook thread.
-- **Mouse recording is armed and disarmed by Space (operator decision).** The
-  core swallows those two presses and doesn't record them.
+- **Recording is armed and disarmed by a trigger the user chooses** (a key
+  or key combination, with Space as the default for mouse recording;
+  operator decisions). The core swallows the trigger presses and doesn't
+  record them.
 - **The client assembles the steps and writes the macro document.**
 
 ### 5.3 Overlay responsibilities
@@ -450,11 +451,19 @@ These are made in project 1's PR unless noted.
 7. **Project 4:** a new §4.x for `macro/1`, a new action `macro.run`, the
    `record_*` IPC, and the safety stop as a P7 exit path.
 
-## 10. Open, to be settled in later projects
+## 10. Settled for later projects (operator, 2026-11-27)
 
-- **Project 3:** whether `{ "action": "none" }` suppresses the key or passes it
-  through to the program.
-- **Project 4:**
-  - how a **keyboard** recording is stopped, given that Space can be part of
-    what's being recorded;
-  - what a second press of a running macro's key does.
+- **Project 3: a key set to nothing is configurable.**
+  - It either suppresses the key or passes it through to the program.
+  - The option is per program map, with a per-key override in the
+    `{ "action": "none" }` entry. Project 3's plan settles the field names
+    and the default.
+- **Project 4: the user chooses the recording trigger.**
+  - The key or key combination that starts and stops a recording is
+    chosen from a set of options, so it can avoid conflicts with what's
+    being recorded. Space is the default for mouse recording.
+  - The chosen trigger is swallowed by the core and never recorded.
+- **Project 4: pressing a running macro's key again restarts the macro.**
+  - The current run is aborted first, releasing everything it holds (the
+    same path as the safety stop).
+  - It then starts again from step one.
