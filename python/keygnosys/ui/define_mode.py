@@ -68,6 +68,8 @@ class DefineMode:
         self.reload_pending = False
         #: The offline notice has been shown in this disconnected stretch.
         self._offline_noticed = False
+        #: Why the last save failed, or None if it succeeded.
+        self._save_error: str | None = None
 
         self._reload_timer = QTimer()
         self._reload_timer.setSingleShot(True)
@@ -345,7 +347,22 @@ class DefineMode:
         # An empty map author is filled from the bundle header.
         plan.bset.metadata.author = plan.author
         # Saves and schedules the reload through _on_binding_edit.
+        self._save_error = None
         self.editor.replace_all(plan.bset, imported_from)
+        if self._save_error is not None:
+            # Nothing reached the file: put memory back to match it, and
+            # remove the backup of an import that did not happen.
+            self.editor.revert_last()
+            self._o.state.binding_set = self.editor.bset
+            if backup is not None:
+                try:
+                    backup.unlink()
+                except OSError:
+                    pass
+            self._o.window.view.update()
+            self._refresh()
+            self._o.show_notice(f"Not imported — {self._save_error}")
+            return False
         name = _capped(plan.name)
         self._o.show_notice(
             IMPORTED_BACKUP_NOTICE.format(name=name, backup=backup.name)
@@ -403,13 +420,16 @@ class DefineMode:
         # After undo or redo the editor holds a new object; always re-read.
         o.state.binding_set = self.editor.bset
         saved = True
+        self._save_error = None
         try:
             binding_store.save(bset, self.bindings_id)
         except binding_store.BrokenUserCopy as exc:
             saved = False
+            self._save_error = exc.reason
             o.show_notice(BROKEN_NOTICE.format(reason=exc.reason))
         except (binding_store.StoreError, OSError) as exc:
             saved = False
+            self._save_error = str(exc)
             o.show_notice(f"Bindings not saved — {exc}")
         o.window.view.update()
         self._refresh()

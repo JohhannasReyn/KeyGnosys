@@ -201,6 +201,17 @@ class BindingEditor:
         self._redo.clear()
         self._on_change(self.bset)
 
+    def revert_last(self) -> bool:
+        """Drop the last step as if it never happened, without notifying.
+
+        For a step whose save failed: memory goes back to what is on disk,
+        and no redo entry is left. History cleared by that step stays
+        cleared."""
+        if not self._undo:
+            return False
+        self.bset = BindingSet.from_dict(self._undo.pop().doc)
+        return True
+
     def _edit(self, mutate: Callable[[], object]) -> None:
         snapshot = self.bset.to_dict()
         mutate()

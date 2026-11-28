@@ -1138,3 +1138,36 @@ def test_a_long_imported_name_is_capped_in_the_notice(make_overlay, tmp_path):
     shown = "n" * 79 + "…"
     assert overlay.tray.text().startswith(f"Imported '{shown}'. ")
     assert len(overlay.tray.text()) < 200
+
+
+def test_a_failed_save_after_the_backup_is_not_an_import(
+        make_overlay, user_root, tmp_path, monkeypatch, qtbot):
+    write_user_doc(user_root, shipped_default())
+    client = FakeClient()
+    overlay = make_overlay(client)
+    client.connect_core()
+    Transfer(overlay)
+    enter(overlay)
+    # One edit first, so there is history to keep.
+    select(overlay, "KeyF")
+    overlay.define.picker.label_edit.setText("Typed")
+    overlay.define.picker.commit_pending()
+    qtbot.wait(400)
+    reloads = client.reloads
+    on_disk = user_file(user_root).read_bytes()
+    running = overlay.define.editor.bset.to_dict()
+    could_undo = overlay.define.editor.can_undo
+
+    def fail(*_args, **_kwargs):
+        raise OSError("disk full")
+    monkeypatch.setattr(binding_store, "save", fail)
+    assert overlay.define.import_(import_file(tmp_path)) is False
+    assert "Imported" not in overlay.tray.text()
+    assert overlay.tray.text() == "Not imported — disk full"
+    assert backups(user_root) == []
+    assert overlay.define.editor.bset.to_dict() == running
+    assert overlay.state.binding_set is overlay.define.editor.bset
+    assert overlay.define.editor.can_undo == could_undo
+    assert user_file(user_root).read_bytes() == on_disk
+    qtbot.wait(400)
+    assert client.reloads == reloads
