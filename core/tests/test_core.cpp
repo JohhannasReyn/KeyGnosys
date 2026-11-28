@@ -1624,6 +1624,54 @@ KGN_TEST(a_broken_user_map_at_startup_falls_back_and_says_so) {
     removeEndpoint(address);
 }
 
+// A user document that exists but cannot be read (locked, denied) is not a
+// missing one. A directory in its place stands in for it: it exists, and
+// reading it fails.
+KGN_TEST(an_unreadable_user_map_on_reload_keeps_the_running_map) {
+    BindingRoots roots("unreadreload");
+    BindingRoots::write(roots.userPath(), BindingRoots::document("default", "KeyQ"));
+    BindingRoots::write(roots.shippedPath(), BindingRoots::document("default", "KeyW"));
+
+    const std::string address = uniqueEndpoint("unreadreload");
+    Core core(roots.options(address));
+    KGN_CHECK(core.start().ok());
+    KGN_CHECK_EQ(core.bindingsSourceForTests(), roots.userPath());
+
+    std::filesystem::remove(roots.userPath());
+    std::filesystem::create_directory(roots.userPath());
+
+    RawClient client;
+    KGN_CHECK(client.connect(address));
+    if (client.valid()) {
+        client.send(R"({"v":1,"t":"command","n":"reload_config","id":"c1","d":{}})" "\n");
+        std::vector<Json> events;
+        const Json reply = replyCollecting(client, core, events);
+        KGN_CHECK(!reply["ok"].asBool());
+        KGN_CHECK_EQ(reply["e"]["code"].asString(), std::string("binding.invalid"));
+        KGN_CHECK(findEvent(events, "config_changed") == nullptr);
+        client.close();
+    }
+
+    KGN_CHECK_EQ(core.bindingsSourceForTests(), roots.userPath());
+    KGN_CHECK(hasInvalidFor(core.diagnostics(), roots.userPath()));
+    core.stop("test finished");
+    removeEndpoint(address);
+}
+
+KGN_TEST(an_unreadable_user_map_at_startup_falls_back_and_says_so) {
+    BindingRoots roots("unreadstart");
+    std::filesystem::create_directory(roots.userPath());
+    BindingRoots::write(roots.shippedPath(), BindingRoots::document("default", "KeyW"));
+
+    const std::string address = uniqueEndpoint("unreadstart");
+    Core core(roots.options(address));
+    KGN_CHECK(core.start().ok());
+    KGN_CHECK_EQ(core.bindingsSourceForTests(), roots.shippedPath());
+    KGN_CHECK(hasInvalidFor(core.diagnostics(), roots.userPath()));
+    core.stop("test finished");
+    removeEndpoint(address);
+}
+
 KGN_TEST(hello_and_config_changed_carry_the_running_bindings_id) {
     BindingRoots roots("bindingsid");
     BindingRoots::write(roots.shippedPath(), BindingRoots::document("default", "KeyW"));

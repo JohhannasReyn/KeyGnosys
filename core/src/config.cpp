@@ -202,7 +202,9 @@ bool parseBindingsDocument(std::string_view text, std::string_view sourceName,
                 continue;   // dropped with no diagnostic; the editor owns this list
             }
             for (const auto& [code, bound] : doc.bindings) {
-                if (bound.id != action.id) continue;
+                // The same command means the same params too: button.click
+                // {left} unassigned beside button.click {right} bound is fine.
+                if (bound != action) continue;
                 diags.emplace_back(
                     DiagLevel::Warn, "binding.unassigned_conflict",
                     "'" + std::string(actionName(action.id)) +

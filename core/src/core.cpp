@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <thread>
@@ -285,7 +286,18 @@ struct Core::Impl {
     bool loadBindings(std::string& loadedFrom) {
         for (const auto& path : bindingsSearchPaths(options)) {
             std::string text;
-            if (!readFile(path, text)) continue;
+            if (!readFile(path, text)) {
+                // Missing is the normal case: look further down. A document
+                // that exists but cannot be read (locked, denied) is one that
+                // fails to load (SPEC 3.3), and is treated the same as one
+                // that does not parse.
+                std::error_code ignored;
+                if (!std::filesystem::exists(path, ignored)) continue;
+                note(DiagLevel::Warn, "binding.invalid",
+                     "document exists but could not be read", path);
+                if (haveBindings) return false;
+                continue;
+            }
             BindingsDocument document;
             Diagnostics found;
             const bool ok = parseBindingsDocument(text, path, document, found);
