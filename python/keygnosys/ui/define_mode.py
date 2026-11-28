@@ -105,7 +105,10 @@ class DefineMode:
         self.active = False
         self.editor = None
         self._armed = None
-        clickthrough.set_click_through(o.window, self._click_through_was)
+        if not clickthrough.set_click_through(o.window, self._click_through_was):
+            o.bar.disable_click_through(
+                clickthrough.unavailable_reason()
+                or "Click-through failed on this platform.")
         if self._click_through_was != bool(o.settings.get("window.click_through", True)):
             # The user flipped the control while define mode held it off.
             o.settings.set("window.click_through", self._click_through_was)
@@ -227,6 +230,10 @@ class DefineMode:
             self.reload_pending = True
 
     def on_connected(self) -> None:
+        # Entered while the core was down, the id came from settings; the
+        # core that just connected may be running another map.
+        if self._switched_away(self._o.client.bindings_id):
+            return
         if self.reload_pending:
             self.reload_pending = False
             self._o.client.reload_config()
@@ -234,11 +241,18 @@ class DefineMode:
     def on_config_changed(self, payload: dict) -> None:
         new_id = payload.get("bindings_id")
         if self.active:
-            if new_id and new_id != self.bindings_id:
-                self.exit(SWITCHED_NOTICE.format(id=new_id))
-                self._o.reload_binding_set(new_id)
+            self._switched_away(new_id)
             return
         self._o.reload_binding_set(new_id)
+
+    def _switched_away(self, new_id: str | None) -> bool:
+        """Close define mode if the core runs a map other than the one being
+        edited, rather than saving edits into a map it no longer runs."""
+        if not (self.active and new_id and new_id != self.bindings_id):
+            return False
+        self.exit(SWITCHED_NOTICE.format(id=new_id))
+        self._o.reload_binding_set(new_id)
+        return True
 
     # -- view -------------------------------------------------------------
 

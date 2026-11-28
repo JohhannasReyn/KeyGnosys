@@ -405,3 +405,68 @@ def test_a_binding_invalid_diagnostic_shows_in_the_tray(make_overlay):
                             "file": "default.json"})
     assert overlay.tray.isVisible()
     assert overlay.tray.text() == "Bindings not applied — KeyD: unknown action"
+
+
+# -- fix round 1 ------------------------------------------------------------
+
+def test_a_late_connect_to_another_id_closes_define_mode(make_overlay, qtbot,
+                                                         user_root):
+    # Entered with the core down, so the id came from settings ("default").
+    client = FakeClient(bindings_id=None)
+    overlay = make_overlay(client)
+    enter(overlay)
+    assert overlay.define.bindings_id == "default"
+    select(overlay, "KeyD")
+    assign_from_picker(overlay, "button.click", RIGHT)
+    qtbot.wait(400)
+    assert overlay.define.reload_pending
+    overlay.define.picker.label_edit.setText("Uncommitted")
+
+    client._id = "other"
+    client.connect_core()
+    assert not overlay.define.active
+    assert overlay.tray.text() ==         "The core switched to bindings 'other'; define mode closed."
+    assert client.reloads == 0
+    assert not overlay.define.reload_pending
+    assert "legend" not in saved_binding(user_root, "KeyD")
+    qtbot.wait(400)
+    assert client.reloads == 0
+
+
+def test_a_late_connect_to_the_same_id_sends_the_pending_reload(make_overlay,
+                                                                qtbot):
+    client = FakeClient(bindings_id=None)
+    overlay = make_overlay(client)
+    enter(overlay)
+    overlay.define.editor.assign("KeyD", Binding("button.click", RIGHT))
+    qtbot.wait(400)
+    client._id = "default"
+    client.connect_core()
+    assert overlay.define.active
+    assert client.reloads == 1
+
+
+def test_window_slots_repaint_the_keyboard_in_define_mode(make_overlay,
+                                                          monkeypatch):
+    client = FakeClient()
+    overlay = make_overlay(client)
+    enter(overlay)
+    repaints = []
+    monkeypatch.setattr(overlay.window.view, "update",
+                        lambda *a: repaints.append(a))
+    client.windowsChanged.emit([{"index": 1, "title": "Editor"}])
+    assert repaints
+
+
+def test_a_failed_click_through_restore_disables_the_control(make_overlay,
+                                                             monkeypatch):
+    overlay = make_overlay()
+    enter(overlay)
+    monkeypatch.setattr(clickthrough, "set_click_through",
+                        lambda _w, _on: False)
+    monkeypatch.setattr(clickthrough, "unavailable_reason", lambda: None)
+    overlay.bar.define_button.click()
+    assert not overlay.define.active
+    click = overlay.bar._click
+    assert not click.isEnabled() and not click.isChecked()
+    assert click.toolTip() == "Click-through failed on this platform."

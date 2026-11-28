@@ -246,7 +246,9 @@ class Overlay:
             int(s["index"]): s.get("title") or s.get("process") or ""
             for s in slots if s.get("index") is not None
         }
-        if self.state.cursor_layer:
+        # Slot legends are drawn wherever the cursor layer is shown, which
+        # includes define mode.
+        if self.state.cursor_layer or self.state.define_mode:
             self.window.view.update()
 
     def _on_connected(self, payload: dict) -> None:
