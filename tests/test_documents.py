@@ -231,3 +231,21 @@ def test_unmodelled_top_level_fields_survive() -> None:
     from keygnosys.documents import BindingSet
     doc = {"schema": "keygnosys/bindings/2", "id": "t", "bindings": {}, "x-note": "keep me"}
     assert BindingSet.from_dict(doc).to_dict()["x-note"] == "keep me"
+
+
+def test_a_moved_aside_broken_copy_is_never_loaded(tmp_path) -> None:
+    # Reset moves a broken user copy to <id>.broken-<ts>.json. Even when the
+    # moved file is valid JSON (moved aside for being unreadable), it must not
+    # load: under its own id it would shadow the shipped map.
+    aside = tmp_path / "default.broken-1795842643.json"
+    aside.write_text(json.dumps({
+        "schema": "keygnosys/bindings/2", "id": "default", "name": "aside",
+        "bindings": {"KeyQ": {"action": "button.click", "params": {"button": "left"}}},
+    }), encoding="utf-8")
+    (tmp_path / "other.broken-1.json").write_text("{ nope", encoding="utf-8")
+
+    reg = Registry()
+    reg._load_dir("bindings", tmp_path)
+
+    assert reg.bindings == {}
+    assert list(reg.diagnostics) == []

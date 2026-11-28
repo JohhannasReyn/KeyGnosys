@@ -37,6 +37,13 @@ _UNASSIGNED_ROLE = Qt.UserRole + 1
 _UNASSIGNED_COLOUR = QColor(230, 140, 30)
 
 
+#: Yellow: the one action left when the user's map file is broken.
+URGENT_RESET_STYLE = (
+    "QPushButton { background: #FFD54A; color: #1a1a1a; font-weight: 600;"
+    " border: 1px solid #C9A227; border-radius: 4px; padding: 3px 8px; }"
+    " QPushButton:hover { background: #FFE07A; }")
+
+
 def _ask(question: str) -> bool:
     answer = QMessageBox.question(None, "KeyGnosys", question)
     return answer == QMessageBox.Yes
@@ -161,6 +168,7 @@ class BindingPicker(QWidget):
         self.reset_button = QPushButton("Reset to shipped")
         self.reset_button.clicked.connect(self._emit_reset)
         self.reset_button.setVisible(False)
+        self.reset_button.setProperty("urgent", False)
         root.addWidget(self.reset_button)
 
         self.refresh()
@@ -181,8 +189,16 @@ class BindingPicker(QWidget):
         self._key = code
         self.refresh()
 
-    def set_can_reset(self, can: bool) -> None:
+    def set_can_reset(self, can: bool, urgent: bool = False) -> None:
+        """Show Reset to shipped; `urgent` highlights it as the one way on.
+
+        Urgent means the user's file is broken and nothing else can be edited
+        until it is reset, so the button must not read as a quiet option.
+        """
         self.reset_button.setVisible(can)
+        urgent = bool(can and urgent)
+        self.reset_button.setProperty("urgent", urgent)
+        self.reset_button.setStyleSheet(URGENT_RESET_STYLE if urgent else "")
 
     def dock_beside(self, anchor: QRect) -> None:
         self.move(anchor.right() + DOCK_GAP, anchor.top())

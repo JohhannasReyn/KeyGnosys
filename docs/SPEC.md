@@ -135,7 +135,11 @@ bundled set writes the user copy under the same `id` (setting
 copy shadows a bundled one, the editor offers **Reset to shipped**, which deletes
 the user copy — or, if it does not load, moves it aside to
 `<id>.broken-<unix_ts>.json`, never deleting it — and returns to the bundled set.
-A user copy that exists but does not load is never overwritten by a save. *Duplicate
+A user copy that exists but does not load is never overwritten by a save; while
+it is in that state the editor offers only Reset to shipped, highlighted as the one
+action left. A moved-aside `<id>.broken-<unix_ts>.json` is kept for the user and is
+**never loaded** as a document: under its own `id` it could shadow the map it was
+moved away from. *Duplicate
 set* (fork under a new id) and *Reset to source template* (§10.2.4) are deferred.
 
 ### 3.3 Live reload

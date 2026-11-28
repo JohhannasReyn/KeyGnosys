@@ -293,7 +293,7 @@ Every row here is a P7 test. A failure leaves a key or a button held.
 | 13.2 | Repeat 13.1, but first clear `Space`: the shipped map also puts Left click there, and a command still bound elsewhere is not displaced (SPEC §10.2.2). Then look under **Unassigned** in the picker. | The displaced Left click appears under Unassigned as "was on D". |
 | 13.3 | Press Undo on the control bar. | `D` returns to Left click, live: the next press of `D` in the layer left-clicks. |
 | 13.4 | With the core stopped, make an edit, then start the core. | The edit applies. |
-| 13.5 | Hand-break the user file (`%APPDATA%\KeyGnosys\bindings\default.json`), then enter define mode. Use **Reset to shipped**. | Entering define mode says the file has an error. Reset moves it aside to `default.broken-<unix_ts>.json`; it is not deleted. |
+| 13.5 | Hand-break the user file (`%APPDATA%\KeyGnosys\bindings\default.json`), then enter define mode. Use **Reset to shipped**. | Entering define mode says the file has an error, and **Reset to shipped** is highlighted yellow. Reset moves it aside to `default.broken-<unix_ts>.json`; it is not deleted. |
 
 ---
 

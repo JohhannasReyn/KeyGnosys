@@ -940,6 +940,12 @@ _LOADERS = {
 }
 
 
+def _is_moved_aside(path: Path) -> bool:
+    """True for `<id>.broken-<digits>.json`, the name Reset gives a broken copy."""
+    stem, _, suffix = path.stem.rpartition(".broken-")
+    return bool(stem) and suffix.isdigit()
+
+
 class Registry:
     """All loaded documents, keyed by kind then id.
 
@@ -969,6 +975,11 @@ class Registry:
             return
         target = getattr(self, kind)
         for path in sorted(directory.glob("*.json")):
+            if _is_moved_aside(path):
+                # A broken copy Reset moved aside (<id>.broken-<ts>.json) is
+                # kept for the user, never loaded: under its own id it could
+                # shadow the map it was moved away from.
+                continue
             try:
                 doc = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:

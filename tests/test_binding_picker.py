@@ -403,3 +403,18 @@ def test_header_names_a_preserved_unknown_action(qtbot, editor):
     picker.set_selected_key("KeyQ")
     assert picker.header.text() == \
         "Assign to KeyQ (now: pointer.teleport (not supported by this version))"
+
+
+def test_an_urgent_reset_is_highlighted(qtbot, editor):
+    picker = make_picker(qtbot, editor, answer=False)
+    picker.set_can_reset(True)
+    assert picker.reset_button.property("urgent") is False
+    assert "#FFD54A" not in picker.reset_button.styleSheet()
+
+    picker.set_can_reset(True, urgent=True)
+    assert picker.reset_button.property("urgent") is True
+    assert "#FFD54A" in picker.reset_button.styleSheet()
+
+    picker.set_can_reset(True)
+    assert picker.reset_button.property("urgent") is False
+    assert "#FFD54A" not in picker.reset_button.styleSheet()

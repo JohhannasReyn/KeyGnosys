@@ -368,6 +368,8 @@ def test_a_broken_user_file_offers_only_reset(make_overlay, user_root):
     assert overlay.tray.text().endswith(
         "). Fix it, or use Reset to shipped.")
     assert picker.reset_button.isVisible()
+    # It is the one thing to do, so it is highlighted.
+    assert picker.reset_button.property("urgent") is True
     assert not any(picker.list.item(r).data(Qt.UserRole)
                    for r in range(picker.list.count()))
     select(overlay, "KeyD")

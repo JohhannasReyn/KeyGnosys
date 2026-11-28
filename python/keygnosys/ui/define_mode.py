@@ -164,7 +164,8 @@ class DefineMode:
             # Never fork over the user's file: Reset, which moves it aside,
             # is the only way on.
             self._set_editor(
-                None, can_reset=binding_store.shipped_path(self.bindings_id).exists())
+                None, can_reset=binding_store.shipped_path(self.bindings_id).exists(),
+                urgent=True)
             o.show_notice(BROKEN_NOTICE.format(reason=exc.reason))
             return
         except binding_store.StoreError as exc:
@@ -173,14 +174,15 @@ class DefineMode:
             return
         self._set_editor(bset, binding_store.shadows_shipped(self.bindings_id))
 
-    def _set_editor(self, bset: BindingSet | None, can_reset: bool) -> None:
+    def _set_editor(self, bset: BindingSet | None, can_reset: bool,
+                    urgent: bool = False) -> None:
         self.editor = (BindingEditor(bset, on_change=self._on_binding_edit,
                                      display=self._display)
                        if bset is not None else None)
         if self.editor is not None:
             self._o.state.binding_set = self.editor.bset
         self.picker.set_editor(self.editor)
-        self.picker.set_can_reset(can_reset)
+        self.picker.set_can_reset(can_reset, urgent=urgent)
         self._o.window.view.update()
 
     def _display(self, code: str) -> str:
