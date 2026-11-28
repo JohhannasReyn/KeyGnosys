@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget,
 )
 
-from ..actions import COMMAND_PARAMS, default_legend
+from ..actions import COMMAND_PARAMS, KNOWN_SETTINGS, default_legend
 from ..binding_editor import UNASSIGNED, BindingEditor, PickerEntry
 from ..documents import Binding
 from .theme import ResolvedTheme
@@ -464,21 +464,6 @@ class BindingPicker(QWidget):
     def _emit_reset(self) -> None:
         if self._confirm(RESET_QUESTION):
             self.resetRequested.emit()
-
-
-#: The core's clamps (core/src/config.cpp), so a box never offers a value
-#: the core would silently change.
-_SPEED = ("double", 0.01, 10000.0, 0.5)
-_RAMP = ("int", 0, 60000, 10)
-KNOWN_SETTINGS: dict[str, tuple] = {
-    "pointer_base_speed": _SPEED,
-    "pointer_max_speed": _SPEED,
-    "scroll_base_speed": _SPEED,
-    "scroll_max_speed": _SPEED,
-    "pointer_ramp_ms": _RAMP,
-    "scroll_ramp_ms": _RAMP,
-    "precision_factor": ("double", 0.001, 1.0, 0.05),
-}
 
 
 def _is_number(value: object) -> bool:
