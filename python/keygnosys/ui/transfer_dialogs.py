@@ -35,6 +35,15 @@ def _plain(text: str) -> QLabel:
     return label
 
 
+def _bold(text: str) -> QLabel:
+    """A section heading: plain text, in bold."""
+    label = _plain(text)
+    font = label.font()
+    font.setBold(True)
+    label.setFont(font)
+    return label
+
+
 def _format_date(iso: str | None) -> str:
     if not iso:
         return ""
@@ -60,8 +69,11 @@ class ImportPreview(QDialog):
 
         key_changes = [c for c in changes if c.kind == "key"]
         if changes:
+            n = len(key_changes)
+            title = (f"Changes ({n} {'key' if n == 1 else 'keys'})"
+                     if n else "Changes")
             self._sections.append(
-                (f"Changes ({len(key_changes)} keys)",
+                (title,
                  [_change_line(c) for c in key_changes]
                  + [_change_line(c) for c in changes if c.kind != "key"]))
         for kind, title in (("unusable", "Kept but not usable in this version"),
@@ -92,10 +104,7 @@ class ImportPreview(QDialog):
             inner_layout.addWidget(note)
             self._labels.append(note)
         for title, lines in self._sections:
-            head = _plain(title)
-            font = head.font()
-            font.setBold(True)
-            head.setFont(font)
+            head = _bold(title)
             inner_layout.addWidget(head)
             body = _plain("\n".join(lines))
             body.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -154,16 +163,22 @@ class ExportPreview(QDialog):
         summary = _plain(f"Exporting '{name}': {key_count} keys.")
         layout.addWidget(summary)
         self._labels.append(summary)
+        self.warnings_heading: QLabel | None = None
+        if warnings:
+            self.warnings_heading = _bold("Warnings")
+            layout.addWidget(self.warnings_heading)
+            self._labels.append(self.warnings_heading)
         for w in warnings:
             lab = _plain(w)
             layout.addWidget(lab)
             self._labels.append(lab)
-        layout.addWidget(QLabel("Author (optional)"))
+        self.author_label = QLabel("Your name (for credit)")
+        layout.addWidget(self.author_label)
         self.author_field = QLineEdit()
         layout.addWidget(self.author_field)
         buttons = QDialogButtonBox()
         self.save_button = buttons.addButton(
-            "Save...", QDialogButtonBox.AcceptRole)
+            "Save…", QDialogButtonBox.AcceptRole)
         self.save_button.setDefault(True)
         self.save_button.clicked.connect(self.accept)
         self.close_button = buttons.addButton(

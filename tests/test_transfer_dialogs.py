@@ -130,3 +130,27 @@ def test_many_changes_scroll_and_buttons_stay_outside(qtbot):
     # The content is far taller than the viewport, so it scrolls.
     assert inner.sizeHint().height() > dlg.scroll.maximumHeight()
     assert dlg.sizeHint().height() <= dlg.max_height()
+
+
+def test_changes_title_is_pluralised(qtbot):
+    one = ImportPreview(make_plan(), two_changes()[:1])
+    qtbot.addWidget(one)
+    assert list(one.sections())[0] == "Changes (1 key)"
+    settings_only = ImportPreview(make_plan(), [
+        Change("setting", "Opacity", "50", "90")])
+    qtbot.addWidget(settings_only)
+    assert list(settings_only.sections())[0] == "Changes"
+
+
+def test_export_preview_matches_the_spec(qtbot):
+    dlg = ExportPreview("Mine", 12, ["Key X has no label"])
+    qtbot.addWidget(dlg)
+    assert dlg.author_label.text() == "Your name (for credit)"
+    assert dlg.save_button.text() == "Save\u2026"
+    assert dlg.warnings_heading is not None
+    assert dlg.warnings_heading.text() == "Warnings"
+    assert dlg.warnings_heading.font().bold()
+    quiet = ExportPreview("Mine", 12, [])
+    qtbot.addWidget(quiet)
+    assert quiet.warnings_heading is None
+    assert "Warnings" not in quiet.all_text()
