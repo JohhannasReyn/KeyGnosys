@@ -5,8 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QLabel, QLineEdit,
-                               QPushButton, QVBoxLayout, QWidget)
+                               QPushButton, QScrollArea, QVBoxLayout,
+                               QWidget)
 
 from keygnosys.bundle import Change, ImportPlan
 
@@ -15,6 +17,22 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
 
 INTRO = ("This replaces your current map. Your current map is kept as a "
          "backup, and Undo brings it straight back.")
+
+
+def max_dialog_height() -> int:
+    """About 60% of the available screen height, with a fixed fallback."""
+    screen = QGuiApplication.primaryScreen()
+    if screen is None:
+        return 480
+    return int(screen.availableGeometry().height() * 0.6)
+
+
+def _plain(text: str) -> QLabel:
+    """A word-wrapped label that never interprets its text as markup."""
+    label = QLabel(text)
+    label.setTextFormat(Qt.PlainText)
+    label.setWordWrap(True)
+    return label
 
 
 def _format_date(iso: str | None) -> str:
@@ -54,19 +72,27 @@ class ImportPreview(QDialog):
                 self._sections.append((f"{title} ({len(texts)})", texts))
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(self._header))
-        intro = QLabel(self._intro)
-        intro.setWordWrap(True)
-        layout.addWidget(intro)
+        self.header_label = _plain(self._header)
+        layout.addWidget(self.header_label)
+        layout.addWidget(_plain(self._intro))
         self._labels: list[QLabel] = []
+        self._max_height = max_dialog_height()
+        self.setMaximumHeight(self._max_height)
+        # Sections scroll; the buttons stay outside so they are always visible.
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setMaximumHeight(max(120, self._max_height - 280))
+        inner = QWidget()
+        inner_layout = QVBoxLayout(inner)
+        self.scroll.setWidget(inner)
+        layout.addWidget(self.scroll)
         if not changes:
-            note = QLabel("Nothing changes: this map is the same as your "
+            note = _plain("Nothing changes: this map is the same as your "
                           "current one.")
-            note.setWordWrap(True)
-            layout.addWidget(note)
+            inner_layout.addWidget(note)
             self._labels.append(note)
         for title, lines in self._sections:
-            head = QLabel(title)
+            head = _plain(title)
             font = head.font()
             font.setBold(True)
             head.setFont(font)
@@ -104,6 +130,14 @@ class ImportPreview(QDialog):
             parts.append(date)
         return "  ·  ".join(parts)
 
+    def max_height(self) -> int:
+        return self._max_height
+
+    def sizeHint(self):
+        hint = super().sizeHint()
+        hint.setHeight(min(hint.height(), self._max_height))
+        return hint
+
     def header_text(self) -> str:
         return self._header
 
@@ -124,13 +158,11 @@ class ExportPreview(QDialog):
         self.setWindowTitle("Export bindings")
         layout = QVBoxLayout(self)
         self._labels: list[QLabel] = []
-        summary = QLabel(f"Exporting '{name}': {key_count} keys.")
-        summary.setWordWrap(True)
+        summary = _plain(f"Exporting '{name}': {key_count} keys.")
         layout.addWidget(summary)
         self._labels.append(summary)
         for w in warnings:
-            lab = QLabel(w)
-            lab.setWordWrap(True)
+            lab = _plain(w)
             layout.addWidget(lab)
             self._labels.append(lab)
         layout.addWidget(QLabel("Author (optional)"))

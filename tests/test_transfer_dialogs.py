@@ -97,3 +97,27 @@ def test_export_preview_lists_warnings(qtbot):
     qtbot.addWidget(dlg)
     assert "Key X has no label" in dlg.all_text()
     assert "12" in dlg.all_text()
+
+
+def test_file_derived_text_is_plain(qtbot):
+    plan = make_plan(author="<i>me</i>")
+    plan.name = "<b>x</b>"
+    dlg = ImportPreview(plan, two_changes())
+    qtbot.addWidget(dlg)
+    assert dlg.header_label.textFormat() == Qt.PlainText
+    assert "<b>x</b>" in dlg.header_label.text()
+    assert dlg.header_label.wordWrap()
+    exp = ExportPreview("<b>n</b>", 1, ["<u>w</u>"])
+    qtbot.addWidget(exp)
+    assert "<b>n</b>" in exp.all_text() and "<u>w</u>" in exp.all_text()
+    assert all(l.textFormat() == Qt.PlainText for l in exp._labels)
+
+
+def test_many_changes_scroll_and_buttons_stay_outside(qtbot):
+    changes = [Change("key", f"K{i}", "a", "b") for i in range(300)]
+    dlg = ImportPreview(make_plan(), changes)
+    qtbot.addWidget(dlg)
+    inner = dlg.scroll.widget()
+    assert not inner.isAncestorOf(dlg.import_button)
+    assert not inner.isAncestorOf(dlg.close_button)
+    assert dlg.sizeHint().height() <= dlg.max_height()
