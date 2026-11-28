@@ -13,6 +13,14 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 #: Gap between the keyboard's bottom edge and the tray.
 TRAY_GAP = 4
 
+#: Background and text colour per notice level (operator, 2026-11-28): green
+#: for something that worked, yellow for a warning, red for an error.
+LEVEL_COLOURS: dict[str, tuple[QColor, str]] = {
+    "success": (QColor(46, 125, 50, 235), "white"),
+    "warning": (QColor(255, 213, 74, 240), "#1a1a1a"),
+    "error": (QColor(200, 30, 30, 235), "white"),
+}
+
 
 class NoticeTray(QWidget):
     """Frameless, non-activating, top-most strip docked under the keyboard."""
@@ -29,7 +37,8 @@ class NoticeTray(QWidget):
         self._label = QLabel(self)
         # Notices can quote a file's own text (a map name, a refusal reason).
         self._label.setTextFormat(Qt.PlainText)
-        self._label.setStyleSheet("color: white; font-weight: 600;")
+        self._level = "error"
+        self._apply_level()
         font = self._label.font()
         font.setPointSizeF(font.pointSizeF() * 1.15)
         self._label.setFont(font)
@@ -45,9 +54,23 @@ class NoticeTray(QWidget):
     def text(self) -> str:
         return self._label.text()
 
-    def show_notice(self, text: str, anchor: QRect, duration_s: float) -> None:
+    def level(self) -> str:
+        return self._level
+
+    def background(self) -> QColor:
+        return LEVEL_COLOURS[self._level][0]
+
+    def _apply_level(self) -> None:
+        text_colour = LEVEL_COLOURS[self._level][1]
+        self._label.setStyleSheet(f"color: {text_colour}; font-weight: 600;")
+
+    def show_notice(self, text: str, anchor: QRect, duration_s: float,
+                    level: str = "error") -> None:
         """Show `text` under `anchor` (the keyboard's frame geometry) for
-        `duration_s`; a new notice replaces the old and restarts the timer."""
+        `duration_s`; a new notice replaces the old and restarts the timer.
+        `level` is "success", "warning" or "error" and sets the colour."""
+        self._level = level if level in LEVEL_COLOURS else "error"
+        self._apply_level()
         self._label.setText(text)
         self.adjustSize()
         self.dock_under(anchor)
@@ -64,6 +87,6 @@ class NoticeTray(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(200, 30, 30, 235))
+        painter.setBrush(self.background())
         radius = self.height() * 0.3
         painter.drawRoundedRect(self.rect(), radius, radius)

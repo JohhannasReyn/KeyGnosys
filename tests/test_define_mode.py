@@ -557,7 +557,7 @@ def test_an_edit_while_the_core_is_down_says_when_it_applies(make_overlay,
     enter(overlay)
     notices = []
     real = overlay.show_notice
-    overlay.show_notice = lambda text: (notices.append(text), real(text))
+    overlay.show_notice = lambda text, *level: (notices.append(text), real(text, *level))
     overlay.define.editor.assign("KeyD", Binding("button.click", RIGHT))
     overlay.define.editor.assign("KeyD", Binding("button.click", LEFT))
     assert notices == ["Saved — changes apply when the core is running."]
@@ -574,7 +574,7 @@ def test_an_edit_while_connected_shows_no_offline_notice(make_overlay):
     client.connect_core()
     enter(overlay)
     notices = []
-    overlay.show_notice = notices.append
+    overlay.show_notice = lambda text, *level: notices.append(text)
     overlay.define.editor.assign("KeyD", Binding("button.click", RIGHT))
     assert notices == []
 
@@ -951,7 +951,7 @@ def test_import_while_offline_reloads_on_connect(make_overlay, user_root,
     client.disconnected.emit("lost")
     notices = []
     real = overlay.show_notice
-    overlay.show_notice = lambda text: (notices.append(text), real(text))
+    overlay.show_notice = lambda text, *level: (notices.append(text), real(text, *level))
     assert overlay.define.import_(import_file(tmp_path))
     assert notices.count(
         "Saved — changes apply when the core is running.") == 1
@@ -1189,7 +1189,7 @@ def test_suggested_export_name_is_a_bare_safe_file_name(make_overlay,
     assert suggested.endswith(bundle.EXTENSION)
     stem = suggested[:-len(bundle.EXTENSION)]
     assert stem and len(stem) <= 100
-    assert not any(ch in stem for ch in '/\:*?"<>|')
+    assert not any(ch in stem for ch in r'/\:*?"<>|')
     assert all(ord(ch) >= 32 for ch in stem)
     assert stem == stem.strip(". ")
     for pure in (PureWindowsPath, PurePosixPath):
@@ -1224,3 +1224,52 @@ def test_an_unreadable_map_refuses_transfer_with_its_own_reason(
     assert overlay.tray.text() == reason
     assert transfer.imports == [] and transfer.exports == []
     assert not user_file(user_root).exists()
+
+
+# -- notice colours (operator, live check 2026-11-28) -------------------------
+
+def test_transfer_notices_are_coloured_by_outcome(make_overlay, user_root,
+                                                  tmp_path):
+    overlay = make_overlay()
+    out = tmp_path / "out.keygnosys.json"
+    Transfer(overlay, save_path=out)
+    enter(overlay)
+    overlay.define.export()
+    assert overlay.tray.text().startswith("Exported")
+    assert overlay.tray.level() == "success"
+
+    assert overlay.define.import_(import_file(tmp_path)) is True
+    assert overlay.tray.text().startswith("Imported")
+    assert overlay.tray.level() == "success"
+
+    bad = tmp_path / "bad.keygnosys.json"
+    bad.write_text("not json", encoding="utf-8")
+    assert overlay.define.import_(bad) is False
+    assert overlay.tray.text().startswith("Not imported")
+    assert overlay.tray.level() == "error"
+
+
+def test_reset_first_and_offline_notices_are_warnings(make_overlay, user_root,
+                                                      tmp_path):
+    broken = user_file(user_root)
+    broken.parent.mkdir(parents=True)
+    broken.write_text("not json", encoding="utf-8")
+    overlay = make_overlay()
+    Transfer(overlay)
+    enter(overlay)
+    assert overlay.tray.level() == "error"          # the broken-file notice
+    overlay.define.import_(import_file(tmp_path))
+    assert overlay.tray.text() == "Reset to shipped first."
+    assert overlay.tray.level() == "warning"
+
+
+def test_the_offline_notice_is_a_warning(make_overlay, user_root):
+    client = FakeClient()
+    overlay = make_overlay(client)              # never connected
+    enter(overlay)
+    select(overlay, "KeyD")
+    overlay.define.picker.label_edit.setText("Mine")
+    overlay.define.picker.commit_pending()
+    from keygnosys.ui.define_mode import OFFLINE_NOTICE
+    assert overlay.tray.text() == OFFLINE_NOTICE
+    assert overlay.tray.level() == "warning"

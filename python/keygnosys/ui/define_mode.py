@@ -183,7 +183,7 @@ class DefineMode:
         o.window.view.set_define_mode(False)
         o.bar.set_define_mode(False, False, False)
         if notice:
-            o.show_notice(notice)
+            o.show_notice(notice, "warning")
 
     def _open_editor(self) -> None:
         o = self._o
@@ -289,11 +289,16 @@ class DefineMode:
         broken copy, but not from one that merely cannot be read."""
         return self._unavailable or RESET_FIRST
 
+    def _show_refusal(self) -> None:
+        # Reset is a way on (a warning); an unreadable map is an error.
+        self._o.show_notice(self.transfer_refusal,
+                            "error" if self._unavailable else "warning")
+
     def export(self) -> None:
         """Write the running map to a bundle file. Changes nothing: no save,
         no reload, no undo entry."""
         if not self.can_transfer:
-            self._o.show_notice(self.transfer_refusal)
+            self._show_refusal()
             return
         # The file should match what the user sees, typed label included.
         self.picker.commit_pending()
@@ -319,13 +324,13 @@ class DefineMode:
         except OSError as exc:
             self._o.show_notice(f"Export failed — {exc}")
             return
-        self._o.show_notice(EXPORTED_NOTICE.format(file=path.name))
+        self._o.show_notice(EXPORTED_NOTICE.format(file=path.name), "success")
 
     def import_(self, path: Path | None = None) -> bool:
         """Replace the running map with one from a file, as one undoable
         edit. Returns whether the map was replaced."""
         if not self.can_transfer:
-            self._o.show_notice(self.transfer_refusal)
+            self._show_refusal()
             return False
         if path is None:
             path = self.choose_open_path()
@@ -378,7 +383,8 @@ class DefineMode:
         name = _capped(plan.name)
         self._o.show_notice(
             IMPORTED_BACKUP_NOTICE.format(name=name, backup=backup.name)
-            if backup is not None else IMPORTED_NOTICE.format(name=name))
+            if backup is not None else IMPORTED_NOTICE.format(name=name),
+            "success")
         return True
 
     def on_file_dropped(self, path: Path) -> None:
@@ -393,7 +399,7 @@ class DefineMode:
             try:
                 binding_store.load(bindings_id)
             except binding_store.BrokenUserCopy:
-                self._o.show_notice(RESET_FIRST)
+                self._o.show_notice(RESET_FIRST, "warning")
                 return
             except binding_store.StoreError:
                 pass    # enter() reports it; import_ then refuses.
@@ -450,14 +456,14 @@ class DefineMode:
             if (o.client.name != "mock" and not o.state.connected
                     and not self._offline_noticed):
                 self._offline_noticed = True
-                o.show_notice(OFFLINE_NOTICE)
+                o.show_notice(OFFLINE_NOTICE, "warning")
             self._reload_timer.start()
 
     def _reload_now(self) -> None:
         o = self._o
         if o.client.name == "mock":
             # The mock "connects", but no core reads this file.
-            o.show_notice(MOCK_NOTICE)
+            o.show_notice(MOCK_NOTICE, "warning")
         elif o.state.connected:
             o.client.reload_config()
         else:

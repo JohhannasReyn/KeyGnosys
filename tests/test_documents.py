@@ -19,8 +19,14 @@ def _flat_key(code: str = "KeyA", x: float = 0) -> dict:
 
 
 @pytest.fixture(scope="module")
-def registry() -> Registry:
-    return Registry().load_all()
+def registry(tmp_path_factory) -> Registry:
+    # Bundled content only: the user's own config directory (which may hold
+    # an imported map with commands this build doesn't know) is not under test.
+    from keygnosys import paths
+    empty = tmp_path_factory.mktemp("no-user-config")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(paths, "user_root", lambda: empty)
+        return Registry().load_all()
 
 
 # -- bundled content --------------------------------------------------------
