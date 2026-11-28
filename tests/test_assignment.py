@@ -281,3 +281,34 @@ def test_a_modelled_binding_wins_over_a_preserved_unknown_one() -> None:
     bset = BindingSet.from_dict(minimal_doc({"KeyZ": {"action": "future.thing"}}))
     bset.assign("KeyZ", CLICK)
     assert bset.to_dict()["bindings"]["KeyZ"]["action"] == "button.click"
+
+
+def test_a_preserved_binding_does_not_return_after_assign_then_unassign() -> None:
+    bset = BindingSet.from_dict(minimal_doc({"KeyZ": {"action": "future.thing"}}))
+    bset.assign("KeyZ", CLICK)
+    bset.unassign("KeyZ")
+    assert "KeyZ" not in bset.to_dict()["bindings"]
+
+
+def test_unassigning_a_key_holding_only_a_preserved_binding_clears_it() -> None:
+    bset = BindingSet.from_dict(minimal_doc({"KeyZ": {"action": "future.thing"}}))
+    bset.unassign("KeyZ")
+    assert "KeyZ" not in bset.to_dict()["bindings"]
+
+
+def test_a_known_action_with_unacceptable_params_is_preserved_with_a_warning() -> None:
+    entry = {"action": "pointer.move", "params": {"dir": "sideways-from-the-future"}}
+    sink = DiagnosticSink()
+    bset = BindingSet.from_dict(minimal_doc({"KeyZ": entry}), sink)
+    assert "KeyZ" not in bset.bindings
+    assert len(sink) == 1
+    assert bset.to_dict()["bindings"]["KeyZ"] == entry
+
+
+def test_unmodelled_unassigned_entries_are_preserved() -> None:
+    doc = minimal_doc({})
+    unknown = {"action": "future.thing", "params": {"x": 1}, "was_on": "KeyQ"}
+    badparams = {"action": "pointer.move", "params": {"dir": "sideways-from-the-future"}}
+    doc["unassigned"] = [unknown, badparams, {"action": "button.click", "params": {"button": "left"}}]
+    out = BindingSet.from_dict(doc).to_dict()["unassigned"]
+    assert unknown in out and badparams in out and len(out) == 3

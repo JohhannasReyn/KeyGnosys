@@ -570,6 +570,8 @@ class BindingSet:
     #: Raw entries for keys whose action this build does not know. Written back
     #: verbatim so a newer build's bindings survive a save from an older one.
     extra_bindings: dict[str, dict] = field(default_factory=dict)
+    #: Raw `unassigned` entries this build cannot model, kept the same way.
+    extra_unassigned: list[dict] = field(default_factory=list)
     #: Top-level document fields this class does not model, kept for the same
     #: reason.
     extra_fields: dict[str, Any] = field(default_factory=dict)
@@ -588,23 +590,26 @@ class BindingSet:
             if sink is not None:
                 sink.warn(code, message, origin)
 
-        from .actions import CATALOG
-
         bindings: dict[str, Binding] = {}
         extra_bindings: dict[str, dict] = {}
         for code, spec in raw.items():
             binding = _binding_from_dict(spec, str(code), warn)
             if binding is not None:
                 bindings[code] = binding
-            elif isinstance(spec, dict) and "action" in spec                     and str(spec["action"]) not in CATALOG:
+            elif isinstance(spec, dict) and "action" in spec:
+                # Unknown action, or known action with params this build
+                # rejects (e.g. a newer enum value): keep it verbatim.
                 extra_bindings[code] = copy.deepcopy(spec)
 
         bound = {b.identity() for b in bindings.values()}
         unassigned: list[Binding] = []
+        extra_unassigned: list[dict] = []
         seen: set[tuple] = set()
         for i, spec in enumerate(doc.get("unassigned") or []):
             binding = _binding_from_dict(spec, f"unassigned[{i}]", warn)
             if binding is None:
+                if isinstance(spec, dict) and "action" in spec:
+                    extra_unassigned.append(copy.deepcopy(spec))
                 continue
             identity = binding.identity()
             if identity in bound:
@@ -632,6 +637,7 @@ class BindingSet:
             metadata=Metadata.from_dict(doc.get("metadata")),
             schema_major=major,
             extra_bindings=extra_bindings,
+            extra_unassigned=extra_unassigned,
             extra_fields={k: copy.deepcopy(v) for k, v in doc.items()
                           if k not in _BINDING_DOC_FIELDS},
         )
@@ -655,7 +661,8 @@ class BindingSet:
         merged: dict[str, dict] = copy.deepcopy(self.extra_bindings)
         merged.update({code: b.to_dict() for code, b in self.bindings.items()})
         out["bindings"] = merged
-        out["unassigned"] = [b.to_dict() for b in self.unassigned]
+        out["unassigned"] = ([b.to_dict() for b in self.unassigned]
+                             + copy.deepcopy(self.extra_unassigned))
         out.update(copy.deepcopy(self.extra_fields))
         return out
 
@@ -677,6 +684,7 @@ class BindingSet:
         Returns the displaced command, if the key held one.
         """
         displaced = self.bindings.get(code)
+        self.extra_bindings.pop(code, None)
         self.bindings[code] = command
 
         # A command may legitimately sit on several keys, so it only becomes
@@ -695,6 +703,7 @@ class BindingSet:
     def unassign(self, code: str) -> Binding | None:
         """Clear a key, moving its command to the unassigned list."""
         removed = self.bindings.pop(code, None)
+        self.extra_bindings.pop(code, None)
         if removed is not None and not self.keys_for(removed):
             self._remember_unassigned(removed, code)
         return removed
