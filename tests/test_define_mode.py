@@ -1118,3 +1118,23 @@ def test_undo_of_import_keeps_the_fork_source_template(make_overlay,
     overlay.define.undo()
     assert overlay.define.editor.bset.metadata.source_template == "default"
     assert saved_doc(user_root)["metadata"]["source_template"] == "default"
+
+
+def test_imported_name_reaches_the_tray_as_plain_text(make_overlay, tmp_path):
+    overlay = make_overlay()
+    Transfer(overlay)
+    enter(overlay)
+    assert overlay.define.import_(import_file(tmp_path, name="<b>x</b>"))
+    assert overlay.tray._label.textFormat() == Qt.PlainText
+    assert overlay.tray.text().startswith("Imported '<b>x</b>'.")
+
+
+def test_a_long_imported_name_is_capped_in_the_notice(make_overlay, tmp_path):
+    overlay = make_overlay()
+    Transfer(overlay)
+    enter(overlay)
+    long_name = "n" * 10_000
+    assert overlay.define.import_(import_file(tmp_path, name=long_name))
+    shown = "n" * 79 + "…"
+    assert overlay.tray.text().startswith(f"Imported '{shown}'. ")
+    assert len(overlay.tray.text()) < 200

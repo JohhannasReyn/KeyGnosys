@@ -27,6 +27,8 @@ class NoticeTray(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
         self._label = QLabel(self)
+        # Notices can quote a file's own text (a map name, a refusal reason).
+        self._label.setTextFormat(Qt.PlainText)
         self._label.setStyleSheet("color: white; font-weight: 600;")
         font = self._label.font()
         font.setPointSizeF(font.pointSizeF() * 1.15)

@@ -40,6 +40,8 @@ IMPORTED_NOTICE = ("Imported '{name}'. Undo or Reset to shipped brings back "
                    "the previous map.")
 EXPORTED_NOTICE = "Exported to {file}."
 FILE_FILTER = "KeyGnosys files (*.keygnosys.json);;All JSON (*.json)"
+#: Longest map name a notice quotes; an imported name is someone else's text.
+NOTICE_NAME_MAX = 80
 
 
 class DefineMode:
@@ -344,9 +346,10 @@ class DefineMode:
         plan.bset.metadata.author = plan.author
         # Saves and schedules the reload through _on_binding_edit.
         self.editor.replace_all(plan.bset, imported_from)
+        name = _capped(plan.name)
         self._o.show_notice(
-            IMPORTED_BACKUP_NOTICE.format(name=plan.name, backup=backup.name)
-            if backup is not None else IMPORTED_NOTICE.format(name=plan.name))
+            IMPORTED_BACKUP_NOTICE.format(name=name, backup=backup.name)
+            if backup is not None else IMPORTED_NOTICE.format(name=name))
         return True
 
     def on_file_dropped(self, path: Path) -> None:
@@ -469,6 +472,10 @@ class DefineMode:
                                     bool(e and e.can_undo),
                                     bool(e and e.can_redo),
                                     self.can_transfer)
+
+
+def _capped(name: str, limit: int = NOTICE_NAME_MAX) -> str:
+    return name if len(name) <= limit else name[:limit - 1] + "…"
 
 
 def _documents_dir() -> str:
