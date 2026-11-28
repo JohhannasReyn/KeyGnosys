@@ -11,9 +11,9 @@ import pytest
 
 import keygnosys
 from keygnosys.bundle import (BUNDLE_SCHEMA, MAX_BYTES, Finding,
-                              ImportRefused, export_bundle, read_import,
+                              ImportRefused, diff, export_bundle, read_import,
                               write_bundle)
-from keygnosys.documents import BindingSet
+from keygnosys.documents import Binding, BindingSet
 
 DEFAULT = Path(__file__).resolve().parent.parent / "data" / "bindings" / "default.json"
 
@@ -225,3 +225,65 @@ def test_write_bundle_is_atomic(tmp_path, monkeypatch):
         write_bundle(path, export_bundle(_default()))
     assert path.read_text("utf-8") == "old"
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+# -- diff ------------------------------------------------------------------
+
+def _pair():
+    old = _default()
+    old.bindings["KeyD"] = Binding("button.click", {"button": "left"})
+    old.bindings["KeyQ"] = Binding("button.click", {"button": "left"}, "Old")
+    old.bindings["KeyE"] = Binding("window.slot", {"index": 1})
+    old.bindings["KeyF"] = Binding("button.click", {"button": "left"})
+    old.bindings.pop("KeyZ", None)
+    old.settings["precision_factor"] = 0.25
+    new = copy.deepcopy(old)
+    new.bindings["KeyD"] = Binding("button.click", {"button": "right"})
+    new.bindings["KeyQ"] = Binding("button.click", {"button": "left"}, "New")
+    new.bindings["KeyE"] = Binding("window.slot", {"index": 2})
+    del new.bindings["KeyF"]
+    new.bindings["KeyZ"] = Binding("button.click", {"button": "left"})
+    new.settings["precision_factor"] = 0.5
+    return old, new
+
+
+def _short(code: str) -> str:
+    return code.removeprefix("Key")
+
+
+def test_diff_identical_is_empty():
+    assert diff(_default(), _default()) == []
+
+
+def test_diff_each_kind_once():
+    old, new = _pair()
+    changes = diff(old, new, display=_short)
+    assert len(changes) == 6
+    by = {c.name: c for c in changes}
+    assert set(by) == {"D", "Q", "E", "F", "Z", "precision_factor"}
+    assert by["F"].after == "(nothing)"
+    assert by["Z"].before == "—"
+    assert by["Q"].before != by["Q"].after
+    assert by["E"].before != by["E"].after
+    assert by["D"].before != by["D"].after
+    assert (by["precision_factor"].before, by["precision_factor"].after) == (
+        "0.25", "0.5")
+    assert by["precision_factor"].kind == "setting"
+
+
+def test_diff_follows_layout_order():
+    old, new = _pair()
+    changes = diff(old, new, display=_short, order=["KeyZ", "KeyD"])
+    names = [c.name for c in changes]
+    assert names[:2] == ["Z", "D"]
+    assert names[2:5] == sorted(["E", "F", "Q"])
+    assert names[-1] == "precision_factor"
+
+
+def test_diff_counts_extra_bindings():
+    old = _default()
+    new = copy.deepcopy(old)
+    new.extra_bindings["F7"] = {"action": "window.snap"}
+    changes = diff(old, new)
+    assert len(changes) == 1
+    assert "window.snap" in changes[0].after

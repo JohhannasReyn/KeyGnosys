@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 import keygnosys
 
-from .actions import CATALOG, KNOWN_SETTINGS
+from .actions import CATALOG, KNOWN_SETTINGS, default_legend
 from .documents import BindingSet, DocumentError
 
 BUNDLE_SCHEMA = "keygnosys/bundle/1"
@@ -245,3 +246,82 @@ def _findings(bset: BindingSet,
                 f"{name}: {value} is outside {low} to {high}; "
                 f"{used} will be used"))
     return out
+
+
+# -- comparing -------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Change:
+    """One difference between two maps. kind is "key" or "setting"."""
+
+    kind: str
+    name: str
+    before: str
+    after: str
+
+
+_NOTHING = "(nothing)"
+_NEW = "—"
+
+
+def _entry(bset: BindingSet, code: str) -> tuple[dict, str, str | None] | None:
+    """(comparable dict, description, legend) for a key, or None if unbound."""
+    binding = bset.bindings.get(code)
+    if binding is not None:
+        legend = binding.legend
+        text = legend if legend else default_legend(binding.action,
+                                                    binding.params)
+        return binding.to_dict(), text, legend
+    raw = bset.extra_bindings.get(code)
+    if raw is not None:
+        return raw, str(raw.get("action")), None
+    return None
+
+
+def diff(old: BindingSet, new: BindingSet,
+         display: Callable[[str], str] = str,
+         order: Sequence[str] = ()) -> list[Change]:
+    """What importing `new` over `old` would change, key by key.
+
+    Key changes follow `order` (the layout), then any other codes sorted;
+    setting changes come last, sorted by name.
+    """
+    codes = {*old.bindings, *old.extra_bindings,
+             *new.bindings, *new.extra_bindings}
+    rank = {code: i for i, code in enumerate(order)}
+    ordered = sorted(codes, key=lambda c: (rank.get(c, len(rank)), c))
+
+    changes: list[Change] = []
+    for code in ordered:
+        before, after = _entry(old, code), _entry(new, code)
+        if before is None and after is None:
+            continue
+        if before is not None and after is not None:
+            if before[0] == after[0]:
+                continue
+            b_text, a_text = before[1], after[1]
+            if b_text == a_text:
+                if (before[0].get("action") == after[0].get("action")
+                        and before[0].get("params") == after[0].get("params")):
+                    # Only the legend differs.
+                    b_text = f'{b_text} "{before[2] or ""}"'
+                    a_text = f'{a_text} "{after[2] or ""}"'
+                else:
+                    # Same words, different parameters: show the parameters.
+                    b_text = f"{b_text} {before[0].get('params', {})}"
+                    a_text = f"{a_text} {after[0].get('params', {})}"
+        else:
+            b_text = before[1] if before else _NEW
+            a_text = after[1] if after else _NOTHING
+        changes.append(Change("key", display(code), b_text, a_text))
+
+    missing = object()
+    for name in sorted({*old.settings, *new.settings}):
+        b = old.settings.get(name, missing)
+        a = new.settings.get(name, missing)
+        if b == a:
+            continue
+        changes.append(Change("setting", name,
+                              _NEW if b is missing else str(b),
+                              _NOTHING if a is missing else str(a)))
+    return changes
