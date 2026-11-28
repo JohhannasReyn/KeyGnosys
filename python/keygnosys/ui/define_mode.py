@@ -366,8 +366,14 @@ class DefineMode:
             except binding_store.StoreError:
                 pass    # enter() reports it; import_ then refuses.
             self.enter()
-            if not self.import_(path):
-                self.exit()
+            imported = False
+            try:
+                imported = self.import_(path)
+            finally:
+                # Even if the import raised, define mode was opened only
+                # for it, so it closes again.
+                if not imported:
+                    self.exit()
             return
         self.import_(path)
 

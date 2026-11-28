@@ -1090,3 +1090,18 @@ def test_drop_while_broken_is_refused(make_overlay, user_root, tmp_path,
 def test_click_through_tooltip_mentions_drops(make_overlay):
     overlay = make_overlay()
     assert "drop" in overlay.bar._click.toolTip()
+
+
+def test_drop_outside_define_mode_closes_again_on_unexpected_error(
+        make_overlay, user_root, tmp_path, monkeypatch, click_calls):
+    overlay = make_overlay()
+    Transfer(overlay)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("unexpected")
+    monkeypatch.setattr(bundle, "read_import", boom)
+    with pytest.raises(RuntimeError):
+        overlay.define.on_file_dropped(import_file(tmp_path))
+    assert not overlay.define.active
+    assert click_calls == [False, True]
+    assert overlay.bar.define_button.text() == "Define"
