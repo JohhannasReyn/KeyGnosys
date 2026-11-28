@@ -96,12 +96,10 @@ class ImportPreview(QDialog):
             font = head.font()
             font.setBold(True)
             head.setFont(font)
-            layout.addWidget(head)
-            body = QLabel("\n".join(lines))
-            body.setTextFormat(Qt.PlainText)
-            body.setWordWrap(True)
+            inner_layout.addWidget(head)
+            body = _plain("\n".join(lines))
             body.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            layout.addWidget(body)
+            inner_layout.addWidget(body)
             self._labels.extend([head, body])
 
         buttons = QDialogButtonBox()
@@ -132,11 +130,6 @@ class ImportPreview(QDialog):
 
     def max_height(self) -> int:
         return self._max_height
-
-    def sizeHint(self):
-        hint = super().sizeHint()
-        hint.setHeight(min(hint.height(), self._max_height))
-        return hint
 
     def header_text(self) -> str:
         return self._header

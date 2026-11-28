@@ -115,9 +115,18 @@ def test_file_derived_text_is_plain(qtbot):
 
 def test_many_changes_scroll_and_buttons_stay_outside(qtbot):
     changes = [Change("key", f"K{i}", "a", "b") for i in range(300)]
-    dlg = ImportPreview(make_plan(), changes)
+    plan = make_plan([Finding("unusable", "u"), Finding("setting", "s")])
+    dlg = ImportPreview(plan, changes)
     qtbot.addWidget(dlg)
     inner = dlg.scroll.widget()
+    assert dlg._labels
+    for label in dlg._labels:
+        assert inner.isAncestorOf(label)
     assert not inner.isAncestorOf(dlg.import_button)
     assert not inner.isAncestorOf(dlg.close_button)
+    assert not inner.isAncestorOf(dlg.header_label)
+    assert dlg.maximumHeight() == dlg.max_height()
+    assert dlg.scroll.maximumHeight() < dlg.max_height()
+    # The content is far taller than the viewport, so it scrolls.
+    assert inner.sizeHint().height() > dlg.scroll.maximumHeight()
     assert dlg.sizeHint().height() <= dlg.max_height()
