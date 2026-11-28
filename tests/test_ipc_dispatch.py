@@ -51,3 +51,21 @@ def test_mode_event_without_protection_reads_as_not_applicable(qtbot):
     _mode(client, mode="cursor", latched=True, activation="hybrid")
 
     assert seen == [("not_applicable", "")]
+
+
+def test_bindings_id_comes_from_hello_and_follows_config_changed(qtbot):
+    client = IpcClient("keygnosys-test-unused")
+    seen = []
+    client.configChanged.connect(seen.append)
+    assert client.bindings_id is None
+
+    client._dispatch({"v": 1, "t": "event", "n": "hello",
+                      "d": {"protocol": "1.0", "bindings_id": "default"}})
+    assert client.bindings_id == "default"
+
+    payload = {"kinds": ["bindings"], "bindings_id": "alt"}
+    client._dispatch({"v": 1, "t": "event", "n": "config_changed",
+                      "d": payload})
+
+    assert client.bindings_id == "alt"
+    assert seen == [payload]

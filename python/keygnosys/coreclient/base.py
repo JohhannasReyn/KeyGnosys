@@ -48,6 +48,9 @@ class CoreClient(QObject):
     #: The `overlay.toggle` action fired. Carries no payload: only the overlay
     #: knows whether it is currently visible, so the core asks rather than tells.
     overlayToggleRequested = Signal()
+    #: (payload with kinds / bindings_id) the core's running configuration
+    #: changed, by `reload_config` or `set_bindings`
+    configChanged = Signal(dict)
 
     #: Human-readable name shown in the UI so it is never ambiguous which
     #: backend is live -- a mock that looks like the real thing is a trap.
@@ -80,3 +83,12 @@ class CoreClient(QObject):
         Principle P6: an unavailable capability is reported, never faked.
         """
         return []
+
+    @property
+    def bindings_id(self) -> str | None:
+        """The id of the bindings map the core is running, or None.
+
+        None when there is no core, or it runs no map: a backend that loads
+        no bindings has no id to report.
+        """
+        return None

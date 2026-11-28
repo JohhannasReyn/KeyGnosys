@@ -110,6 +110,8 @@ public:
     void applyWindowForTests(const Action& action);
     void doubleClickForTests(MouseButton button);
     void releaseAllForTests();
+    // The path the running bindings map was loaded from; empty when none is.
+    [[nodiscard]] std::string bindingsSourceForTests() const;
 
     [[nodiscard]] Server* server();
     [[nodiscard]] const Diagnostics& diagnostics() const;

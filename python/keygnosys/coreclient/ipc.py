@@ -35,6 +35,7 @@ class IpcClient(CoreClient):
         self._buffer = bytearray()
         self._ids = itertools.count(1)
         self._hello: dict = {}
+        self._bindings_id: str | None = None
         self._want_running = False
 
         self._socket.readyRead.connect(self._on_ready_read)
@@ -68,6 +69,7 @@ class IpcClient(CoreClient):
     def _on_disconnected(self) -> None:
         self._buffer.clear()
         self._hello = {}
+        self._bindings_id = None
         self.disconnected.emit("core disconnected")
         if self._want_running:
             self._retry.start()
@@ -75,6 +77,10 @@ class IpcClient(CoreClient):
     @property
     def limitations(self) -> list[str]:
         return list(self._hello.get("limitations", []))
+
+    @property
+    def bindings_id(self) -> str | None:
+        return self._bindings_id
 
     # -- reading ----------------------------------------------------------
 
@@ -121,6 +127,10 @@ class IpcClient(CoreClient):
             self.overlayToggleRequested.emit()
         elif name == "diagnostic":
             self.diagnostic.emit(data)
+        elif name == "config_changed":
+            if "bindings_id" in data:
+                self._bindings_id = data.get("bindings_id") or None
+            self.configChanged.emit(data)
         elif name == "shutdown":
             self.disconnected.emit(data.get("reason", "core shut down"))
 
@@ -142,6 +152,7 @@ class IpcClient(CoreClient):
             self._socket.abort()
             return
         self._hello = data
+        self._bindings_id = data.get("bindings_id") or None
         self._retry.stop()
         self.connected.emit(data)
 

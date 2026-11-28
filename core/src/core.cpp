@@ -217,6 +217,11 @@ struct Core::Impl {
     EngineConfig engineConfig;
     Dispatcher dispatcher;
     BindingsDocument bindings;
+    // Where the running map came from, and whether there is one at all. Once
+    // a map is running, a document that fails to load never replaces it with
+    // one further down the search path (SPEC 3.3).
+    std::string bindingsSource;
+    bool haveBindings = false;
     Backends backends;
     EndpointOwner owner;
     std::unique_ptr<Server> server;
@@ -288,9 +293,19 @@ struct Core::Impl {
                 if (server) server->broadcastDiagnostic(diagnostic);
                 diagnostics.push_back(std::move(diagnostic));
             }
-            if (!ok) continue;
+            // The parser has already said why, as `binding.invalid` against
+            // this path. With a map running, a broken document stops the
+            // search: the next document down is not what the user asked for,
+            // and the running map stays (SPEC 3.3). Only at startup, with
+            // nothing running, is falling back better than nothing.
+            if (!ok) {
+                if (haveBindings) return false;
+                continue;
+            }
             bindings = std::move(document);
             loadedFrom = path;
+            bindingsSource = path;
+            haveBindings = true;
             return true;
         }
         return false;
@@ -967,30 +982,42 @@ struct Core::Impl {
         publishState();
     }
 
+    // The running map changed: the hello a later client is greeted with
+    // names it, and every connected client is told.
+    void bindingsChanged() {
+        hello.bindingsId = options.bindingsId;
+        if (!server) return;
+        server->setHello(hello);
+        Json changed = Json::object();
+        Json kinds = Json::array();
+        kinds.push(Json("bindings"));
+        changed.set("kinds", std::move(kinds));
+        changed.set("bindings_id", Json(options.bindingsId));
+        server->broadcast("config_changed", std::move(changed));
+    }
+
     Reply reload() {
-        releaseEverything();
+        // Load before releasing anything. A document that fails to load
+        // leaves the running map, and whatever it is holding, alone.
         std::string from;
-        Json loaded = Json::object();
-        if (loadBindings(from)) {
-            applyBindings();
-            loaded.set("bindings", Json(1));
-        } else {
+        if (!loadBindings(from)) {
             note(DiagLevel::Warn, "binding.invalid",
-                 "no bindings document could be loaded");
-            loaded.set("bindings", Json(0));
+                 haveBindings ? "no bindings document could be loaded; the "
+                                "running map is unchanged"
+                              : "no bindings document could be loaded");
+            return Reply::failure("binding.invalid",
+                                  "no bindings document could be loaded");
         }
+        releaseEverything();
+        applyBindings();
+        Json loaded = Json::object();
+        loaded.set("bindings", Json(1));
         // The core loads only bindings. Layouts and profiles are presentation
         // and belong to the overlay's registry, so the counts it can honestly
         // report for them are zero rather than a number it made up.
         loaded.set("layouts", Json(0));
         loaded.set("profiles", Json(0));
-        if (server) {
-            Json changed = Json::object();
-            Json kinds = Json::array();
-            kinds.push(Json("bindings"));
-            changed.set("kinds", std::move(kinds));
-            server->broadcast("config_changed", std::move(changed));
-        }
+        bindingsChanged();
         Json data = Json::object();
         data.set("loaded", std::move(loaded));
         return Reply::success(std::move(data));
@@ -1050,6 +1077,7 @@ struct Core::Impl {
             }
             releaseEverything();
             applyBindings();
+            bindingsChanged();
             return Reply::success();
         }
         if (command.name == "set_setting") {
@@ -1231,6 +1259,10 @@ OwnResult Core::start() {
     std::string from;
     if (impl_->loadBindings(from)) {
         impl_->applyBindings();
+        // No client can have connected yet, so the hello is all that needs
+        // to know. With nothing loaded it stays empty and says null.
+        impl_->hello.bindingsId = impl_->options.bindingsId;
+        impl_->server->setHello(impl_->hello);
     } else {
         std::string looked;
         for (const auto& path : bindingsSearchPaths(impl_->options)) {
@@ -1384,6 +1416,8 @@ void Core::doubleClickForTests(MouseButton button) {
 }
 
 void Core::releaseAllForTests() { impl_->releaseEverything(); }
+
+std::string Core::bindingsSourceForTests() const { return impl_->bindingsSource; }
 
 Server* Core::server() { return impl_->server.get(); }
 const Diagnostics& Core::diagnostics() const { return impl_->diagnostics; }

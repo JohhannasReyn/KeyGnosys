@@ -136,6 +136,11 @@ reloads and emits `bindings_changed` / `layouts_changed` over IPC. A reload that
 produces zero valid documents **MUST** keep the previous set and emit a diagnostic
 (inherited from the prototype's behaviour).
 
+A user document that exists but fails to load never replaces the running map.
+The core keeps what it is running and emits `binding.invalid`. Only at startup,
+with nothing running, may it fall back to the next document in the search path,
+with the same diagnostic.
+
 Reloading bindings **MUST** release every held action whose binding disappeared,
 and every locked drag button (P7).
 
@@ -986,7 +991,7 @@ events.
 
 | `n` | Payload | Emitted when |
 |-----|---------|--------------|
-| `hello` | `{core_version, protocol, platform, backends:{input,output,window}, capabilities:[…], limitations:[…]}` | Immediately on connect |
+| `hello` | `{core_version, protocol, platform, backends:{input,output,window}, capabilities:[…], limitations:[…], bindings_id:string\|null}` (`bindings_id`: the running bindings map, null when none is running) | Immediately on connect |
 | `key` | `{code, state:"down"\|"up"\|"repeat", suppressed:bool}` | Every physical key event, suppressed or not |
 | `modifiers` | `{shift, control, alt, meta, caps_layer}` — all bool | Any modifier state change |
 | `mode` | `{mode:"normal"\|"cursor", latched:bool, activation:"toggle"\|"hold"\|"hybrid", inert:bool, protection:"not_applicable"\|"protected"\|"unprotected", protection_reason:string}` | Layer engaged/released, `inert` or `protection` changed, and on connect (sent to that client only, after `hello`) |
@@ -996,7 +1001,7 @@ events.
 | `pointer` | `{x, y, monitor}` | Only while cursor layer is engaged, ≤20 Hz |
 | `drag_lock` | `{button, active}` | Drag lock engaged/released |
 | `overlay_toggle` | `{}` | The `overlay.toggle` action fired; the overlay shows or hides itself |
-| `config_changed` | `{kinds:["bindings","layouts",…]}` | Core reloaded config |
+| `config_changed` | `{kinds:["bindings","layouts",…], bindings_id:string}` | Core reloaded config (`reload_config`), or `set_bindings` switched the running map |
 | `diagnostic` | `{level:"info"\|"warn"\|"error", code, message, file?}` | §11 |
 | `shutdown` | `{reason}` | Core is exiting |
 
@@ -1029,7 +1034,7 @@ positional codes are transmitted. See §12.
 | `get_state` | `{}` | Full snapshot: mode, latched, activation, enabled, inert, protection, protection_reason, modifiers, focus, windows, monitors |
 | `set_activation_mode` | `{mode}` | `{}` |
 | `set_enabled` | `{enabled:bool}` | `{}` — master switch; disables interception entirely |
-| `reload_config` | `{}` | `{loaded:{layouts:n, bindings:n, profiles:n}}` |
+| `reload_config` | `{}` | `{loaded:{layouts:n, bindings:n, profiles:n}}`; fails with `binding.invalid`, the running map unchanged, when no document loads (§3.3) |
 | `set_bindings` | `{id}` | `{}` |
 | `set_setting` | `{path, value}` | `{}` — dotted path into §4.5 `behavior` |
 | `release_all` | `{}` | `{}` — panic button: release every held key, button and drag lock |
