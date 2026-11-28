@@ -12,6 +12,7 @@ All *decisions* about what a key says and how it should look live in
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from PySide6.QtCore import QMimeData, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
@@ -38,6 +39,25 @@ SELECTED_COLOUR = QColor("#FFB020")
 SELECTED_WIDTH_PX = 2.0
 #: Opacity of keys that cannot hold a binding, in define mode.
 NOT_TARGET_OPACITY = 0.35
+#: The "Drop to import" highlight: the selection colour at about 25%.
+FILE_DRAG_ALPHA = 64
+FILE_DRAG_TEXT = "Drop to import"
+
+
+def dropped_file(mime: QMimeData) -> Path | None:
+    """The file a drag carries, if it is exactly one local `.json` file.
+
+    Anything else -- several files, a folder, a remote URL, another
+    extension -- is refused here, before anything is read. Text alongside
+    the URL (a browser adds it) is ignored.
+    """
+    urls = mime.urls()
+    if len(urls) != 1 or not urls[0].isLocalFile():
+        return None
+    path = Path(urls[0].toLocalFile())
+    if not path.name.lower().endswith(".json") or path.is_dir():
+        return None
+    return path
 
 
 class KeyboardView(QWidget):
@@ -46,6 +66,8 @@ class KeyboardView(QWidget):
     keyClicked = Signal(str)
     #: (code, Binding) a dragged command was dropped on a key, in define mode
     bindingDropped = Signal(str, object)
+    #: (Path) a single local .json file was dropped on the view, in any mode
+    fileDropped = Signal(object)
 
     def __init__(self, state: AppState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -57,6 +79,10 @@ class KeyboardView(QWidget):
         self._fade_ms = 220
         self._define_mode = False
         self._selected: str | None = None
+        #: A file is being dragged over the view; drives the highlight.
+        self.file_drag_active = False
+        # Files can be dropped in any mode; picker drags only in define mode.
+        self.setAcceptDrops(True)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMouseTracking(False)
 
@@ -96,7 +122,6 @@ class KeyboardView(QWidget):
 
     def set_define_mode(self, on: bool) -> None:
         self._define_mode = on
-        self.setAcceptDrops(on)
         self.update()
 
     def set_selected(self, code: str | None) -> None:
@@ -272,6 +297,23 @@ class KeyboardView(QWidget):
         if banner:
             self._paint_banner(painter, banner)
 
+        if self.file_drag_active:
+            self._paint_file_drag(painter, path)
+
+    def _paint_file_drag(self, painter: QPainter, board: QPainterPath) -> None:
+        """The whole view tinted, unlike a picker drag's key outline."""
+        painter.save()
+        tint = QColor(SELECTED_COLOUR)
+        tint.setAlpha(FILE_DRAG_ALPHA)
+        painter.fillPath(board, tint)
+        font = QFont()
+        font.setBold(True)
+        font.setPixelSize(max(10, int(self.height() * 0.11)))
+        painter.setFont(font)
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(QRectF(self.rect()), Qt.AlignCenter, FILE_DRAG_TEXT)
+        painter.restore()
+
     def _paint_banner(self, painter: QPainter, text: str) -> None:
         """A big plate across the keyboard, readable over any theme."""
         font = QFont()
@@ -444,7 +486,7 @@ class KeyboardView(QWidget):
         """In define mode, a key that can hold no binding ignores the user."""
         return self._define_mode and key.code in NOT_TARGETS
 
-    # -- define-mode drops --------------------------------------------------
+    # -- drops: picker commands (define mode) and files (any mode) ---------
 
     def _drop_target(self, pos: QPointF, mime: QMimeData) -> Key | None:
         if not self._define_mode or not mime.hasFormat(BINDING_MIME):
@@ -466,20 +508,43 @@ class KeyboardView(QWidget):
         self.bindingDropped.emit(key.code, binding)
         return True
 
+    def _set_file_drag(self, on: bool) -> None:
+        if self.file_drag_active != on:
+            self.file_drag_active = on
+            self.update()
+
     def dragEnterEvent(self, event) -> None:
-        if self._define_mode and event.mimeData().hasFormat(BINDING_MIME):
+        # File URLs win only when they are exactly one local .json file.
+        if dropped_file(event.mimeData()) is not None:
+            self._set_file_drag(True)
+            event.acceptProposedAction()
+        elif self._define_mode and event.mimeData().hasFormat(BINDING_MIME):
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragMoveEvent(self, event) -> None:
-        if self._drop_target(event.position(), event.mimeData()) is not None:
+        if dropped_file(event.mimeData()) is not None:
+            event.acceptProposedAction()
+        elif self._drop_target(event.position(), event.mimeData()) is not None:
             event.acceptProposedAction()
         else:
             event.ignore()
 
+    def dragLeaveEvent(self, event) -> None:
+        self._set_file_drag(False)
+        super().dragLeaveEvent(event)
+
     def dropEvent(self, event) -> None:
-        if self.drop_at(event.position(), event.mimeData()):
+        self._set_file_drag(False)
+        path = dropped_file(event.mimeData())
+        if path is not None:
+            event.acceptProposedAction()
+            # Emitted once the drop has returned: the import preview is a
+            # modal dialog, and the drag source (Explorer) would otherwise
+            # hang until it closes.
+            QTimer.singleShot(0, self, lambda: self.fileDropped.emit(path))
+        elif self.drop_at(event.position(), event.mimeData()):
             event.acceptProposedAction()
         else:
             event.ignore()

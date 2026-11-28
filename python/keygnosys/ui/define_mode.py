@@ -349,6 +349,28 @@ class DefineMode:
             if backup is not None else IMPORTED_NOTICE.format(name=plan.name))
         return True
 
+    def on_file_dropped(self, path: Path) -> None:
+        """A file dropped on the keyboard: the same import, with the same
+        preview. Outside define mode it opens define mode for the import and
+        closes it again if nothing was imported."""
+        if not self.active:
+            # Ruling R3: refuse a broken map before anything opens, so
+            # nothing is entered and the file is never read.
+            bindings_id = (self._o.client.bindings_id
+                           or self._o.settings.get("behavior.bindings"))
+            try:
+                binding_store.load(bindings_id)
+            except binding_store.BrokenUserCopy:
+                self._o.show_notice(RESET_FIRST)
+                return
+            except binding_store.StoreError:
+                pass    # enter() reports it; import_ then refuses.
+            self.enter()
+            if not self.import_(path):
+                self.exit()
+            return
+        self.import_(path)
+
     def _choose_open_path(self) -> Path | None:
         chosen, _ = QFileDialog.getOpenFileName(
             self._o.window, "Import bindings", _documents_dir(), FILE_FILTER)

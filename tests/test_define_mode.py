@@ -996,3 +996,97 @@ def test_backup_failure_aborts_import(make_overlay, user_root, tmp_path,
     assert user_file(user_root).read_bytes() == before
     qtbot.wait(400)
     assert client.reloads == 0
+
+
+# -- dropping a file on the keyboard ----------------------------------------
+
+def test_drop_inside_define_mode_opens_preview(make_overlay, user_root,
+                                               tmp_path):
+    write_user_doc(user_root, shipped_default())
+    before = user_file(user_root).read_bytes()
+    overlay = make_overlay()
+    transfer = Transfer(overlay)
+    seen = []
+    ask = transfer._ask_import
+
+    def ask_import(plan, changes):
+        # Nothing has changed while the preview is up.
+        seen.append(user_file(user_root).read_bytes() == before
+                    and backups(user_root) == [])
+        return ask(plan, changes)
+    overlay.define.ask_import = ask_import
+    enter(overlay)
+    overlay.window.view.fileDropped.emit(import_file(tmp_path))
+
+    assert seen == [True]
+    assert len(transfer.imports) == 1
+    assert transfer.opened == 0
+    assert saved_binding(user_root, "KeyD") == {"action": "button.click",
+                                                "params": RIGHT}
+    assert overlay.define.active
+
+
+def test_drop_outside_define_mode_enters_then_exits_on_cancel(
+        make_overlay, user_root, tmp_path, click_calls):
+    overlay = make_overlay()
+    transfer = Transfer(overlay, import_answer=False)
+    active = []
+    ask = transfer._ask_import
+    overlay.define.ask_import = lambda plan, changes: (
+        active.append(overlay.define.active), ask(plan, changes))[1]
+    overlay.window.view.fileDropped.emit(import_file(tmp_path))
+
+    assert active == [True]
+    assert not overlay.define.active
+    assert click_calls == [False, True]
+    assert overlay.bar.define_button.text() == "Define"
+    assert not overlay.define.picker.isVisible()
+    assert not user_file(user_root).exists()
+
+
+def test_drop_outside_define_mode_stays_open_after_import(
+        make_overlay, user_root, tmp_path, click_calls):
+    overlay = make_overlay()
+    Transfer(overlay)
+    overlay.window.view.fileDropped.emit(import_file(tmp_path))
+
+    assert overlay.define.active
+    assert click_calls == [False]
+    assert overlay.bar.define_button.text() == "Done"
+    assert overlay.bar.undo_button.isEnabled()
+    assert saved_binding(user_root, "KeyD") == {"action": "button.click",
+                                                "params": RIGHT}
+
+
+def test_drop_while_broken_is_refused(make_overlay, user_root, tmp_path,
+                                      monkeypatch, click_calls):
+    broken = user_file(user_root)
+    broken.parent.mkdir(parents=True)
+    broken.write_text("not json", encoding="utf-8")
+    overlay = make_overlay()
+    transfer = Transfer(overlay)
+
+    def never(*_args, **_kwargs):
+        raise AssertionError("read_import must not be called")
+    monkeypatch.setattr(bundle, "read_import", never)
+    path = import_file(tmp_path)
+
+    # Outside define mode: nothing opens.
+    overlay.window.view.fileDropped.emit(path)
+    assert overlay.tray.text() == "Reset to shipped first."
+    assert not overlay.define.active
+    assert click_calls == []
+    assert overlay.bar.define_button.text() == "Define"
+
+    # Inside define mode: it stays open.
+    enter(overlay)
+    overlay.window.view.fileDropped.emit(path)
+    assert overlay.tray.text() == "Reset to shipped first."
+    assert overlay.define.active
+    assert transfer.imports == []
+    assert broken.read_text("utf-8") == "not json"
+
+
+def test_click_through_tooltip_mentions_drops(make_overlay):
+    overlay = make_overlay()
+    assert "drop" in overlay.bar._click.toolTip()

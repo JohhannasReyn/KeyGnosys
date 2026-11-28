@@ -166,6 +166,7 @@ class Overlay:
         self.bar.importRequested.connect(self.define.import_)
         self.window.view.keyClicked.connect(self.define.on_key_clicked)
         self.window.view.bindingDropped.connect(self.define.on_binding_dropped)
+        self.window.view.fileDropped.connect(self.define.on_file_dropped)
 
     def _connect_client(self) -> None:
         self.client.keyEvent.connect(self._on_key)

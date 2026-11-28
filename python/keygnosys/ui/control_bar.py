@@ -91,7 +91,8 @@ class ControlBar(QWidget):
         root.addWidget(self._pin)
 
         self._click = _toggle("👆", "Click through the keyboard to the window "
-                                    "beneath it")
+                                    "beneath it. Turn it off to drop a file "
+                                    "on the keyboard to import it.")
         self._click.toggled.connect(self.clickThroughToggled)
         root.addWidget(self._click)
 
