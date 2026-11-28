@@ -13,6 +13,7 @@ import keygnosys
 from keygnosys.bundle import (BUNDLE_SCHEMA, MAX_BYTES, Finding,
                               ImportRefused, diff, export_bundle, read_import,
                               write_bundle)
+from keygnosys.actions import default_legend
 from keygnosys.documents import Binding, BindingSet
 
 DEFAULT = Path(__file__).resolve().parent.parent / "data" / "bindings" / "default.json"
@@ -287,3 +288,85 @@ def test_diff_counts_extra_bindings():
     changes = diff(old, new)
     assert len(changes) == 1
     assert "window.snap" in changes[0].after
+
+
+# -- damaged maps (final review I1) ----------------------------------------
+
+_DAMAGED = "This map is damaged and cannot be read."
+
+
+def _deep(levels: int) -> object:
+    value: object = 1
+    for _ in range(levels):
+        value = [value]
+    return value
+
+
+@pytest.mark.parametrize("over", [
+    {"settings": [1]},
+    {"settings": "ab"},
+    {"unassigned": 5},
+    {"metadata": {"revision": float("inf")}},
+    {"bindings": {"F7": {"action": "window.snap", "params": {"x": _deep(600)}}}},
+], ids=["settings-list", "settings-str", "unassigned-int", "revision-huge",
+        "deep-nesting"])
+def test_refuses_damaged_map(tmp_path, over):
+    doc = _doc(**over)
+    p = tmp_path / "f.keygnosys.json"
+    # json.dumps writes inf as Infinity; the file says 1e400, as a hand edit
+    # would, and json.loads reads that back as inf too.
+    p.write_text(json.dumps(_bundle(doc)).replace("Infinity", "1e400"),
+                 encoding="utf-8")
+    assert _refused(p) == [_DAMAGED]
+
+
+def test_document_error_keeps_its_own_message(tmp_path):
+    p = _write(tmp_path, _bundle(_doc(bindings=[])))
+    reasons = _refused(p)
+    assert reasons != [_DAMAGED]
+    assert _has(reasons, "'bindings' must be an object")
+
+
+# -- byte order mark (final review M4) -------------------------------------
+
+def test_reads_a_file_with_a_utf8_bom(tmp_path):
+    p = tmp_path / "bom.keygnosys.json"
+    p.write_bytes(b"\xef\xbb\xbf" + json.dumps(_bundle(_doc())).encode("utf-8"))
+    assert read_import(p).bset.name == "Mine"
+
+
+# -- diff text always differs (final review M2) ----------------------------
+
+def test_diff_legend_set_to_default_text_shows_both_sides():
+    old = _default()
+    old.bindings["KeyD"] = Binding("button.click", {"button": "left"})
+    new = copy.deepcopy(old)
+    words = default_legend("button.click", {"button": "left"})
+    new.bindings["KeyD"] = Binding("button.click", {"button": "left"}, words)
+    (c,) = diff(old, new)
+    assert (c.before, c.after) == (f'{words} ""', f'{words} "{words}"')
+
+
+def test_diff_extra_binding_legend_only_differs():
+    old = _default()
+    old.extra_bindings["F7"] = {"action": "window.snap", "legend": "A"}
+    new = copy.deepcopy(old)
+    new.extra_bindings["F7"] = {"action": "window.snap", "legend": "B"}
+    (c,) = diff(old, new)
+    assert c.before != c.after
+    assert '"A"' in c.before and '"B"' in c.after
+
+
+def test_diff_unknown_fields_only_differs():
+    old = _default()
+    old.extra_bindings["F7"] = {"action": "window.snap", "x": 1}
+    new = copy.deepcopy(old)
+    new.extra_bindings["F7"] = {"action": "window.snap", "x": 2}
+    old.bindings["KeyD"] = Binding("button.click", {"button": "left"},
+                                   extra={"y": 1})
+    new.bindings["KeyD"] = Binding("button.click", {"button": "left"},
+                                   extra={"y": 2})
+    changes = diff(old, new)
+    assert len(changes) == 2
+    for c in changes:
+        assert c.before != c.after

@@ -31,6 +31,7 @@ _BINDINGS_MAJOR = 2
 
 _NOT_OURS = "This is not a KeyGnosys file."
 _NEWER = "This file was made by a newer KeyGnosys."
+_DAMAGED = "This map is damaged and cannot be read."
 
 
 class ImportRefused(Exception):
@@ -119,7 +120,8 @@ def _load_json(path: Path) -> object:
                 [f"This file is too large to be a KeyGnosys map "
                  f"(over {MAX_BYTES // (1024 * 1024)} MB)."])
         raw = path.read_bytes()
-        return json.loads(raw.decode("utf-8"))
+        # utf-8-sig: a file hand-edited and saved with a BOM still reads.
+        return json.loads(raw.decode("utf-8-sig"))
     except (OSError, UnicodeDecodeError, ValueError):
         # JSONDecodeError is a ValueError.
         raise ImportRefused([_NOT_OURS]) from None
@@ -153,10 +155,18 @@ def read_import(path: Path,
         doc, header = data, {}
 
     try:
-        bset = BindingSet.from_dict(doc)
+        return _plan(doc, header, layout_codes)
     except DocumentError as exc:
         raise ImportRefused([str(exc)]) from None
+    except Exception:       # noqa: BLE001 -- the file is untrusted
+        # A wrong type, an absurd number or deep nesting: whatever it is,
+        # it must reach the user as a refusal, never escape as a crash.
+        raise ImportRefused([_DAMAGED]) from None
 
+
+def _plan(doc: dict, header: dict,
+          layout_codes: set[str] | None) -> ImportPlan:
+    bset = BindingSet.from_dict(doc)
     name = header.get("name")
     if not isinstance(name, str) or not name:
         name = bset.name
@@ -274,8 +284,14 @@ def _entry(bset: BindingSet, code: str) -> tuple[dict, str, str | None] | None:
         return binding.to_dict(), text, legend
     raw = bset.extra_bindings.get(code)
     if raw is not None:
-        return raw, str(raw.get("action")), None
+        legend = raw.get("legend")
+        return (raw, str(raw.get("action")),
+                legend if isinstance(legend, str) else None)
     return None
+
+
+def _compact(spec: dict) -> str:
+    return json.dumps(spec, sort_keys=True, separators=(",", ":"))
 
 
 def diff(old: BindingSet, new: BindingSet,
@@ -310,6 +326,9 @@ def diff(old: BindingSet, new: BindingSet,
                     # Same words, different parameters: show the parameters.
                     b_text = f"{b_text} {before[0].get('params', {})}"
                     a_text = f"{a_text} {after[0].get('params', {})}"
+            if b_text == a_text:
+                # Only fields this build does not show differ: show them all.
+                b_text, a_text = _compact(before[0]), _compact(after[0])
         else:
             b_text = before[1] if before else _NEW
             a_text = after[1] if after else _NOTHING
