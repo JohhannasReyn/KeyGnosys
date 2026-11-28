@@ -8,6 +8,7 @@ the file on disk is the one source of truth both sides read.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -298,7 +299,7 @@ class DefineMode:
             bset.name, len(bset.bindings) + len(bset.extra_bindings), warnings)
         if author is None:
             return
-        path = self.choose_save_path(f"{bset.name}{bundle.EXTENSION}")
+        path = self.choose_save_path(safe_file_name(bset.name, bset.id))
         if path is None:
             return
         path = Path(path)
@@ -405,7 +406,8 @@ class DefineMode:
     def _choose_save_path(self, suggested: str) -> Path | None:
         chosen, _ = QFileDialog.getSaveFileName(
             self._o.window, "Export bindings",
-            str(Path(_documents_dir()) / suggested), FILE_FILTER)
+            str(Path(_documents_dir()) / safe_file_name(suggested)),
+            FILE_FILTER)
         if not chosen:
             return None
         path = Path(chosen)
@@ -496,6 +498,27 @@ class DefineMode:
 
 def _capped(name: str, limit: int = NOTICE_NAME_MAX) -> str:
     return name if len(name) <= limit else name[:limit - 1] + "…"
+
+
+#: Characters no file name may hold on Windows, plus controls.
+_UNSAFE = re.compile(r'[/\\:*?"<>|\x00-\x1f\x7f]')
+FILE_STEM_MAX = 100
+
+
+def _clean_stem(text: str) -> str:
+    stem = _UNSAFE.sub("_", text).strip(". ")
+    return stem[:FILE_STEM_MAX].strip(". ")
+
+
+def safe_file_name(name: str, fallback: str | None = None) -> str:
+    """A bare file name for a suggested export, from a map name that may be
+    someone else's text: no path parts, no characters Windows refuses, at
+    most 100 characters before the extension. Falls back to `fallback`
+    (the map id), then "keymap"."""
+    if name.endswith(bundle.EXTENSION):
+        name = name[:-len(bundle.EXTENSION)]
+    stem = _clean_stem(name) or _clean_stem(fallback or "") or "keymap"
+    return stem + bundle.EXTENSION
 
 
 def _documents_dir() -> str:

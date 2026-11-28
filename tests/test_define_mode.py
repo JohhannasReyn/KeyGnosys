@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import PurePosixPath, PureWindowsPath
 
 import pytest
 from PySide6.QtCore import QMimeData, QPointF, Qt
@@ -1171,3 +1172,27 @@ def test_a_failed_save_after_the_backup_is_not_an_import(
     assert user_file(user_root).read_bytes() == on_disk
     qtbot.wait(400)
     assert client.reloads == reloads
+
+
+@pytest.mark.parametrize("name", ["a/b", "..\\x", "C:\\evil", "", "n" * 300,
+                                  'q:*?"<>|\x01', " . "],
+                         ids=["slash", "dotdot", "drive", "empty", "long",
+                              "reserved", "dots"])
+def test_suggested_export_name_is_a_bare_safe_file_name(make_overlay,
+                                                         tmp_path, name):
+    overlay = make_overlay()
+    transfer = Transfer(overlay, save_path=None)
+    enter(overlay)
+    overlay.define.editor.bset.name = name
+    overlay.define.export()
+    (suggested,) = transfer.suggested
+    assert suggested.endswith(bundle.EXTENSION)
+    stem = suggested[:-len(bundle.EXTENSION)]
+    assert stem and len(stem) <= 100
+    assert not any(ch in stem for ch in '/\:*?"<>|')
+    assert all(ord(ch) >= 32 for ch in stem)
+    assert stem == stem.strip(". ")
+    for pure in (PureWindowsPath, PurePosixPath):
+        assert pure(suggested).name == suggested
+    if name in ("", " . "):
+        assert suggested == f"default{bundle.EXTENSION}"
